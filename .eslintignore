@@ -1,0 +1,12 @@
+# Ignorer les fichiers de build
+dist/
+node_modules/
+coverage/
+
+# Ignorer les fichiers de configuration
+*.config.js
+*.config.ts
+
+# Ignorer des dossiers spécifiques si nécessaire
+# src/auth/
+# src/entities/
