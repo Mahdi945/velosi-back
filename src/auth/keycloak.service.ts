@@ -311,4 +311,101 @@ export class KeycloakService {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
+
+  /**
+   * Obtenir un utilisateur par email depuis Keycloak
+   */
+  async getUserByEmail(email: string): Promise<any> {
+    try {
+      const token = await this.getAccessToken();
+      const usersUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users?email=${encodeURIComponent(email)}`;
+
+      const response = await fetch(usersUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const users = await response.json();
+        if (users.length > 0) {
+          this.logger.debug(`Utilisateur trouvé dans Keycloak pour ${email}`);
+          return users[0];
+        }
+      } else {
+        this.logger.warn(`Impossible de rechercher l'utilisateur par email: ${response.status}`);
+      }
+      
+      return null;
+    } catch (error) {
+      this.logger.warn(`Erreur lors de la recherche utilisateur par email: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe d'un utilisateur dans Keycloak
+   */
+  async resetUserPassword(userId: string, newPassword: string): Promise<boolean> {
+    try {
+      const token = await this.getAccessToken();
+      const passwordUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${userId}/reset-password`;
+
+      const response = await fetch(passwordUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'password',
+          value: newPassword,
+          temporary: false, // Mot de passe permanent
+        }),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Mot de passe réinitialisé avec succès dans Keycloak pour l'utilisateur ${userId}`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec de la réinitialisation du mot de passe: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la réinitialisation du mot de passe: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Déclencher un email de récupération de mot de passe via Keycloak
+   */
+  async sendPasswordResetEmail(userId: string): Promise<boolean> {
+    try {
+      const token = await this.getAccessToken();
+      const resetUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${userId}/execute-actions-email`;
+
+      const response = await fetch(resetUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(['UPDATE_PASSWORD']),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Email de récupération envoyé via Keycloak pour l'utilisateur ${userId}`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec envoi email récupération: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur envoi email récupération: ${error.message}`);
+      return false;
+    }
+  }
 }

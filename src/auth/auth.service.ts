@@ -17,6 +17,8 @@ import { Personnel } from '../entities/personnel.entity';
 import { KeycloakService } from './keycloak.service';
 import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
 import { ContactClientService } from '../services/contact-client.service';
+import { EmailService } from '../services/email.service';
+import { OtpService } from '../services/otp.service';
 
 export interface LoginDto {
   usernameOrEmail: string;
@@ -64,6 +66,8 @@ export class AuthService {
     @Optional() private keycloakService: KeycloakService,
     private configService: ConfigService,
     private contactClientService: ContactClientService,
+    private emailService: EmailService,
+    private otpService: OtpService,
   ) {}
 
   async validateUser(username: string, password: string): Promise<any> {
@@ -522,5 +526,254 @@ export class AuthService {
       this.logger.warn(`Échec de la synchronisation Keycloak pour ${userType}:${userId}:`, error.message);
       // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
     }
+  }
+
+  /**
+   * Initier la récupération de mot de passe avec vérification réelle et Keycloak
+   */
+  async initiatePasswordReset(email: string): Promise<{ success: boolean; message: string; userFound?: boolean }> {
+    try {
+      // Rechercher l'utilisateur par email dans la base de données
+      const user = await this.findUserByEmail(email);
+      
+      if (!user) {
+        // Retourner une erreur explicite si l'email n'existe pas
+        this.logger.warn(`Tentative de récupération pour email inexistant: ${email}`);
+        return {
+          success: false,
+          message: 'Cette adresse email n\'est pas enregistrée dans notre système.',
+          userFound: false
+        };
+      }
+
+      this.logger.log(`Utilisateur trouvé pour ${email}: ${user.userType}`);
+
+      // Vérifier et mettre à jour l'utilisateur dans Keycloak si nécessaire
+      try {
+        if (this.keycloakService) {
+          await this.syncUserWithKeycloak(user);
+        }
+      } catch (keycloakError) {
+        this.logger.warn(`Erreur Keycloak pour ${email}, continuons avec l'OTP:`, keycloakError);
+      }
+
+      // Générer et envoyer l'OTP
+      const otpCode = this.otpService.generateOtp(email, 'password-reset');
+      const userName = user.userType === 'personnel' ? user.nom_utilisateur : user.nom;
+      
+      const emailSent = await this.emailService.sendOtpEmail(
+        email,
+        otpCode,
+        userName
+      );
+
+      if (!emailSent) {
+        this.logger.error(`Échec envoi email OTP pour ${email}`);
+        return {
+          success: false,
+          message: 'Erreur lors de l\'envoi de l\'email. Veuillez réessayer.',
+          userFound: true
+        };
+      }
+
+      this.logger.log(`Code OTP envoyé avec succès pour ${email} (${user.userType})`);
+      return {
+        success: true,
+        message: `Code OTP envoyé à ${email}`,
+        userFound: true
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'initiation de récupération pour ${email}:`, error);
+      return {
+        success: false,
+        message: 'Erreur interne. Veuillez réessayer plus tard.',
+        userFound: false
+      };
+    }
+  }
+
+  /**
+   * Synchroniser l'utilisateur avec Keycloak
+   */
+  private async syncUserWithKeycloak(user: any): Promise<void> {
+    if (!this.keycloakService) {
+      return;
+    }
+
+    try {
+      // Vérifier si l'utilisateur existe dans Keycloak
+      const keycloakUser = await this.keycloakService.getUserByEmail(user.email);
+      
+      if (!keycloakUser) {
+        // Créer l'utilisateur dans Keycloak s'il n'existe pas
+        const userData = {
+          email: user.email,
+          username: user.userType === 'personnel' ? user.nom_utilisateur : user.email,
+          firstName: user.userType === 'personnel' ? user.nom_utilisateur : user.nom,
+          lastName: user.userType === 'personnel' ? 'Personnel' : 'Client',
+          enabled: true,
+          emailVerified: true
+        };
+
+        await this.keycloakService.createUser(userData);
+        this.logger.log(`Utilisateur créé dans Keycloak: ${user.email}`);
+      } else {
+        this.logger.log(`Utilisateur déjà présent dans Keycloak: ${user.email}`);
+      }
+    } catch (error) {
+      this.logger.error(`Erreur synchronisation Keycloak pour ${user.email}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Vérifier le code OTP pour la récupération de mot de passe
+   */
+  async verifyPasswordResetOtp(email: string, otpCode: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const isValid = this.otpService.verifyOtp(email, otpCode, 'password-reset');
+      
+      if (!isValid) {
+        return {
+          success: false,
+          message: 'Code OTP invalide ou expiré',
+        };
+      }
+
+      this.logger.log(`Code OTP vérifié avec succès pour ${email}`);
+      return {
+        success: true,
+        message: 'Code OTP vérifié avec succès',
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur lors de la vérification OTP pour ${email}:`, error);
+      return {
+        success: false,
+        message: 'Erreur lors de la vérification. Veuillez réessayer.',
+      };
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe
+   */
+  async resetPassword(email: string, newPassword: string, otpToken?: string): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('🔐 AuthService resetPassword called:', {
+        email,
+        hasOtpToken: !!otpToken,
+        otpToken: otpToken ? '***' + otpToken.slice(-4) : 'none'
+      });
+
+      // Vérifier que l'OTP a été vérifié récemment
+      // Si on a un token OTP, on l'utilise pour la validation
+      if (otpToken) {
+        // Le token OTP est en fait le code OTP vérifié - on vérifie juste qu'il est validé
+        if (!this.otpService.isOtpVerified(email, 'password-reset')) {
+          return {
+            success: false,
+            message: 'Token OTP invalide ou expiré',
+          };
+        }
+      } else {
+        // Fallback: vérifier avec l'ancienne méthode
+        if (!this.otpService.isOtpVerified(email, 'password-reset')) {
+          return {
+            success: false,
+            message: 'Vous devez d\'abord vérifier le code OTP',
+          };
+        }
+      }
+
+      // Rechercher l'utilisateur
+      const user = await this.findUserByEmail(email);
+      
+      if (!user) {
+        return {
+          success: false,
+          message: 'Utilisateur non trouvé',
+        };
+      }
+
+      // Hasher le nouveau mot de passe
+      const hashedPassword = await this.hashPassword(newPassword);
+
+      // Mettre à jour le mot de passe dans la base de données
+      if (user.userType === 'personnel') {
+        await this.personnelRepository.update(user.id, {
+          mot_de_passe: hashedPassword,
+        });
+      } else {
+        await this.clientRepository.update(user.id, {
+          mot_de_passe: hashedPassword,
+        });
+      }
+
+      // Mettre à jour dans Keycloak si disponible
+      if (this.keycloakService && user.keycloak_id) {
+        try {
+          await this.keycloakService.resetUserPassword(user.keycloak_id, newPassword);
+          this.logger.log(`Mot de passe mis à jour dans Keycloak pour ${email}`);
+        } catch (keycloakError) {
+          this.logger.warn(`Erreur mise à jour Keycloak pour ${email}:`, keycloakError);
+          // Ne pas faire échouer le reset si Keycloak échoue
+        }
+      }
+
+      // Invalider l'OTP
+      this.otpService.invalidateOtp(email);
+
+      // Envoyer email de confirmation
+      try {
+        await this.emailService.sendPasswordResetSuccessEmail(
+          email,
+          user.userType === 'personnel' ? user.nom_utilisateur : user.nom
+        );
+      } catch (emailError) {
+        this.logger.warn(`Erreur envoi email confirmation pour ${email}:`, emailError);
+        // Ne pas faire échouer le reset si l'email de confirmation échoue
+      }
+
+      this.logger.log(`Mot de passe réinitialisé avec succès pour ${email}`);
+      return {
+        success: true,
+        message: 'Mot de passe réinitialisé avec succès',
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur lors de la réinitialisation pour ${email}:`, error);
+      return {
+        success: false,
+        message: 'Erreur lors de la réinitialisation. Veuillez réessayer.',
+      };
+    }
+  }
+
+  /**
+   * Rechercher un utilisateur par email dans toutes les tables
+   */
+  private async findUserByEmail(email: string): Promise<any> {
+    // Rechercher dans le personnel
+    const personnel = await this.personnelRepository.findOne({
+      where: { email: email },
+    });
+
+    if (personnel) {
+      return { ...personnel, userType: 'personnel' };
+    }
+
+    // Rechercher dans les clients via contact_client
+    try {
+      const contactResult = await this.contactClientService.findByEmail(email);
+      if (contactResult && contactResult.client) {
+        return { ...contactResult.client, userType: 'client' };
+      }
+    } catch (error) {
+      this.logger.debug(`Email ${email} non trouvé dans contact_client`);
+    }
+
+    return null;
   }
 }

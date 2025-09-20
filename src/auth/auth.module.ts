@@ -13,6 +13,8 @@ import { Personnel } from '../entities/personnel.entity';
 import { ContactClient } from '../entities/contact-client.entity';
 import { ObjectifCom } from '../entities/objectif-com.entity';
 import { ContactClientService } from '../services/contact-client.service';
+import { EmailService } from '../services/email.service';
+import { OtpService } from '../services/otp.service';
 
 @Module({
   imports: [
@@ -31,7 +33,7 @@ import { ContactClientService } from '../services/contact-client.service';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, KeycloakService, LocalStrategy, JwtStrategy, ContactClientService],
+  providers: [AuthService, KeycloakService, LocalStrategy, JwtStrategy, ContactClientService, EmailService, OtpService],
   controllers: [AuthController],
   exports: [AuthService, JwtModule],
 })
