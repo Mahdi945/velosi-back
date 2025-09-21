@@ -31,6 +31,9 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: true })
   email: string;
 
+  @Column({ type: 'varchar', nullable: false, default: 'Homme' })
+  genre: string;
+
   @Column({ type: 'varchar', nullable: true, default: 'actif' })
   statut: string;
 

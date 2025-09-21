@@ -42,6 +42,13 @@ export class CreatePersonnelDto {
   email?: string;
 
   @IsString()
+  @IsNotEmpty({ message: 'Le genre est requis' })
+  @IsIn(['Homme', 'Femme'], {
+    message: 'Le genre doit être Homme ou Femme',
+  })
+  genre: string;
+
+  @IsString()
   @IsNotEmpty({ message: 'Le mot de passe est requis' })
   @MinLength(8, {
     message: 'Le mot de passe doit contenir au moins 8 caractères',

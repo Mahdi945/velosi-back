@@ -343,4 +343,48 @@ export class AuthController {
       }
     };
   }
+
+  /**
+   * Endpoint de test pour les différentes méthodes d'affichage du logo
+   */
+  @Post('test-logo-email')
+  @HttpCode(HttpStatus.OK)
+  async testLogoEmail(@Body() body: { email: string; method?: string }) {
+    const { email, method = 'cid' } = body;
+    
+    if (!email) {
+      throw new BadRequestException('Email requis');
+    }
+
+    try {
+      let result = false;
+      
+      switch (method) {
+        case 'cid':
+          // Méthode 1: CID (Content-ID)
+          result = await this.authService.sendTestEmailCID(email);
+          break;
+        case 'url':
+          // Méthode 2: URL publique
+          result = await this.authService.sendTestEmailURL(email);
+          break;
+        case 'base64':
+          // Méthode 3: Base64 (original)
+          result = await this.authService.sendTestEmailBase64(email);
+          break;
+        default:
+          throw new BadRequestException('Méthode non supportée: cid, url, base64');
+      }
+
+      return {
+        success: result,
+        message: result 
+          ? `Email de test envoyé avec succès (méthode: ${method})` 
+          : 'Erreur lors de l\'envoi de l\'email',
+        method
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur: ${error.message}`);
+    }
+  }
 }

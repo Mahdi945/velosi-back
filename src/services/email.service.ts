@@ -13,6 +13,65 @@ export class EmailService {
     this.initializeTransporter();
   }
 
+  /**
+   * Obtenir le chemin du logo de la société
+   */
+  private getLogoPath(): string | null {
+    const possiblePaths = [
+      path.join(process.cwd(), 'assets', 'logo_societee.png'),
+      path.join(__dirname, '..', '..', 'assets', 'logo_societee.png'),
+      path.join(__dirname, '..', 'assets', 'logo_societee.png'),
+      path.join(__dirname, '../../../assets', 'logo_societee.png')
+    ];
+    
+    for (const logoPath of possiblePaths) {
+      if (fs.existsSync(logoPath)) {
+        this.logger.log(`✅ Logo trouvé à: ${logoPath}`);
+        return logoPath;
+      }
+    }
+    
+    this.logger.warn('❌ Logo non trouvé dans tous les chemins possibles');
+    return null;
+  }
+
+  /**
+   * Obtenir le logo de la société en base64
+   */
+  private getCompanyLogoBase64(): string {
+    try {
+      // Chemins possibles pour le logo
+      const possiblePaths = [
+        path.join(process.cwd(), 'assets', 'logo_societee.png'),
+        path.join(__dirname, '..', '..', 'assets', 'logo_societee.png'),
+        path.join(__dirname, '..', 'assets', 'logo_societee.png'),
+        path.join(__dirname, '../../../assets', 'logo_societee.png')
+      ];
+      
+      for (const logoPath of possiblePaths) {
+        this.logger.log(`Tentative de chargement du logo depuis: ${logoPath}`);
+        
+        if (fs.existsSync(logoPath)) {
+          const logoBuffer = fs.readFileSync(logoPath);
+          const logoBase64 = logoBuffer.toString('base64');
+          const dataUri = `data:image/png;base64,${logoBase64}`;
+          this.logger.log(`✅ Logo chargé avec succès depuis: ${logoPath} (${logoBuffer.length} bytes)`);
+          this.logger.log(`📊 Base64 length: ${logoBase64.length}, DataURI length: ${dataUri.length}`);
+          this.logger.log(`🔍 DataURI prefix: ${dataUri.substring(0, 100)}...`);
+          return dataUri;
+        } else {
+          this.logger.warn(`❌ Logo non trouvé à: ${logoPath}`);
+        }
+      }
+      
+      this.logger.error('❌ Aucun logo trouvé dans tous les chemins possibles');
+      return '';
+    } catch (error) {
+      this.logger.error('❌ Erreur lors du chargement du logo:', error);
+      return '';
+    }
+  }
+
   private initializeTransporter() {
     try {
       this.transporter = nodemailer.createTransport({
@@ -39,6 +98,18 @@ export class EmailService {
     try {
       const htmlTemplate = this.getOtpEmailTemplate(otpCode, userName);
       
+      // Préparer l'attachment du logo
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+        });
+      }
+      
       const mailOptions = {
         from: {
           name: 'Velosi ERP - Récupération de compte',
@@ -48,6 +119,7 @@ export class EmailService {
         subject: '🔐 Code de récupération Velosi ERP',
         html: htmlTemplate,
         text: `Votre code de récupération Velosi ERP est: ${otpCode}. Ce code expire dans 10 minutes.`,
+        attachments: attachments
       };
 
       const result = await this.transporter.sendMail(mailOptions);
@@ -66,6 +138,18 @@ export class EmailService {
     try {
       const htmlTemplate = this.getSuccessEmailTemplate(userName);
       
+      // Préparer l'attachment du logo
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+        });
+      }
+      
       const mailOptions = {
         from: {
           name: 'Velosi ERP - Sécurité',
@@ -75,6 +159,7 @@ export class EmailService {
         subject: '✅ Mot de passe réinitialisé - Velosi ERP',
         html: htmlTemplate,
         text: `Votre mot de passe Velosi ERP a été réinitialisé avec succès.`,
+        attachments: attachments
       };
 
       const result = await this.transporter.sendMail(mailOptions);
@@ -144,7 +229,7 @@ export class EmailService {
                 background-size: cover;
             }
             
-            .logo {
+            .logo-fallback {
                 width: 120px;
                 height: 60px;
                 background: #fff;
@@ -157,8 +242,6 @@ export class EmailService {
                 font-size: 18px;
                 color: #5e72e4;
                 box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-                position: relative;
-                z-index: 2;
             }
             
             .header h1 {
@@ -331,7 +414,7 @@ export class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">VELOSI</div>
+                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
                 <h1>🔐 Code de Récupération</h1>
                 <p>Récupération sécurisée de votre compte ERP</p>
             </div>
@@ -347,7 +430,7 @@ export class EmailService {
                     <div class="otp-label">Votre code de vérification :</div>
                     <div class="otp-code">${otpCode}</div>
                     <div class="timer-info">
-                        <div class="timer-icon">!</div>
+                         
                         Ce code expire dans 10 minutes
                     </div>
                 </div>
@@ -433,7 +516,7 @@ export class EmailService {
                 color: white;
             }
             
-            .logo {
+            .logo-fallback {
                 width: 120px;
                 height: 60px;
                 background: #fff;
@@ -484,12 +567,12 @@ export class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">VELOSI</div>
+                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
                 <h1>✅ Réinitialisation Réussie</h1>
             </div>
             
             <div class="content">
-                <div class="success-icon">✓</div>
+                
                 <h2>Mot de passe réinitialisé avec succès !</h2>
                 <p>Bonjour <strong>${displayName}</strong>,</p>
                 <p>Votre mot de passe Velosi ERP a été réinitialisé avec succès le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}.</p>
@@ -518,4 +601,84 @@ export class EmailService {
       return false;
     }
   }
+
+  /**
+   * Méthode alternative: utiliser l'URL publique du logo
+   */
+  async sendOtpEmailWithPublicLogo(email: string, otpCode: string, userName?: string): Promise<boolean> {
+    try {
+      const htmlTemplate = this.getOtpEmailTemplateWithUrl(otpCode, userName);
+      
+      const mailOptions = {
+        from: {
+          name: 'Velosi ERP - Récupération de compte',
+          address: 'mahdibey2002@gmail.com'
+        },
+        to: email,
+        subject: '🔐 Code de récupération Velosi ERP (URL)',
+        html: htmlTemplate,
+        text: `Votre code de récupération Velosi ERP est: ${otpCode}. Ce code expire dans 10 minutes.`,
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email OTP (URL publique) envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur envoi email OTP (URL publique) à ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Template avec URL publique du logo
+   */
+  private getOtpEmailTemplateWithUrl(otpCode: string, userName?: string): string {
+    const displayName = userName || 'Utilisateur';
+    const logoUrl = 'http://localhost:3000/assets/logo_societee.png'; // URL publique
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Code de récupération Velosi ERP</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; margin: 0;">
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; padding: 30px;">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <img src="${logoUrl}" alt="Logo Velosi" width="200" height="auto" style="display: block; margin: 0 auto;" />
+                <h1 style="color: #333; margin: 20px 0;">🔐 Code de Récupération</h1>
+                <p style="color: #666;">Récupération sécurisée de votre compte ERP</p>
+            </div>
+            
+            <div style="padding: 20px;">
+                <p>Bonjour <strong>${displayName}</strong>,</p>
+                <p>Vous avez demandé la récupération de votre mot de passe pour votre compte <strong>Velosi ERP</strong>.</p>
+                
+                <div style="text-align: center; margin: 30px 0; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                    <p style="margin-bottom: 10px;">Votre code de vérification :</p>
+                    <div style="font-size: 36px; font-weight: bold; color: #5e72e4; padding: 15px; background: white; border-radius: 8px; display: inline-block; letter-spacing: 4px;">
+                        ${otpCode}
+                    </div>
+                    <p style="color: #e53e3e; margin-top: 15px; font-size: 14px;">
+                        ⏰ Ce code expire dans 10 minutes
+                    </p>
+                </div>
+                
+                <p style="margin-top: 20px; color: #666;">
+                    Si vous n'avez pas demandé cette récupération, ignorez cet email.
+                </p>
+            </div>
+            
+            <div style="text-align: center; padding: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
+                <p>© ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+
 }

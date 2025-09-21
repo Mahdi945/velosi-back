@@ -15,13 +15,14 @@ export class SyncController {
     @Param('userId') userId: number,
   ) {
     try {
-      const success = await this.keycloakSyncService.syncSingleUserToKeycloak(
+      const keycloakUserId = await this.keycloakSyncService.syncSingleUserToKeycloak(
         userType,
         userId,
       );
       return {
-        success,
-        message: success
+        success: !!keycloakUserId,
+        keycloakUserId,
+        message: keycloakUserId
           ? 'Utilisateur synchronisé avec succès'
           : 'Échec de la synchronisation',
       };
@@ -100,13 +101,14 @@ export class SyncController {
     @Param('userId') userId: number,
   ) {
     try {
-      const success = await this.keycloakSyncService.syncSingleUserToKeycloak(
+      const keycloakUserId = await this.keycloakSyncService.syncSingleUserToKeycloak(
         userType,
         userId,
       );
       return {
-        success,
-        message: success
+        success: !!keycloakUserId,
+        keycloakUserId,
+        message: keycloakUserId
           ? 'Utilisateur synchronisé avec succès'
           : 'Échec de la synchronisation',
       };

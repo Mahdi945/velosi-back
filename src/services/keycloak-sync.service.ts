@@ -46,7 +46,7 @@ export class KeycloakSyncService {
     }
   }
 
-  private async createKeycloakUser(userData: any): Promise<boolean> {
+  private async createKeycloakUser(userData: any): Promise<string | null> {
     try {
       const token = await this.getKeycloakAdminToken();
       
@@ -82,15 +82,23 @@ export class KeycloakSyncService {
         }
       );
 
+      // Récupérer l'ID de l'utilisateur créé depuis l'en-tête Location
+      const location = response.headers['location'];
+      if (location) {
+        const keycloakUserId = location.substring(location.lastIndexOf('/') + 1);
+        this.logger.log(`Utilisateur créé dans Keycloak: ${userData.username} avec ID: ${keycloakUserId}`);
+        return keycloakUserId;
+      }
+
       this.logger.log(`Utilisateur créé dans Keycloak: ${userData.username}`);
-      return true;
+      return null;
     } catch (error) {
       if (error.response?.status === 409) {
         this.logger.warn(`Utilisateur déjà existant dans Keycloak: ${userData.username}`);
-        return false;
+        return null;
       }
       this.logger.error(`Erreur lors de la création de l'utilisateur ${userData.username}:`, error.response?.data || error.message);
-      return false;
+      return null;
     }
   }
 
@@ -117,14 +125,13 @@ export class KeycloakSyncService {
           roles: ['personnel', personnel.role || 'user'],
         };
 
-        const created = await this.createKeycloakUser(userData);
-        if (created) {
+        const keycloakUserId = await this.createKeycloakUser(userData);
+        if (keycloakUserId) {
           successCount++;
           
           // Mettre à jour l'ID Keycloak dans la base
-          // Vous devrez peut-être ajouter un champ keycloak_id à votre table
-          // personnel.keycloak_id = keycloakUserId;
-          // await this.personnelRepository.save(personnel);
+          personnel.keycloak_id = keycloakUserId;
+          await this.personnelRepository.save(personnel);
         }
       } catch (error) {
         errorCount++;
@@ -158,13 +165,13 @@ export class KeycloakSyncService {
           roles: ['client', 'user'],
         };
 
-        const created = await this.createKeycloakUser(userData);
-        if (created) {
+        const keycloakUserId = await this.createKeycloakUser(userData);
+        if (keycloakUserId) {
           successCount++;
           
           // Mettre à jour l'ID Keycloak dans la base
-          // client.keycloak_id = keycloakUserId;
-          // await this.clientRepository.save(client);
+          client.keycloak_id = keycloakUserId;
+          await this.clientRepository.save(client);
         }
       } catch (error) {
         errorCount++;
@@ -190,7 +197,7 @@ export class KeycloakSyncService {
   }
 
   // Méthode pour synchroniser un utilisateur spécifique lors de la création
-  async syncSingleUserToKeycloak(userType: 'personnel' | 'client', userId: number): Promise<boolean> {
+  async syncSingleUserToKeycloak(userType: 'personnel' | 'client', userId: number): Promise<string | null> {
     try {
       let userData;
       
@@ -261,10 +268,22 @@ export class KeycloakSyncService {
         };
       }
 
-      return await this.createKeycloakUser(userData);
+      const keycloakUserId = await this.createKeycloakUser(userData);
+      
+      // Sauvegarder l'ID Keycloak dans la base de données
+      if (keycloakUserId) {
+        if (userType === 'personnel') {
+          await this.personnelRepository.update(userId, { keycloak_id: keycloakUserId });
+        } else {
+          await this.clientRepository.update(userId, { keycloak_id: keycloakUserId });
+        }
+        this.logger.log(`ID Keycloak sauvegardé pour ${userType} ${userId}: ${keycloakUserId}`);
+      }
+      
+      return keycloakUserId;
     } catch (error) {
       this.logger.error(`Erreur lors de la synchronisation de l'utilisateur ${userType}:${userId}:`, error);
-      return false;
+      return null;
     }
   }
 

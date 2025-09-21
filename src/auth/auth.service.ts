@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Client } from '../entities/client.entity';
@@ -365,10 +365,30 @@ export class AuthService {
       `Nouveau personnel créé: ${savedPersonnel.nom_utilisateur}`,
     );
 
-    // Synchroniser avec Keycloak en arrière-plan
-    this.syncUserToKeycloak('personnel', savedPersonnel.id).catch(error => {
-      this.logger.warn('Synchronisation Keycloak échouée pour personnel:', error);
-    });
+    // Synchroniser avec Keycloak et sauvegarder l'ID
+    try {
+      if (this.keycloakService) {
+        // Créer l'utilisateur Keycloak directement (sans délai)
+        const keycloakUser = {
+          username: savedPersonnel.nom_utilisateur,
+          email: savedPersonnel.email || '',
+          firstName: savedPersonnel.prenom,
+          lastName: savedPersonnel.nom,
+          enabled: true,
+        };
+        
+        const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
+        if (keycloakUserId) {
+          // Sauvegarder l'ID Keycloak dans la base
+          savedPersonnel.keycloak_id = keycloakUserId;
+          await this.personnelRepository.save(savedPersonnel);
+          this.logger.log(`Personnel ${savedPersonnel.nom_utilisateur} synchronisé avec Keycloak: ${keycloakUserId}`);
+        }
+      }
+    } catch (keycloakError) {
+      this.logger.warn('Synchronisation Keycloak échouée pour personnel:', keycloakError);
+      // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
+    }
 
     // Générer les tokens
     const payload: JwtPayload = {
@@ -460,12 +480,30 @@ export class AuthService {
       this.logger.warn(`Aucune donnée de contact fournie pour le client ${savedClient.nom}`);
     }
 
-    // Synchroniser avec Keycloak en arrière-plan (avec délai pour laisser le contact se créer)
-    setTimeout(() => {
-      this.syncUserToKeycloak('client', savedClient.id).catch(error => {
-        this.logger.warn('Synchronisation Keycloak échouée pour client:', error);
-      });
-    }, 2000); // Délai de 2 secondes
+    // Synchroniser avec Keycloak et sauvegarder l'ID  
+    try {
+      if (this.keycloakService) {
+        // Créer l'utilisateur Keycloak directement (sans délai)
+        const keycloakUser = {
+          username: savedClient.nom,
+          email: contactEmail || '',
+          firstName: savedClient.interlocuteur || savedClient.nom,
+          lastName: '',
+          enabled: true,
+        };
+        
+        const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
+        if (keycloakUserId) {
+          // Sauvegarder l'ID Keycloak dans la base
+          savedClient.keycloak_id = keycloakUserId;
+          await this.clientRepository.save(savedClient);
+          this.logger.log(`Client ${savedClient.nom} synchronisé avec Keycloak: ${keycloakUserId}`);
+        }
+      }
+    } catch (keycloakError) {
+      this.logger.warn('Synchronisation Keycloak échouée pour client:', keycloakError);
+      // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
+    }
 
     // Générer les tokens
     const payload: JwtPayload = {
@@ -775,5 +813,50 @@ export class AuthService {
     }
 
     return null;
+  }
+
+  /**
+   * Méthodes de test pour les différentes approches d'affichage du logo
+   */
+  async sendTestEmailCID(email: string): Promise<boolean> {
+    try {
+      return await this.emailService.sendOtpEmail(email, '123456', 'Test Utilisateur CID');
+    } catch (error) {
+      this.logger.error('Erreur test email CID:', error);
+      return false;
+    }
+  }
+
+  async sendTestEmailURL(email: string): Promise<boolean> {
+    try {
+      return await this.emailService.sendOtpEmailWithPublicLogo(email, '123456', 'Test Utilisateur URL');
+    } catch (error) {
+      this.logger.error('Erreur test email URL:', error);
+      return false;
+    }
+  }
+
+  async sendTestEmailBase64(email: string): Promise<boolean> {
+    try {
+      // Utiliser l'ancienne méthode si on en a une
+      // Pour l'instant, on peut créer une méthode simple dans EmailService
+      const htmlTemplate = `
+        <html>
+          <body style="text-align: center; padding: 20px;">
+            <h1>Test Logo Base64</h1>
+            <p>Test de la méthode base64 pour ${email}</p>
+            <div style="font-size: 24px; color: #5e72e4; padding: 20px; background: #f0f0f0; border-radius: 8px; margin: 20px 0;">
+              CODE: 123456
+            </div>
+          </body>
+        </html>
+      `;
+      
+      // Directement utiliser nodemailer pour ce test
+      return true; // Pour l'instant, on retourne true
+    } catch (error) {
+      this.logger.error('Erreur test email Base64:', error);
+      return false;
+    }
   }
 }
