@@ -60,6 +60,7 @@ export class UsersService {
     const client = this.clientRepository.create({
       ...createClientDto,
       mot_de_passe: hashedPassword,
+      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
     });
 
     const savedClient = await this.clientRepository.save(client);
@@ -116,6 +117,7 @@ export class UsersService {
     const personnel = this.personnelRepository.create({
       ...createPersonnelDto,
       mot_de_passe: hashedPassword,
+      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
     });
 
     const savedPersonnel = await this.personnelRepository.save(personnel);

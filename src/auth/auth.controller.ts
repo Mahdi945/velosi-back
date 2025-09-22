@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Put,
   UseGuards,
   Request,
   Body,
@@ -8,14 +9,24 @@ import {
   HttpStatus,
   Res,
   Get,
+  Delete,
   UnauthorizedException,
   BadRequestException,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { AuthService, LoginDto } from './auth.service';
 import { LocalAuthGuard } from './local-auth.guard';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
+import * as fs from 'fs';
 
 // DTOs pour la récupération de mot de passe
 interface ForgotPasswordDto {
@@ -31,6 +42,16 @@ interface ResetPasswordDto {
   email: string;
   newPassword: string;
   otpToken?: string; // Token OTP pour validation
+}
+
+// Interface pour l'utilisateur authentifié dans les requêtes
+interface AuthenticatedUser {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  userType: 'client' | 'personnel';
+  [key: string]: any; // Pour d'autres propriétés éventuelles
 }
 
 @Controller('auth')
@@ -117,11 +138,23 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  getProfile(@Request() req) {
-    return {
-      user: req.user,
-      message: 'Profil utilisateur récupéré avec succès',
-    };
+  async getProfile(@Request() req) {
+    const fullUserProfile = await this.authService.getFullUserProfile(req.user.id, req.user.userType);
+    return fullUserProfile;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('profile')
+  async updateProfile(@Request() req, @Body() updateData: any) {
+    const updatedProfile = await this.authService.updateUserProfile(req.user.id, req.user.userType, updateData);
+    return updatedProfile;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  async changePassword(@Request() req, @Body() passwordData: { currentPassword: string; newPassword: string }) {
+    const result = await this.authService.changeUserPassword(req.user.id, req.user.userType, passwordData);
+    return result;
   }
 
   @UseGuards(JwtAuthGuard)
@@ -385,6 +418,121 @@ export class AuthController {
       };
     } catch (error) {
       throw new BadRequestException(`Erreur: ${error.message}`);
+    }
+  }
+
+  /**
+   * Upload d'une image de profil pour l'utilisateur connecté
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('upload-profile-image')
+  @UseInterceptors(
+    FileInterceptor('profile', {
+      storage: diskStorage({
+        destination: './uploads/profiles',
+        filename: (req, file, cb) => {
+          // Générer un nom unique avec timestamp
+          const timestamp = Date.now();
+          const userId = (req.user as AuthenticatedUser)?.id || 'unknown';
+          const ext = extname(file.originalname);
+          cb(null, `profile_${userId}_${timestamp}${ext}`);
+        },
+      }),
+      fileFilter: (req, file, cb) => {
+        // Vérifier le type de fichier
+        const allowedTypes = /jpeg|jpg|png|webp/;
+        const extname = allowedTypes.test(file.originalname.toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+        
+        if (mimetype && extname) {
+          return cb(null, true);
+        } else {
+          cb(new BadRequestException('Seuls les fichiers JPG, PNG et WebP sont autorisés'), false);
+        }
+      },
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB
+      },
+    }),
+  )
+  async uploadProfileImage(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
+        ],
+      }),
+    )
+    file: any, // Utiliser any au lieu de Express.Multer.File pour éviter les erreurs de type
+    @Request() req,
+  ) {
+    try {
+      // Mettre à jour le profil utilisateur avec la nouvelle image
+      const user = req.user as AuthenticatedUser;
+      const result = await this.authService.updateUserProfileImage(
+        user.id,
+        user.userType,
+        `uploads/profiles/${file.filename}`,
+      );
+
+      return {
+        success: true,
+        message: 'Image de profil mise à jour avec succès',
+        filePath: `uploads/profiles/${file.filename}`,
+        fileName: file.filename,
+      };
+    } catch (error) {
+      // Supprimer le fichier en cas d'erreur
+      if (file && file.path) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (unlinkError) {
+          console.error('Erreur lors de la suppression du fichier:', unlinkError);
+        }
+      }
+      throw new BadRequestException(`Erreur lors de l'upload: ${error.message}`);
+    }
+  }
+
+  /**
+   * Suppression de l'image de profil de l'utilisateur connecté
+   */
+  @UseGuards(JwtAuthGuard)
+  @Delete('profile-image')
+  @HttpCode(HttpStatus.OK)
+  async deleteProfileImage(@Request() req) {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const result = await this.authService.deleteUserProfileImage(
+        user.id,
+        user.userType,
+      );
+
+      return {
+        success: true,
+        message: 'Image de profil supprimée avec succès',
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur lors de la suppression: ${error.message}`);
+    }
+  }
+
+  /**
+   * Endpoint temporaire pour migrer les avatars vers PNG
+   * ATTENTION: Cet endpoint doit être supprimé après la migration
+   */
+  @Post('migrate-avatars')
+  @HttpCode(HttpStatus.OK)
+  async migrateAvatars() {
+    try {
+      const result = await this.authService.migrateAvatarsToPng();
+      return {
+        success: true,
+        message: 'Migration des avatars terminée avec succès',
+        ...result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur lors de la migration: ${error.message}`);
     }
   }
 }

@@ -107,6 +107,9 @@ export class Client {
   @Column({ type: 'uuid', nullable: true })
   keycloak_id: string;
 
+  @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
+  photo: string; // URL ou chemin vers la photo de profil
+
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];

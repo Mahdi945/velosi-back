@@ -45,6 +45,7 @@ export interface AuthResult {
     role: string;
     userType: 'client' | 'personnel';
     fullName?: string;
+    photo?: string; // Ajouter le champ photo
   };
   client?: {
     id: number;
@@ -175,6 +176,7 @@ export class AuthService {
         role: payload.role,
         userType: user.userType,
         fullName: user.userType === 'personnel' ? user.fullName : user.nom,
+        photo: user.photo || null, // Inclure le champ photo pour les deux types d'utilisateurs
       },
     };
   }
@@ -225,6 +227,7 @@ export class AuthService {
             payload.userType === 'personnel'
               ? `${user.prenom} ${user.nom}`
               : user.nom,
+          photo: user.photo || null, // Inclure le champ photo
         },
       };
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -321,7 +324,34 @@ export class AuthService {
       throw new UnauthorizedException('Utilisateur non trouvé');
     }
 
-    return { ...payload, user };
+    // Construire l'objet utilisateur avec le champ photo
+    const userResponse = {
+      id: user.id,
+      username: payload.userType === 'personnel' ? user.nom_utilisateur : user.nom,
+      email: payload.email || user.email || '',
+      role: payload.role,
+      userType: payload.userType,
+      fullName: payload.userType === 'personnel' 
+        ? `${user.prenom} ${user.nom}`
+        : user.nom,
+      photo: user.photo || null, // Inclure le champ photo
+      // Informations spécifiques au type d'utilisateur
+      ...(payload.userType === 'personnel' && {
+        prenom: user.prenom,
+        nom: user.nom,
+        telephone: user.telephone,
+        genre: user.genre,
+        statut: user.statut
+      }),
+      ...(payload.userType === 'client' && {
+        interlocuteur: user.interlocuteur,
+        adresse: user.adresse,
+        ville: user.ville,
+        pays: user.pays
+      })
+    };
+
+    return userResponse;
   }
 
   async registerPersonnel(
@@ -357,6 +387,7 @@ export class AuthService {
       ...createPersonnelDto,
       mot_de_passe: hashedPassword,
       statut: 'actif',
+      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
     });
 
     const savedPersonnel = await this.personnelRepository.save(personnel);
@@ -439,6 +470,7 @@ export class AuthService {
       mot_de_passe: hashedPassword,
       blocage: false,
       maj_web: true,
+      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
     });
 
     const savedClients = await this.clientRepository.save(client);
@@ -857,6 +889,353 @@ export class AuthService {
     } catch (error) {
       this.logger.error('Erreur test email Base64:', error);
       return false;
+    }
+  }
+
+  /**
+   * Met à jour l'image de profil d'un utilisateur
+   */
+  async updateUserProfileImage(
+    userId: string,
+    userType: 'personnel' | 'client',
+    imagePath: string,
+  ): Promise<boolean> {
+    try {
+      if (userType === 'personnel') {
+        await this.personnelRepository.update(parseInt(userId), {
+          photo: imagePath,
+        });
+      } else {
+        await this.clientRepository.update(parseInt(userId), {
+          photo: imagePath,
+        });
+      }
+
+      this.logger.log(`Image de profil mise à jour pour ${userType} ID: ${userId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur mise à jour image profil pour ${userType} ${userId}:`, error);
+      throw new Error('Impossible de mettre à jour l\'image de profil');
+    }
+  }
+
+  /**
+   * Supprime l'image de profil d'un utilisateur
+   */
+  async deleteUserProfileImage(
+    userId: string,
+    userType: 'personnel' | 'client',
+  ): Promise<boolean> {
+    try {
+      // Récupérer l'ancienne image pour la supprimer du système de fichiers
+      let oldImage: string | null = null;
+      
+      if (userType === 'personnel') {
+        const user = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+        oldImage = user?.photo || null;
+        
+        await this.personnelRepository.update(parseInt(userId), {
+          photo: null,
+        });
+      } else {
+        const user = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+        oldImage = user?.photo || null;
+        
+        await this.clientRepository.update(parseInt(userId), {
+          photo: null,
+        });
+      }
+
+      // Supprimer le fichier physique si il existe
+      if (oldImage && !oldImage.startsWith('http')) {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const filePath = path.join(process.cwd(), oldImage);
+          
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            this.logger.log(`Fichier image supprimé: ${filePath}`);
+          }
+        } catch (fileError) {
+          this.logger.warn(`Impossible de supprimer le fichier image: ${oldImage}`, fileError);
+          // Ne pas faire échouer la suppression si le fichier ne peut pas être supprimé
+        }
+      }
+
+      this.logger.log(`Image de profil supprimée pour ${userType} ID: ${userId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur suppression image profil pour ${userType} ${userId}:`, error);
+      throw new Error('Impossible de supprimer l\'image de profil');
+    }
+  }
+
+  /**
+   * Méthode temporaire pour migrer tous les avatars vers PNG
+   * ATTENTION: Cette méthode doit être supprimée après la migration
+   */
+  async migrateAvatarsToPng(): Promise<{ personnelUpdated: number; clientsUpdated: number }> {
+    try {
+      this.logger.log('Début de la migration des avatars vers PNG...');
+
+      // Mettre à jour tous les utilisateurs Personnel qui n'ont pas d'avatar ou qui ont l'ancien avatar SVG
+      const personnelUpdateResult = await this.personnelRepository
+        .createQueryBuilder()
+        .update(Personnel)
+        .set({ photo: 'uploads/profiles/default-avatar.png' })
+        .where('photo IS NULL OR photo = :emptyString OR photo = :oldSvg', {
+          emptyString: '',
+          oldSvg: 'uploads/profiles/default-avatar.svg'
+        })
+        .execute();
+
+      // Mettre à jour tous les clients qui n'ont pas d'avatar ou qui ont l'ancien avatar SVG
+      const clientsUpdateResult = await this.clientRepository
+        .createQueryBuilder()
+        .update(Client)
+        .set({ photo: 'uploads/profiles/default-avatar.png' })
+        .where('photo IS NULL OR photo = :emptyString OR photo = :oldSvg', {
+          emptyString: '',
+          oldSvg: 'uploads/profiles/default-avatar.svg'
+        })
+        .execute();
+
+      const personnelUpdated = personnelUpdateResult.affected || 0;
+      const clientsUpdated = clientsUpdateResult.affected || 0;
+
+      this.logger.log(`Migration terminée: ${personnelUpdated} personnel et ${clientsUpdated} clients mis à jour`);
+
+      return {
+        personnelUpdated,
+        clientsUpdated
+      };
+    } catch (error) {
+      this.logger.error('Erreur lors de la migration des avatars:', error);
+      throw new Error('Impossible de migrer les avatars');
+    }
+  }
+
+  /**
+   * Récupère le profil complet d'un utilisateur avec toutes les informations
+   */
+  async getFullUserProfile(userId: string, userType: 'personnel' | 'client'): Promise<any> {
+    try {
+      if (userType === 'personnel') {
+        const personnel = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!personnel) {
+          throw new UnauthorizedException('Personnel non trouvé');
+        }
+
+        return {
+          id: personnel.id,
+          nom: personnel.nom,
+          prenom: personnel.prenom,
+          nom_utilisateur: personnel.nom_utilisateur,
+          email: personnel.email,
+          telephone: personnel.telephone,
+          genre: personnel.genre,
+          statut: personnel.statut,
+          photo: personnel.photo || 'uploads/profiles/default-avatar.png',
+          role: personnel.role || 'personnel',
+          userType: 'personnel',
+          fullName: `${personnel.prenom} ${personnel.nom}`,
+          username: personnel.nom_utilisateur,
+          isActive: personnel.isActive,
+          created_at: personnel.created_at
+        };
+      } else {
+        const client = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!client) {
+          throw new UnauthorizedException('Client non trouvé');
+        }
+
+        // Récupérer l'email depuis contact_client
+        let email = '';
+        try {
+          const contactClient = await this.contactClientService.findByClient(client.id);
+          if (contactClient && contactClient.length > 0) {
+            email = contactClient[0].mail1 || contactClient[0].mail2 || '';
+          }
+        } catch (error) {
+          this.logger.warn(`Erreur récupération email pour client ${client.nom}:`, error.message);
+        }
+
+        return {
+          id: client.id,
+          nom: client.nom,
+          interlocuteur: client.interlocuteur,
+          categorie: client.categorie,
+          type_client: client.type_client,
+          adresse: client.adresse,
+          code_postal: client.code_postal,
+          ville: client.ville,
+          pays: client.pays,
+          id_fiscal: client.id_fiscal,
+          nature: client.nature,
+          photo: client.photo || 'uploads/profiles/default-avatar.png',
+          role: 'client',
+          userType: 'client',
+          username: client.nom,
+          email: email,
+          created_at: client.created_at,
+          blocage: client.blocage,
+          devise: client.devise,
+          timbre: client.timbre,
+          solde: client.solde
+        };
+      }
+    } catch (error) {
+      this.logger.error(`Erreur récupération profil complet pour ${userType} ${userId}:`, error);
+      throw new UnauthorizedException('Impossible de récupérer le profil');
+    }
+  }
+
+  /**
+   * Met à jour le profil d'un utilisateur
+   */
+  async updateUserProfile(userId: string, userType: 'personnel' | 'client', updateData: any): Promise<any> {
+    try {
+      if (userType === 'personnel') {
+        // Mise à jour personnel
+        const personnel = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!personnel) {
+          throw new UnauthorizedException('Personnel non trouvé');
+        }
+
+        // Valider les champs modifiables pour le personnel
+        const allowedFields = ['nom', 'prenom', 'telephone', 'email', 'genre', 'photo'];
+        const filteredData = {};
+        
+        allowedFields.forEach(field => {
+          if (updateData[field] !== undefined) {
+            filteredData[field] = updateData[field];
+          }
+        });
+
+        // Vérifier l'unicité de l'email si modifié
+        if (filteredData['email'] && filteredData['email'] !== personnel.email) {
+          const existingEmail = await this.personnelRepository.findOne({
+            where: { email: filteredData['email'] },
+          });
+          if (existingEmail && existingEmail.id !== personnel.id) {
+            throw new ConflictException('Cet email est déjà utilisé');
+          }
+        }
+
+        await this.personnelRepository.update(personnel.id, filteredData);
+        
+        // Retourner le profil mis à jour
+        return await this.getFullUserProfile(userId, userType);
+
+      } else {
+        // Mise à jour client
+        const client = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!client) {
+          throw new UnauthorizedException('Client non trouvé');
+        }
+
+        // Valider les champs modifiables pour le client
+        const allowedFields = ['nom', 'interlocuteur', 'type_client', 'adresse', 'code_postal', 'ville', 'pays', 'id_fiscal', 'photo'];
+        const filteredData = {};
+        
+        allowedFields.forEach(field => {
+          if (updateData[field] !== undefined) {
+            filteredData[field] = updateData[field];
+          }
+        });
+
+        await this.clientRepository.update(client.id, filteredData);
+        
+        // Retourner le profil mis à jour
+        return await this.getFullUserProfile(userId, userType);
+      }
+    } catch (error) {
+      this.logger.error(`Erreur mise à jour profil pour ${userType} ${userId}:`, error);
+      if (error instanceof ConflictException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Impossible de mettre à jour le profil');
+    }
+  }
+
+  /**
+   * Change le mot de passe d'un utilisateur
+   */
+  async changeUserPassword(userId: string, userType: 'personnel' | 'client', passwordData: { currentPassword: string; newPassword: string }): Promise<any> {
+    try {
+      if (userType === 'personnel') {
+        const personnel = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!personnel) {
+          throw new UnauthorizedException('Personnel non trouvé');
+        }
+
+        // Vérifier le mot de passe actuel
+        const isCurrentPasswordValid = await bcrypt.compare(passwordData.currentPassword, personnel.mot_de_passe);
+        if (!isCurrentPasswordValid) {
+          throw new UnauthorizedException('Mot de passe actuel incorrect');
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedNewPassword = await this.hashPassword(passwordData.newPassword);
+
+        // Mettre à jour le mot de passe
+        await this.personnelRepository.update(personnel.id, {
+          mot_de_passe: hashedNewPassword
+        });
+
+        return { message: 'Mot de passe modifié avec succès' };
+
+      } else {
+        const client = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!client) {
+          throw new UnauthorizedException('Client non trouvé');
+        }
+
+        // Vérifier le mot de passe actuel
+        const isCurrentPasswordValid = await bcrypt.compare(passwordData.currentPassword, client.mot_de_passe);
+        if (!isCurrentPasswordValid) {
+          throw new UnauthorizedException('Mot de passe actuel incorrect');
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedNewPassword = await this.hashPassword(passwordData.newPassword);
+
+        // Mettre à jour le mot de passe
+        await this.clientRepository.update(client.id, {
+          mot_de_passe: hashedNewPassword
+        });
+
+        return { message: 'Mot de passe modifié avec succès' };
+      }
+    } catch (error) {
+      this.logger.error(`Erreur changement mot de passe pour ${userType} ${userId}:`, error);
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Impossible de changer le mot de passe');
     }
   }
 }

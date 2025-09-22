@@ -17,6 +17,11 @@ async function bootstrap() {
     prefix: '/assets/',
   });
 
+  // Configuration pour servir les fichiers d'upload (images de profil, etc.)
+  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
+    prefix: '/uploads/',
+  });
+
   // Configuration CORS pour permettre les requêtes depuis le frontend
   app.enableCors({
     origin: ['http://localhost:4200', 'http://localhost:3000'],
