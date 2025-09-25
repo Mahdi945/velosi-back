@@ -12,17 +12,7 @@ import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Configuration pour servir les fichiers statiques (assets)
-  app.useStaticAssets(join(__dirname, '..', 'assets'), {
-    prefix: '/assets/',
-  });
-
-  // Configuration pour servir les fichiers d'upload (images de profil, etc.)
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
-    prefix: '/uploads/',
-  });
-
-  // Configuration CORS pour permettre les requêtes depuis le frontend
+  // Configuration CORS pour permettre les requêtes depuis le frontend (AVANT les autres middleware)
   app.enableCors({
     origin: ['http://localhost:4200', 'http://localhost:3000'],
     credentials: true,
@@ -35,6 +25,19 @@ async function bootstrap() {
       'X-Requested-With',
     ],
   });
+
+  // Configuration pour servir les fichiers statiques (AVANT le préfixe global)
+  app.useStaticAssets(join(__dirname, '..', 'assets'), {
+    prefix: '/assets/',
+  });
+
+  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
+    prefix: '/uploads/',
+  });
+
+  // Ajout d'un log pour déboguer le chemin des uploads
+  console.log('📁 Chemin uploads:', join(__dirname, '..', 'uploads'));
+  console.log('📁 Chemin assets:', join(__dirname, '..', 'assets'));
 
   // Middleware pour les cookies
   app.use(cookieParser());
@@ -51,8 +54,11 @@ async function bootstrap() {
     }),
   );
 
-  // Préfixe global pour toutes les routes API
-  app.setGlobalPrefix('api');
+  // Préfixe global pour toutes les routes API (APRÈS les fichiers statiques)
+  // Exclure les routes statiques du préfixe global
+  app.setGlobalPrefix('api', {
+    exclude: ['/uploads/(.*)', '/assets/(.*)']
+  });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

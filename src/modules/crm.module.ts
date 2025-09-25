@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContactClientController } from '../controllers/contact-client.controller';
 import { ObjectifComController } from '../controllers/objectif-com.controller';
 import { SyncController } from '../controllers/sync.controller';
+import { StatsController } from '../controllers/stats.controller';
 import { ContactClientService } from '../services/contact-client.service';
 import { ObjectifComService } from '../services/objectif-com.service';
 import { KeycloakSyncService } from '../services/keycloak-sync.service';
@@ -15,7 +16,7 @@ import { Personnel } from '../entities/personnel.entity';
   imports: [
     TypeOrmModule.forFeature([ContactClient, ObjectifCom, Client, Personnel]),
   ],
-  controllers: [ContactClientController, ObjectifComController, SyncController],
+  controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],
   exports: [ContactClientService, ObjectifComService, KeycloakSyncService],
 })

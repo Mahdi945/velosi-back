@@ -16,7 +16,7 @@ export class ObjectifCom {
   @Column({ type: 'integer', nullable: false })
   id_personnel: number;
 
-  @Column({ type: 'varchar', nullable: false })
+  @Column({ type: 'varchar', nullable: true, default: 'Objectif Commercial' })
   titre: string;
 
   @Column({ type: 'text', nullable: true })

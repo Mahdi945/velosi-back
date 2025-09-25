@@ -295,12 +295,17 @@ export class AuthService {
   }
 
   async validateJwtPayload(payload: JwtPayload): Promise<any> {
+    console.log('validateJwtPayload - Payload:', payload);
+    
     let user;
     if (payload.userType === 'personnel') {
+      console.log('validateJwtPayload - Recherche personnel avec ID:', payload.sub);
       user = await this.personnelRepository.findOne({
         where: { id: parseInt(payload.sub) },
       });
+      console.log('validateJwtPayload - Personnel trouvé:', user ? user.nom : 'null');
     } else {
+      console.log('validateJwtPayload - Recherche client avec ID:', payload.sub);
       user = await this.clientRepository.findOne({
         where: { id: parseInt(payload.sub) },
       });
@@ -321,8 +326,11 @@ export class AuthService {
     }
 
     if (!user) {
+      console.log('validateJwtPayload - Aucun utilisateur trouvé, throwing UnauthorizedException');
       throw new UnauthorizedException('Utilisateur non trouvé');
     }
+
+    console.log('validateJwtPayload - Utilisateur trouvé, construction de la réponse');
 
     // Construire l'objet utilisateur avec le champ photo
     const userResponse = {
@@ -351,6 +359,7 @@ export class AuthService {
       })
     };
 
+    console.log('validateJwtPayload - Réponse construite:', userResponse);
     return userResponse;
   }
 
@@ -434,6 +443,24 @@ export class AuthService {
     const refresh_token = this.jwtService.sign(payload, {
       expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
     });
+
+    // Envoyer l'email avec les informations de connexion
+    try {
+      if (savedPersonnel.email && this.emailService) {
+        const fullName = `${savedPersonnel.prenom} ${savedPersonnel.nom}`;
+        await this.emailService.sendPersonnelCredentialsEmail(
+          savedPersonnel.email,
+          savedPersonnel.nom_utilisateur,
+          createPersonnelDto.mot_de_passe, // Mot de passe original non hashé
+          fullName,
+          savedPersonnel.role
+        );
+        this.logger.log(`Email d'informations envoyé à ${savedPersonnel.email}`);
+      }
+    } catch (emailError) {
+      this.logger.warn('Erreur envoi email informations personnel:', emailError);
+      // Ne pas faire échouer l'inscription si l'envoi d'email échoue
+    }
 
     return {
       access_token,
@@ -1236,6 +1263,242 @@ export class AuthService {
         throw error;
       }
       throw new UnauthorizedException('Impossible de changer le mot de passe');
+    }
+  }
+
+  /**
+   * Récupère les informations utilisateur depuis Keycloak
+   */
+  async getKeycloakUserInfo(token: string): Promise<any> {
+    try {
+      if (!this.keycloakService) {
+        this.logger.warn('Service Keycloak non disponible');
+        return null;
+      }
+
+      const userInfo = await this.keycloakService.getUserInfo(token);
+      
+      if (userInfo) {
+        this.logger.debug(`Informations Keycloak récupérées pour: ${userInfo.preferred_username}`);
+        return userInfo;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.error(`Erreur récupération infos Keycloak: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Synchronise un utilisateur depuis Keycloak vers notre base de données
+   */
+  async syncUserFromKeycloak(keycloakUserInfo: any): Promise<any> {
+    try {
+      this.logger.debug('Synchronisation utilisateur depuis Keycloak:', keycloakUserInfo);
+
+      const email = keycloakUserInfo.email;
+      const username = keycloakUserInfo.preferred_username;
+      
+      if (!email && !username) {
+        throw new Error('Email ou nom d\'utilisateur requis pour la synchronisation');
+      }
+
+      // Chercher d'abord dans la table personnel
+      let user = null;
+      let userType = null;
+
+      if (email) {
+        user = await this.personnelRepository.findOne({
+          where: { email: email }
+        });
+        if (user) {
+          userType = 'personnel';
+        }
+      }
+
+      // Si pas trouvé, chercher dans la table client
+      if (!user && email) {
+        user = await this.clientRepository.findOne({
+          where: { email: email }
+        });
+        if (user) {
+          userType = 'client';
+        }
+      }
+
+      // Si pas trouvé par email, chercher par nom d'utilisateur
+      if (!user && username) {
+        user = await this.personnelRepository.findOne({
+          where: { nom_utilisateur: username }
+        });
+        if (user) {
+          userType = 'personnel';
+        }
+      }
+
+      if (!user) {
+        throw new Error('Utilisateur non trouvé dans la base de données locale');
+      }
+
+      // Mettre à jour l'ID Keycloak si nécessaire
+      if (keycloakUserInfo.sub && !user.keycloak_id) {
+        if (userType === 'personnel') {
+          await this.personnelRepository.update(user.id, { 
+            keycloak_id: keycloakUserInfo.sub 
+          });
+        } else if (userType === 'client') {
+          await this.clientRepository.update(user.id, { 
+            keycloak_id: keycloakUserInfo.sub 
+          });
+        }
+        user.keycloak_id = keycloakUserInfo.sub;
+      }
+
+      // Récupérer les rôles depuis Keycloak
+      const roles = this.extractRolesFromKeycloak(keycloakUserInfo);
+
+      return {
+        user: {
+          id: user.id,
+          username: userType === 'personnel' ? user.nom_utilisateur : user.nom,
+          email: user.email,
+          userType: userType,
+          keycloak_id: user.keycloak_id,
+          ...(userType === 'personnel' ? {
+            prenom: user.prenom,
+            nom: user.nom
+          } : {
+            nom: user.nom,
+            telephone: user.telephone
+          })
+        },
+        roles: roles
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur synchronisation utilisateur Keycloak: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Extrait les rôles depuis les informations Keycloak
+   */
+  private extractRolesFromKeycloak(keycloakUserInfo: any): string[] {
+    const roles: string[] = [];
+
+    try {
+      // Rôles du realm
+      if (keycloakUserInfo.realm_access && keycloakUserInfo.realm_access.roles) {
+        roles.push(...keycloakUserInfo.realm_access.roles);
+      }
+
+      // Rôles du client
+      if (keycloakUserInfo.resource_access) {
+        const clientId = this.configService.get('KEYCLOAK_CLIENT_ID', 'velosi_auth');
+        if (keycloakUserInfo.resource_access[clientId] && 
+            keycloakUserInfo.resource_access[clientId].roles) {
+          roles.push(...keycloakUserInfo.resource_access[clientId].roles);
+        }
+      }
+
+      // Rôles depuis les groupes
+      if (keycloakUserInfo.groups) {
+        roles.push(...keycloakUserInfo.groups);
+      }
+
+      // Filtrer les rôles système par défaut
+      const filteredRoles = roles.filter(role => 
+        !['default-roles-erp_velosi', 'offline_access', 'uma_authorization'].includes(role)
+      );
+
+      this.logger.debug(`Rôles extraits de Keycloak: ${filteredRoles.join(', ')}`);
+      return filteredRoles;
+
+    } catch (error) {
+      this.logger.warn(`Erreur extraction rôles Keycloak: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Récupère les rôles d'un utilisateur basés sur les données locales
+   */
+  async getUserRoles(userId: string, userType: 'personnel' | 'client'): Promise<string[]> {
+    try {
+      const roles: string[] = [];
+
+      if (userType === 'personnel') {
+        const personnel = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) }
+        });
+
+        if (personnel) {
+          // Ajouter des rôles basés sur le statut du personnel
+          roles.push('personnel');
+          
+          // Vérifier si c'est un admin (vous pouvez ajuster la logique selon vos besoins)
+          if (personnel.email && personnel.email.includes('admin')) {
+            roles.push('admin');
+          }
+          
+          // Ajouter d'autres rôles selon votre logique métier
+          if (personnel.statut === 'actif') {
+            roles.push('active_user');
+          }
+        }
+      } else if (userType === 'client') {
+        const client = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) }
+        });
+
+        if (client) {
+          roles.push('client');
+          
+          // Ajouter des rôles basés sur le statut du client
+          if (client.statut === 'actif') {
+            roles.push('active_client');
+          }
+        }
+      }
+
+      this.logger.debug(`Rôles locaux pour ${userType} ${userId}: ${roles.join(', ')}`);
+      return roles;
+
+    } catch (error) {
+      this.logger.warn(`Erreur récupération rôles locaux: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Find personnel by email
+   */
+  async findPersonnelByEmail(email: string): Promise<any> {
+    try {
+      const personnel = await this.personnelRepository.findOne({
+        where: { email: email }
+      });
+      return personnel;
+    } catch (error) {
+      this.logger.warn(`Erreur recherche personnel par email: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Find client by email
+   */
+  async findClientByEmail(email: string): Promise<any> {
+    try {
+      const client = await this.clientRepository.findOne({
+        where: { email: email }
+      });
+      return client;
+    } catch (error) {
+      this.logger.warn(`Erreur recherche client par email: ${error.message}`);
+      return null;
     }
   }
 }

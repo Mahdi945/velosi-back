@@ -10,7 +10,8 @@ async function syncAllUsers() {
     console.log('🔄 Début de la synchronisation complète vers Keycloak...');
     
     // Synchroniser tous les utilisateurs
-    await keycloakSyncService.syncAllUsersToKeycloak();
+    await keycloakSyncService.syncPersonnelToKeycloak();
+    await keycloakSyncService.syncClientsToKeycloak();
     
     console.log('✅ Synchronisation terminée avec succès !');
   } catch (error) {

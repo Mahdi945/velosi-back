@@ -35,6 +35,6 @@ import { OtpService } from '../services/otp.service';
   ],
   providers: [AuthService, KeycloakService, LocalStrategy, JwtStrategy, ContactClientService, EmailService, OtpService],
   controllers: [AuthController],
-  exports: [AuthService, JwtModule],
+  exports: [AuthService, KeycloakService, JwtModule],
 })
 export class AuthModule {}

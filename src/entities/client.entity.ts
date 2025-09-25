@@ -110,6 +110,9 @@ export class Client {
   @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
   photo: string; // URL ou chemin vers la photo de profil
 
+  @Column({ type: 'varchar', nullable: true, default: 'actif' })
+  statut: string; // Statut du client (actif, inactif, suspendu, etc.)
+
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];

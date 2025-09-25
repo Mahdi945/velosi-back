@@ -7,6 +7,7 @@ export interface KeycloakUser {
   firstName: string;
   lastName: string;
   enabled: boolean;
+  password?: string;
 }
 
 @Injectable()
@@ -267,6 +268,11 @@ export class KeycloakService {
           lastName: userData.lastName,
           enabled: userData.enabled,
           emailVerified: true,
+          credentials: userData.password ? [{
+            type: 'password',
+            value: userData.password,
+            temporary: false
+          }] : undefined,
         }),
       });
 
@@ -405,6 +411,234 @@ export class KeycloakService {
       }
     } catch (error) {
       this.logger.error(`Erreur envoi email récupération: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Assigner un rôle à un utilisateur dans Keycloak
+  async assignRoleToUser(userId: string, roleName: string): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      
+      // D'abord, récupérer les informations du rôle
+      const rolesUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/roles/${roleName}`;
+      const roleResponse = await fetch(rolesUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!roleResponse.ok) {
+        this.logger.warn(`Rôle ${roleName} non trouvé dans Keycloak`);
+        return false;
+      }
+
+      const roleData = await roleResponse.json();
+
+      // Assigner le rôle à l'utilisateur
+      const assignRoleUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${userId}/role-mappings/realm`;
+      const assignResponse = await fetch(assignRoleUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([roleData]),
+      });
+
+      if (assignResponse.ok) {
+        this.logger.log(`Rôle ${roleName} assigné avec succès à l'utilisateur ${userId}`);
+        return true;
+      } else {
+        const errorText = await assignResponse.text();
+        this.logger.warn(`Échec de l'assignation du rôle: ${assignResponse.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'assignation du rôle: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Mettre à jour un utilisateur dans Keycloak
+  async updateUser(keycloakId: string, userData: Partial<KeycloakUser>): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+
+      const updateData: any = {};
+      if (userData.username) updateData.username = userData.username;
+      if (userData.email) updateData.email = userData.email;
+      if (userData.firstName) updateData.firstName = userData.firstName;
+      if (userData.lastName) updateData.lastName = userData.lastName;
+      if (userData.enabled !== undefined) updateData.enabled = userData.enabled;
+
+      const response = await fetch(userUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Utilisateur Keycloak ${keycloakId} mis à jour avec succès`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec de la mise à jour de l'utilisateur: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la mise à jour de l'utilisateur: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Mettre à jour le mot de passe d'un utilisateur dans Keycloak
+  async updateUserPassword(keycloakId: string, newPassword: string): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const passwordUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}/reset-password`;
+
+      const response = await fetch(passwordUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'password',
+          value: newPassword,
+          temporary: false,
+        }),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Mot de passe mis à jour avec succès pour l'utilisateur ${keycloakId}`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec de la mise à jour du mot de passe: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la mise à jour du mot de passe: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Activer/Désactiver un utilisateur dans Keycloak
+  async enableUser(keycloakId: string): Promise<boolean> {
+    return await this.updateUserStatus(keycloakId, true);
+  }
+
+  async disableUser(keycloakId: string): Promise<boolean> {
+    return await this.updateUserStatus(keycloakId, false);
+  }
+
+  private async updateUserStatus(keycloakId: string, enabled: boolean): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+
+      const response = await fetch(userUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          enabled: enabled,
+        }),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Utilisateur ${keycloakId} ${enabled ? 'activé' : 'désactivé'} dans Keycloak`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec de la mise à jour du statut: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la mise à jour du statut: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Supprimer tous les rôles d'un utilisateur puis assigner un nouveau rôle
+  async updateUserRole(keycloakId: string, newRole: string): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      
+      // 1. Récupérer les rôles actuels de l'utilisateur
+      const userRolesUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}/role-mappings/realm`;
+      const userRolesResponse = await fetch(userRolesUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (userRolesResponse.ok) {
+        const currentRoles = await userRolesResponse.json();
+        
+        // 2. Supprimer tous les rôles actuels
+        if (currentRoles.length > 0) {
+          const removeResponse = await fetch(userRolesUrl, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(currentRoles),
+          });
+
+          if (!removeResponse.ok) {
+            this.logger.warn(`Échec de la suppression des anciens rôles`);
+          }
+        }
+
+        // 3. Assigner le nouveau rôle
+        return await this.assignRoleToUser(keycloakId, newRole);
+      } else {
+        this.logger.warn(`Impossible de récupérer les rôles actuels de l'utilisateur`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la mise à jour du rôle: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Supprimer un utilisateur de Keycloak
+  async deleteUser(keycloakId: string): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+
+      const response = await fetch(userUrl, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (response.ok) {
+        this.logger.log(`Utilisateur ${keycloakId} supprimé de Keycloak`);
+        return true;
+      } else {
+        const errorText = await response.text();
+        this.logger.warn(`Échec de la suppression de l'utilisateur: ${response.status} - ${errorText}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la suppression de l'utilisateur: ${error.message}`);
       return false;
     }
   }

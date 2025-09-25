@@ -77,8 +77,8 @@ export class EmailService {
       this.transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
-          user: 'mahdibey2002@gmail.com',
-          pass: 'emmv krph yucn enub', // Mot de passe d'application Gmail
+          user: 'velosierp@gmail.com',
+          pass: 'qaas amak tyqq rzet', // Mot de passe d'application Gmail
         },
         tls: {
           rejectUnauthorized: false,
@@ -89,6 +89,31 @@ export class EmailService {
     } catch (error) {
       this.logger.error('Erreur initialisation service email:', error);
     }
+  }
+
+  /**
+   * Génère un footer simple et unifié pour tous les emails
+   */
+  private getSimpleEmailFooter(): string {
+    return `
+      <div class="footer" style="
+        background-color: #f8f9fa;
+        padding: 20px;
+        text-align: center;
+        border-top: 1px solid #e9ecef;
+        margin-top: 30px;
+        color: #6c757d;
+        font-size: 12px;
+        line-height: 1.4;
+      ">
+        <p style="margin: 0 0 8px 0; font-weight: 500;">
+          © ${new Date().getFullYear()} Velosi ERP - Tous droits réservés
+        </p>
+        <p style="margin: 0; font-size: 11px;">
+          Cet email a été envoyé automatiquement. Merci de ne pas répondre à cette adresse.
+        </p>
+      </div>
+    `;
   }
 
   /**
@@ -457,18 +482,7 @@ export class EmailService {
                 </p>
             </div>
             
-            <div class="footer">
-                <div class="contact-info">
-                    <h4>📞 Support Technique Velosi</h4>
-                    <p><strong>Transport & Logistique</strong></p>
-                    <p>Email: support@velosi.com | Tél: +33 (0)1 23 45 67 89</p>
-                    <p>Disponible 24h/24, 7j/7 pour votre sécurité</p>
-                </div>
-                
-                <p style="margin-top: 20px;">© ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.</p>
-                <p>Votre partenaire de confiance en Transport & Logistique</p>
-                <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
-            </div>
+            ${this.getSimpleEmailFooter()}
         </div>
     </body>
     </html>
@@ -579,9 +593,7 @@ export class EmailService {
                 <p>Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.</p>
             </div>
             
-            <div class="footer">
-                <p>© ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.</p>
-            </div>
+            ${this.getSimpleEmailFooter()}
         </div>
     </body>
     </html>
@@ -671,9 +683,972 @@ export class EmailService {
                 </p>
             </div>
             
-            <div style="text-align: center; padding: 20px; border-top: 1px solid #eee; color: #888; font-size: 12px;">
-                <p>© ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.</p>
+            ${this.getSimpleEmailFooter()}
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  /**
+   * Envoyer les informations de connexion au nouveau personnel
+   */
+  async sendPersonnelCredentialsEmail(
+    email: string, 
+    userName: string, 
+    password: string, 
+    fullName: string,
+    role: string
+  ): Promise<boolean> {
+    try {
+      const htmlTemplate = this.getPersonnelCredentialsTemplate(userName, password, fullName, role);
+      
+      // Préparer l'attachment du logo
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+        });
+      }
+      
+      const mailOptions = {
+        from: {
+          name: 'Velosi ERP - Bienvenue',
+          address: 'mahdibey2002@gmail.com'
+        },
+        to: email,
+        subject: '🎉 Bienvenue dans Velosi ERP - Vos informations de connexion',
+        html: htmlTemplate,
+        text: `Bienvenue ${fullName}! Vos informations de connexion Velosi ERP: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
+        attachments: attachments
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email informations personnel envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur envoi email informations personnel à ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Template HTML pour les informations de connexion du personnel
+   */
+  private getPersonnelCredentialsTemplate(
+    userName: string, 
+    password: string, 
+    fullName: string, 
+    role: string
+  ): string {
+    const roleDisplayNames = {
+      'commercial': 'Commercial',
+      'admin': 'Administrateur',
+      'manager': 'Manager',
+      'employe': 'Employé'
+    };
+    
+    const displayRole = roleDisplayNames[role] || role;
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Bienvenue dans Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+            
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 650px;
+                margin: 0 auto;
+                background: #ffffff;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+                overflow: hidden;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                padding: 40px 30px;
+                text-align: center;
+                color: white;
+                position: relative;
+            }
+            
+            .header::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 100" fill="rgba(255,255,255,0.1)"><polygon points="0,100 0,0 500,100 1000,0 1000,100"/></svg>');
+                background-size: cover;
+            }
+            
+            .header h1 {
+                font-size: 32px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .header p {
+                font-size: 18px;
+                opacity: 0.95;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .welcome-icon {
+                width: 80px;
+                height: 80px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 50%;
+                margin: 0 auto 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .content {
+                padding: 40px 30px;
+            }
+            
+            .greeting {
+                text-align: center;
+                margin-bottom: 35px;
+            }
+            
+            .greeting h2 {
+                font-size: 28px;
+                color: #1a202c;
+                margin-bottom: 10px;
+                font-weight: 600;
+            }
+            
+            .greeting p {
+                font-size: 16px;
+                color: #4a5568;
+                margin-bottom: 8px;
+            }
+            
+            .role-badge {
+                display: inline-block;
+                background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+                color: white;
+                padding: 8px 20px;
+                border-radius: 25px;
+                font-weight: 600;
+                font-size: 14px;
+                margin-top: 10px;
+            }
+            
+            .credentials-section {
+                background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+                border: 2px solid #e2e8f0;
+                border-radius: 16px;
+                padding: 30px;
+                margin: 30px 0;
+                position: relative;
+            }
+            
+            .credentials-title {
+                text-align: center;
+                font-size: 20px;
+                font-weight: 600;
+                color: #2d3748;
+                margin-bottom: 25px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+            }
+            
+            .credential-item {
+                margin-bottom: 20px;
+                padding: 20px;
+                background: white;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            
+            .credential-label {
+                font-size: 14px;
+                color: #4a5568;
+                font-weight: 500;
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            .credential-value {
+                font-size: 18px;
+                font-weight: 700;
+                color: #2d3748;
+                background: #f7fafc;
+                padding: 12px 16px;
+                border-radius: 8px;
+                border: 2px dashed #cbd5e0;
+                font-family: 'Courier New', monospace;
+                word-break: break-all;
+            }
+            
+            .security-alert {
+                background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%);
+                border: 2px solid #fc8181;
+                border-radius: 12px;
+                padding: 25px;
+                margin: 30px 0;
+                position: relative;
+            }
+            
+            .security-alert::before {
+                content: '🔒';
+                position: absolute;
+                top: -15px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #e53e3e;
+                color: white;
+                width: 30px;
+                height: 30px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 16px;
+            }
+            
+            .security-alert h3 {
+                color: #c53030;
+                font-size: 18px;
+                margin-bottom: 15px;
+                text-align: center;
+                font-weight: 600;
+            }
+            
+            .security-alert ul {
+                color: #2d3748;
+                margin-left: 20px;
+            }
+            
+            .security-alert li {
+                margin-bottom: 8px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            
+            .instructions {
+                background: linear-gradient(135deg, #e6fffa 0%, #b2f5ea 100%);
+                border: 2px solid #4fd1c7;
+                border-radius: 12px;
+                padding: 25px;
+                margin: 25px 0;
+            }
+            
+            .instructions h3 {
+                color: #234e52;
+                font-size: 18px;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .instructions ol {
+                margin-left: 20px;
+                color: #2d3748;
+            }
+            
+            .instructions li {
+                margin-bottom: 10px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            
+            .contact-section {
+                background: #f8f9fa;
+                border-radius: 12px;
+                padding: 25px;
+                margin: 30px 0;
+                text-align: center;
+            }
+            
+            .contact-section h3 {
+                color: #2d3748;
+                font-size: 18px;
+                margin-bottom: 15px;
+            }
+            
+            .contact-section p {
+                color: #4a5568;
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+            
+            .footer {
+                
+                padding: 30px;
+                text-align: center;
+                color: white;
+            }
+            
+            .footer p {
+                margin-bottom: 8px;
+                opacity: 0.9;
+            }
+            
+            .footer .company-info {
+                font-size: 14px;
+                font-weight: 600;
+                margin-top: 15px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
+              
+                <h1>Bienvenue dans Velosi ERP !</h1>
+                <p>Votre compte a été créé avec succès</p>
             </div>
+            
+            <div class="content">
+                <div class="greeting">
+                    <h2>Bonjour ${fullName} !</h2>
+                    <p>Nous sommes ravis de vous accueillir dans l'équipe Velosi.</p>
+                    <p>Votre compte a été créé en tant que :</p>
+                    <div class="role-badge">${displayRole}</div>
+                </div>
+                
+                <div class="credentials-section">
+                    <div class="credentials-title">
+                        🔑 Vos informations de connexion
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Nom d'utilisateur</div>
+                        <div class="credential-value">${userName}</div>
+                    </div>
+                    
+                    <div class="credential-item">
+                        <div class="credential-label">Mot de passe temporaire</div>
+                        <div class="credential-value">${password}</div>
+                    </div>
+                </div>
+                
+                <div class="security-alert">
+                    <h3>🚨 IMPORTANT - Sécurité</h3>
+                    <ul>
+                        <li><strong>Changez immédiatement votre mot de passe</strong> lors de votre première connexion</li>
+                        <li>Ne partagez jamais vos informations de connexion</li>
+                        <li>Utilisez un mot de passe fort (min. 8 caractères, majuscules, minuscules, chiffres)</li>
+                        <li>Déconnectez-vous toujours en fin de session</li>
+                    </ul>
+                </div>
+                
+                <div class="instructions">
+                    <h3>📋 Première connexion</h3>
+                    <ol>
+                        <li>Rendez-vous sur le portail Velosi ERP</li>
+                        <li>Utilisez les informations ci-dessus pour vous connecter</li>
+                        <li>Le système vous demandera de changer votre mot de passe</li>
+                        <li>Complétez votre profil si nécessaire</li>
+                        <li>Explorez votre nouvel environnement de travail !</li>
+                    </ol>
+                </div>
+                
+                <div class="contact-section">
+                    <h3>💬 Besoin d'aide ?</h3>
+                    <p><strong>Support IT Velosi</strong></p>
+                    <p>📧 Email: support.it@velosi.com</p>
+                    <p>📞 Téléphone: +33 (0)1 23 45 67 89</p>
+                    <p>🕒 Disponible du lundi au vendredi, 8h30 - 18h00</p>
+                </div>
+            </div>
+            
+            <div class="footer">
+            
+                <p style="font-size: 12px; margin-top: 20px;">
+                    © ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.<br>
+                    Cet email contient des informations confidentielles.
+                </p>
+            ${this.getSimpleEmailFooter()}
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  /**
+   * Envoyer notification de désactivation/suspension
+   */
+  async sendPersonnelDeactivationEmail(
+    email: string, 
+    fullName: string, 
+    action: 'desactive' | 'suspendu', 
+    reason: string
+  ): Promise<boolean> {
+    try {
+      const htmlTemplate = this.getDeactivationEmailTemplate(fullName, action, reason);
+      
+      // Préparer l'attachment du logo
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi'
+        });
+      }
+      
+      const actionText = action === 'desactive' ? 'désactivé' : 'suspendu';
+      
+      const mailOptions = {
+        from: {
+          name: 'Velosi ERP - Gestion RH',
+          address: 'mahdibey2002@gmail.com'
+        },
+        to: email,
+        subject: `⚠️ Compte ${actionText} - Velosi ERP`,
+        html: htmlTemplate,
+        text: `Votre compte Velosi ERP a été ${actionText}. Raison: ${reason}. Contactez votre administrateur pour plus d'informations.`,
+        attachments: attachments
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email de ${action} envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur envoi email ${action} à ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Envoyer notification de réactivation
+   */
+  async sendPersonnelReactivationEmail(
+    email: string, 
+    fullName: string
+  ): Promise<boolean> {
+    try {
+      const htmlTemplate = this.getReactivationEmailTemplate(fullName);
+      
+      // Préparer l'attachment du logo
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi'
+        });
+      }
+      
+      const mailOptions = {
+        from: {
+          name: 'Velosi ERP - Gestion RH',
+          address: 'mahdibey2002@gmail.com'
+        },
+        to: email,
+        subject: '✅ Compte réactivé - Velosi ERP',
+        html: htmlTemplate,
+        text: `Bonne nouvelle ! Votre compte Velosi ERP a été réactivé. Vous pouvez maintenant vous reconnecter normalement.`,
+        attachments: attachments
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email de réactivation envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`Erreur envoi email réactivation à ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Template HTML pour la désactivation/suspension
+   */
+  private getDeactivationEmailTemplate(
+    fullName: string, 
+    action: 'desactive' | 'suspendu', 
+    reason: string
+  ): string {
+    const actionText = action === 'desactive' ? 'désactivé' : 'suspendu';
+    const actionColor = action === 'desactive' ? '#e53e3e' : '#d69e2e';
+    const actionIcon = action === 'desactive' ? '🚫' : '⏸️';
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Compte ${actionText} - Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+            
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, ${actionColor} 0%, #2d3748 100%);
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 650px;
+                margin: 0 auto;
+                background: #ffffff;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+                overflow: hidden;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, ${actionColor} 0%, #2d3748 100%);
+                padding: 40px 30px;
+                text-align: center;
+                color: white;
+                position: relative;
+            }
+            
+            .header h1 {
+                font-size: 32px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .header p {
+                font-size: 18px;
+                opacity: 0.95;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .status-icon {
+                width: 80px;
+                height: 80px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 50%;
+                margin: 0 auto 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .content {
+                padding: 40px 30px;
+            }
+            
+            .notification {
+                text-align: center;
+                margin-bottom: 35px;
+            }
+            
+            .notification h2 {
+                font-size: 28px;
+                color: #1a202c;
+                margin-bottom: 15px;
+                font-weight: 600;
+            }
+            
+            .notification p {
+                font-size: 16px;
+                color: #4a5568;
+                margin-bottom: 8px;
+            }
+            
+            .status-badge {
+                display: inline-block;
+                background: ${actionColor};
+                color: white;
+                padding: 10px 25px;
+                border-radius: 25px;
+                font-weight: 600;
+                font-size: 16px;
+                margin-top: 15px;
+                text-transform: uppercase;
+            }
+            
+            .reason-section {
+                background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+                border: 2px solid #e2e8f0;
+                border-radius: 16px;
+                padding: 30px;
+                margin: 30px 0;
+            }
+            
+            .reason-title {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2d3748;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .reason-text {
+                background: white;
+                padding: 20px;
+                border-radius: 12px;
+                border: 1px solid #e2e8f0;
+                font-size: 16px;
+                line-height: 1.6;
+                color: #2d3748;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            
+            .admin-info {
+                background: #f8f9fa;
+                border-radius: 12px;
+                padding: 20px;
+                margin: 25px 0;
+                text-align: center;
+            }
+            
+            .admin-info p {
+                color: #4a5568;
+                font-size: 14px;
+                margin-bottom: 5px;
+            }
+            
+            .contact-section {
+                background: linear-gradient(135deg, #e6fffa 0%, #b2f5ea 100%);
+                border: 2px solid #4fd1c7;
+                border-radius: 12px;
+                padding: 25px;
+                margin: 25px 0;
+                text-align: center;
+            }
+            
+            .contact-section h3 {
+                color: #234e52;
+                font-size: 18px;
+                margin-bottom: 15px;
+            }
+            
+            .contact-section p {
+                color: #2d3748;
+                font-size: 14px;
+                margin-bottom: 8px;
+            }
+            
+            .footer {
+                background: #f8f9fa;
+                padding: 30px;
+                text-align: center;
+                color: #6c757d;
+            }
+            
+            .footer p {
+                margin-bottom: 8px;
+                opacity: 0.9;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
+             
+                <h1>Compte ${actionText}</h1>
+                <p>Notification importante concernant votre accès</p>
+            </div>
+            
+            <div class="content">
+                <div class="notification">
+                    <h2>Bonjour ${fullName}</h2>
+                    <p>Nous vous informons que votre compte Velosi ERP a été ${actionText}.</p>
+                    <div class="status-badge">Compte ${actionText}</div>
+                </div>
+                
+                <div class="reason-section">
+                    <div class="reason-title">
+                        📝 Motif de cette action
+                    </div>
+                    <div class="reason-text">
+                        ${reason}
+                    </div>
+                </div>
+                
+                <div class="admin-info">
+                    <p><strong>Date :</strong> ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}</p>
+                </div>
+                
+                <div class="contact-section">
+                    <h3>💬 Besoin d'informations ?</h3>
+                    <p><strong>Service RH Velosi</strong></p>
+                    <p>📧 Email: rh@velosi.com</p>
+                    <p>📞 Téléphone: +33 (0)1 23 45 67 89</p>
+                    <p>🕒 Disponible du lundi au vendredi, 8h30 - 18h00</p>
+                    <p style="margin-top: 15px; font-weight: 600;">
+                        Pour toute question concernant cette décision, n'hésitez pas à nous contacter.
+                    </p>
+                </div>
+            </div>
+            
+            ${this.getSimpleEmailFooter()}
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  /**
+   * Template HTML pour la réactivation
+   */
+  private getReactivationEmailTemplate(fullName: string): string {
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Compte réactivé - Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+            
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 650px;
+                margin: 0 auto;
+                background: #ffffff;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+                overflow: hidden;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                padding: 40px 30px;
+                text-align: center;
+                color: white;
+                position: relative;
+            }
+            
+            .header h1 {
+                font-size: 32px;
+                font-weight: 700;
+                margin-bottom: 10px;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .header p {
+                font-size: 18px;
+                opacity: 0.95;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .success-icon {
+                width: 80px;
+                height: 80px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 50%;
+                margin: 0 auto 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 40px;
+                position: relative;
+                z-index: 2;
+                animation: bounce 2s infinite;
+            }
+            
+            @keyframes bounce {
+                0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+                40% { transform: translateY(-10px); }
+                60% { transform: translateY(-5px); }
+            }
+            
+            .content {
+                padding: 40px 30px;
+            }
+            
+            .notification {
+                text-align: center;
+                margin-bottom: 35px;
+            }
+            
+            .notification h2 {
+                font-size: 28px;
+                color: #1a202c;
+                margin-bottom: 15px;
+                font-weight: 600;
+            }
+            
+            .notification p {
+                font-size: 16px;
+                color: #4a5568;
+                margin-bottom: 10px;
+            }
+            
+            .status-badge {
+                display: inline-block;
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                color: white;
+                padding: 12px 30px;
+                border-radius: 25px;
+                font-weight: 600;
+                font-size: 16px;
+                margin-top: 15px;
+                text-transform: uppercase;
+                box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3);
+            }
+            
+            .instructions {
+                background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+                border: 2px solid #68d391;
+                border-radius: 16px;
+                padding: 30px;
+                margin: 30px 0;
+            }
+            
+            .instructions h3 {
+                color: #22543d;
+                font-size: 18px;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .instructions ul {
+                margin-left: 20px;
+                color: #2d3748;
+            }
+            
+            .instructions li {
+                margin-bottom: 10px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            
+            .admin-info {
+                background: #f8f9fa;
+                border-radius: 12px;
+                padding: 20px;
+                margin: 25px 0;
+                text-align: center;
+            }
+            
+            .admin-info p {
+                color: #4a5568;
+                font-size: 14px;
+                margin-bottom: 5px;
+            }
+            
+            .footer {
+                background: #f8f9fa;
+                padding: 30px;
+                text-align: center;
+                color: #6c757d;
+            }
+            
+            .footer p {
+                margin-bottom: 8px;
+                opacity: 0.9;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
+                
+                <h1>Compte Réactivé !</h1>
+                <p>Bienvenue de retour dans l'équipe</p>
+            </div>
+            
+            <div class="content">
+                <div class="notification">
+                    <h2>Excellente nouvelle ${fullName} !</h2>
+                    <p>Votre compte Velosi ERP a été réactivé avec succès.</p>
+                    <p>Vous pouvez maintenant accéder à nouveau à tous vos services.</p>
+                    <div class="status-badge">✅ Compte Actif</div>
+                </div>
+                
+                <div class="instructions">
+                    <h3>🔑 Prochaines étapes</h3>
+                    <ul>
+                        <li>Vous pouvez vous connecter immédiatement avec vos identifiants habituels</li>
+                        <li>Toutes vos données et configurations ont été préservées</li>
+                        <li>En cas de problème de connexion, contactez le support IT</li>
+                        <li>Nous vous recommandons de changer votre mot de passe par sécurité</li>
+                    </ul>
+                </div>
+                
+                <div class="admin-info">
+                    <p><strong>Date :</strong> ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}</p>
+                </div>
+                
+                <div style="text-align: center; margin: 30px 0; padding: 20px; background: #e6fffa; border-radius: 12px;">
+                    <h3 style="color: #234e52; margin-bottom: 10px;">🚀 Bon retour parmi nous !</h3>
+                    <p style="color: #2d3748; font-size: 16px;">
+                        L'équipe Velosi vous souhaite une excellente reprise.
+                    </p>
+                </div>
+            </div>
+            
+            ${this.getSimpleEmailFooter()}
         </div>
     </body>
     </html>

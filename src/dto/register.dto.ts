@@ -6,6 +6,8 @@ import {
   IsIn,
   MinLength,
   ValidateIf,
+  Matches,
+  Length,
 } from 'class-validator';
 
 export class CreatePersonnelDto {
@@ -32,8 +34,15 @@ export class CreatePersonnelDto {
   )
   role: string;
 
-  @IsString()
   @IsOptional()
+  @ValidateIf((o) => o.telephone && o.telephone.trim().length > 0)
+  @IsString({ message: 'Le téléphone doit être une chaîne de caractères' })
+  @Matches(/^[0-9+\-\s()]+$/, { 
+    message: 'Le téléphone ne peut contenir que des chiffres, +, -, espaces et parenthèses' 
+  })
+  @Length(8, 20, { 
+    message: 'Le téléphone doit contenir entre 8 et 20 caractères' 
+  })
   telephone?: string;
 
   @IsOptional()
@@ -86,15 +95,36 @@ export class CreateClientDto {
 
   // Champs de contact - emails optionnels et validés seulement si non vides
   @IsOptional()
-  @IsString()
+  @ValidateIf((o) => o.contact_tel1 && o.contact_tel1.trim().length > 0)
+  @IsString({ message: 'Le téléphone principal doit être une chaîne de caractères' })
+  @Matches(/^[0-9+\-\s()]+$/, { 
+    message: 'Le téléphone principal ne peut contenir que des chiffres, +, -, espaces et parenthèses' 
+  })
+  @Length(8, 20, { 
+    message: 'Le téléphone principal doit contenir entre 8 et 20 caractères' 
+  })
   contact_tel1?: string;
 
   @IsOptional()
-  @IsString()
+  @ValidateIf((o) => o.contact_tel2 && o.contact_tel2.trim().length > 0)
+  @IsString({ message: 'Le téléphone secondaire doit être une chaîne de caractères' })
+  @Matches(/^[0-9+\-\s()]+$/, { 
+    message: 'Le téléphone secondaire ne peut contenir que des chiffres, +, -, espaces et parenthèses' 
+  })
+  @Length(8, 20, { 
+    message: 'Le téléphone secondaire doit contenir entre 8 et 20 caractères' 
+  })
   contact_tel2?: string;
 
   @IsOptional()
-  @IsString()
+  @ValidateIf((o) => o.contact_tel3 && o.contact_tel3.trim().length > 0)
+  @IsString({ message: 'Le téléphone tertiaire doit être une chaîne de caractères' })
+  @Matches(/^[0-9+\-\s()]+$/, { 
+    message: 'Le téléphone tertiaire ne peut contenir que des chiffres, +, -, espaces et parenthèses' 
+  })
+  @Length(8, 20, { 
+    message: 'Le téléphone tertiaire doit contenir entre 8 et 20 caractères' 
+  })
   contact_tel3?: string;
 
   @IsOptional()
@@ -114,4 +144,11 @@ export class CreateClientDto {
   @IsOptional()
   @IsString()
   contact_fonction?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['actif', 'inactif', 'suspendu', 'bloque'], {
+    message: 'Le statut doit être: actif, inactif, suspendu, ou bloque',
+  })
+  statut?: string;
 }

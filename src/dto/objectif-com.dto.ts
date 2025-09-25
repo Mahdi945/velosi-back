@@ -2,10 +2,11 @@ import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
 
 export class CreateObjectifComDto {
   @IsNumber()
-  personnelId: number;
+  id_personnel: number;
 
+  @IsOptional()
   @IsString()
-  titre: string;
+  titre?: string;
 
   @IsOptional()
   @IsString()
@@ -39,7 +40,7 @@ export class CreateObjectifComDto {
 export class UpdateObjectifComDto {
   @IsOptional()
   @IsNumber()
-  personnelId?: number;
+  id_personnel?: number;
 
   @IsOptional()
   @IsString()
