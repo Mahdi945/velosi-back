@@ -19,8 +19,8 @@ export class Client {
   @Column({ type: 'varchar', nullable: true })
   interlocuteur: string;
 
-  @Column({ type: 'integer', nullable: true })
-  categorie: number;
+  @Column({ type: 'varchar', nullable: true })
+  categorie: string;
 
   @Column({ type: 'varchar', nullable: true })
   type_client: string;

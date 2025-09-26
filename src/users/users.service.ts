@@ -5,12 +5,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Client } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { ObjectifCom } from '../entities/objectif-com.entity';
+import { ContactClient } from '../entities/contact-client.entity';
 import { KeycloakService } from '../auth/keycloak.service';
 import { EmailService } from '../services/email.service';
 
@@ -30,6 +31,45 @@ export interface CreateClientDto {
   contact_mail1?: string;
   contact_mail2?: string;
   contact_fonction?: string;
+}
+
+export interface UpdateClientDto {
+  nom?: string;
+  interlocuteur?: string;
+  email?: string;
+  tel1?: string;
+  tel2?: string;
+  tel3?: string;
+  fax?: string;
+  mail1?: string;
+  mail2?: string;
+  adresse?: string;
+  code_postal?: string;
+  ville?: string;
+  pays?: string;
+  categorie?: string;
+  type_client?: string;
+  id_fiscal?: string;
+  nature?: string;
+  c_douane?: string;
+  nbr_jour_ech?: number;
+  etat_fiscal?: string;
+  n_auto?: string;
+  date_auto?: string;
+  franchise_sur?: number;
+  date_fin?: string;
+  blocage?: boolean;
+  devise?: string;
+  timbre?: boolean;
+  compte_cpt?: string;
+  sec_activite?: string;
+  charge_com?: string;
+  stop_envoie_solde?: boolean;
+  maj_web?: boolean;
+  d_initial?: number;
+  c_initial?: number;
+  solde?: number;
+  statut?: string;
 }
 
 export interface CreatePersonnelDto {
@@ -61,6 +101,9 @@ export class UsersService {
     private personnelRepository: Repository<Personnel>,
     @InjectRepository(ObjectifCom)
     private objectifComRepository: Repository<ObjectifCom>,
+    @InjectRepository(ContactClient)
+    private contactClientRepository: Repository<ContactClient>,
+    private dataSource: DataSource,
     private keycloakService: KeycloakService,
     private configService: ConfigService,
     private emailService: EmailService,
@@ -271,22 +314,116 @@ export class UsersService {
       }
     }
 
+    // Envoyer l'email de bienvenue avec les informations de connexion
+    if (savedPersonnel.email) {
+      try {
+        await this.emailService.sendPersonnelCredentialsEmail(
+          savedPersonnel.email,
+          savedPersonnel.nom_utilisateur,
+          createPersonnelDto.mot_de_passe, // Mot de passe original
+          `${savedPersonnel.prenom} ${savedPersonnel.nom}`,
+          savedPersonnel.role
+        );
+        this.logger.log(`Email de bienvenue envoyé à ${savedPersonnel.email}`);
+      } catch (error) {
+        this.logger.warn(`Erreur lors de l'envoi de l'email de bienvenue: ${error.message}`);
+        // On continue même si l'email échoue
+      }
+    }
+
     return savedPersonnel;
   }
 
-  async getAllClients(): Promise<Client[]> {
-    return this.clientRepository.find({
-      select: [
-        'id',
-        'nom',
-        'interlocuteur',
-        'adresse',
-        'ville',
-        'pays',
-        'created_at',
-        'blocage',
-      ],
-    });
+  async getAllClients(): Promise<any[]> {
+    try {
+      console.log('🔍 [getAllClients] Début de la récupération des clients...');
+      
+      const clients = await this.clientRepository
+        .createQueryBuilder('client')
+        .leftJoinAndSelect('client.contacts', 'contact')
+        .select([
+          'client.id',
+          'client.nom',
+          'client.interlocuteur',
+          'client.adresse',
+          'client.code_postal',
+          'client.ville',
+          'client.pays',
+          'client.type_client',
+          'client.categorie',
+          'client.id_fiscal',
+          'client.etat_fiscal',
+          'client.devise',
+          'client.solde',
+          'client.statut',
+          'client.photo',
+          'client.created_at',
+          'client.blocage',
+          'client.timbre',
+          'client.stop_envoie_solde',
+          'client.maj_web',
+          'client.d_initial',
+          'client.c_initial',
+          'client.nbr_jour_ech',
+          'client.franchise_sur',
+          'client.date_fin',
+          'client.nature',
+          'client.c_douane',
+          'client.n_auto',
+          'client.date_auto',
+          'client.compte_cpt',
+          'client.sec_activite',
+          'client.charge_com',
+          'client.keycloak_id',
+          'contact.tel1',
+          'contact.tel2',
+          'contact.tel3',
+          'contact.fax',
+          'contact.mail1',
+          'contact.mail2',
+          'contact.fonction'
+        ])
+        .getMany();
+
+      console.log(`📊 [getAllClients] ${clients.length} clients trouvés dans la base`);
+
+      // Mapper les clients avec les informations de contact
+      const mappedClients = clients.map(client => {
+        const contact = client.contacts && client.contacts[0];
+        
+        // Debug: afficher les informations de contact
+        console.log(`🔍 [getAllClients] Client ${client.nom} (ID: ${client.id}):`);
+        console.log(`   - Contacts trouvés: ${client.contacts ? client.contacts.length : 0}`);
+        if (contact) {
+          console.log(`   - Contact: tel1="${contact.tel1}", mail1="${contact.mail1}", fonction="${contact.fonction}"`);
+        } else {
+          console.log(`   - Aucun contact disponible pour ce client`);
+        }
+        
+        const mappedClient = {
+          ...client,
+          // Mapper les champs de contact vers les champs attendus par le frontend
+          email: contact?.mail1 || client.email || '', // Priorité au contact, puis getter email
+          tel1: contact?.tel1 || '', 
+          tel2: contact?.tel2 || '',
+          tel3: contact?.tel3 || '',
+          fax: contact?.fax || '',
+          mail1: contact?.mail1 || client.email || '',
+          mail2: contact?.mail2 || '',
+          fonction: contact?.fonction || '', // Ne pas utiliser le nom du client par défaut
+        };
+        
+        console.log(`✅ [getAllClients] Client mappé: ${client.nom} (ID: ${client.id}) - Email: "${mappedClient.email}" - Tel1: "${mappedClient.tel1}"`);
+        return mappedClient;
+      });
+
+      console.log(`✅ [getAllClients] Retour de ${mappedClients.length} clients mappés`);
+      return mappedClients;
+      
+    } catch (error) {
+      console.error('❌ [getAllClients] Erreur lors de la récupération des clients:', error);
+      throw new Error(`Impossible de récupérer la liste des clients: ${error.message}`);
+    }
   }
 
   async getAllPersonnel(): Promise<Personnel[]> {
@@ -327,6 +464,85 @@ export class UsersService {
     }
 
     return client;
+  }
+
+  async updateClient(id: number, updateClientDto: UpdateClientDto): Promise<Client> {
+    // Vérifier que le client existe
+    const existingClient = await this.clientRepository.findOne({
+      where: { id }
+    });
+
+    if (!existingClient) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    console.log('🔄 [updateClient] Mise à jour du client ID:', id);
+    console.log('🔄 [updateClient] Données reçues:', updateClientDto);
+
+    try {
+      // Séparer les données client des données contact
+      const {
+        // Champs de contact (à traiter séparément)
+        email, tel1, tel2, tel3, fax, mail1, mail2,
+        // Champs client (à mettre à jour dans la table client)
+        ...clientData
+      } = updateClientDto;
+
+      // Nettoyer les données client - convertir les chaînes vides en null pour les champs de date
+      const cleanedClientData = {
+        ...clientData,
+        date_auto: clientData.date_auto === '' ? null : clientData.date_auto,
+        date_fin: clientData.date_fin === '' ? null : clientData.date_fin,
+      };
+
+      console.log('🔄 [updateClient] Données client nettoyées à mettre à jour:', cleanedClientData);
+
+      // Mettre à jour le client
+      await this.clientRepository.update(id, cleanedClientData);
+
+      // Préparer les données de contact
+      const contactData = {
+        tel1: tel1 || null,
+        tel2: tel2 || null,
+        tel3: tel3 || null,
+        fax: fax || null,
+        mail1: email || mail1 || null, // Utiliser email ou mail1
+        mail2: mail2 || null,
+      };
+
+      console.log('🔄 [updateClient] Données contact à mettre à jour:', contactData);
+
+      // Mettre à jour ou créer le contact
+      // Vérifier si un contact existe déjà
+      const existingContact = await this.contactClientRepository.findOne({
+        where: { id_client: id }
+      });
+
+      if (existingContact) {
+        // Mettre à jour le contact existant
+        await this.contactClientRepository.update({ id_client: id }, contactData);
+        console.log('✅ [updateClient] Contact mis à jour');
+      } else {
+        // Créer un nouveau contact
+        await this.contactClientRepository.save({
+          id_client: id,
+          ...contactData
+        });
+        console.log('✅ [updateClient] Contact créé');
+      }
+
+      // Récupérer le client mis à jour
+      const updatedClient = await this.clientRepository.findOne({
+        where: { id }
+      });
+
+      console.log('✅ [updateClient] Client mis à jour avec succès:', updatedClient?.nom);
+      return updatedClient!;
+
+    } catch (error) {
+      console.error('❌ [updateClient] Erreur lors de la mise à jour:', error);
+      throw new Error(`Impossible de mettre à jour le client: ${error.message}`);
+    }
   }
 
   async getPersonnelById(id: number): Promise<Personnel> {
@@ -427,8 +643,30 @@ export class UsersService {
     // Récupérer le personnel mis à jour
     const updatedPersonnel = await this.getPersonnelById(id);
 
-    // Synchroniser avec Keycloak si l'utilisateur a un keycloak_id
-    if (updatedPersonnel.keycloak_id) {
+    // Synchroniser avec Keycloak - créer l'utilisateur s'il n'existe pas
+    if (!updatedPersonnel.keycloak_id) {
+      try {
+        this.logger.log(`Création utilisateur Keycloak lors de mise à jour pour: ${updatedPersonnel.nom_utilisateur}`);
+        
+        const keycloakId = await this.keycloakService.createUser({
+          username: updatedPersonnel.nom_utilisateur,
+          email: updatedPersonnel.email || `${updatedPersonnel.nom_utilisateur}@velosi.com`,
+          firstName: updatedPersonnel.prenom,
+          lastName: updatedPersonnel.nom,
+          enabled: updatedPersonnel.statut === 'actif',
+        });
+        
+        if (keycloakId) {
+          // Mettre à jour l'ID dans la base
+          await this.personnelRepository.update(id, { keycloak_id: keycloakId });
+          // Assigner le rôle
+          await this.keycloakService.updateUserRole(keycloakId, updatedPersonnel.role);
+          this.logger.log(`Utilisateur créé dans Keycloak avec ID: ${keycloakId}`);
+        }
+      } catch (error) {
+        this.logger.warn('Erreur création utilisateur Keycloak:', error.message);
+      }
+    } else {
       try {
         // Mettre à jour les informations de base dans Keycloak
         await this.keycloakService.updateUser(updatedPersonnel.keycloak_id, {
@@ -444,6 +682,31 @@ export class UsersService {
           await this.keycloakService.updateUserRole(updatedPersonnel.keycloak_id, updatedPersonnel.role);
         }
 
+        // Si le statut a changé vers inactif, désactiver dans Keycloak
+        if (updateData.statut && updateData.statut === 'inactif' && existingPersonnel.statut === 'actif') {
+          await this.keycloakService.disableUser(updatedPersonnel.keycloak_id);
+          this.logger.log(`Utilisateur ${updatedPersonnel.nom_utilisateur} désactivé dans Keycloak`);
+        }
+
+        // Si le statut a changé vers actif, activer dans Keycloak
+        if (updateData.statut && updateData.statut === 'actif' && existingPersonnel.statut === 'inactif') {
+          await this.keycloakService.enableUser(updatedPersonnel.keycloak_id);
+          this.logger.log(`Utilisateur ${updatedPersonnel.nom_utilisateur} activé dans Keycloak`);
+        }
+
+        // Vérifier immédiatement que les changements ont été appliqués
+        await new Promise(resolve => setTimeout(resolve, 500)); // Attendre 500ms
+        
+        // TODO: Implémenter getUserById dans KeycloakService
+        // const verificationUser = await this.keycloakService.getUserById(updatedPersonnel.keycloak_id);
+        // if (verificationUser) {
+        //   this.logger.log(`✅ Vérification Keycloak réussie pour ${updatedPersonnel.nom_utilisateur}:`);
+        //   this.logger.log(`   - Email: ${verificationUser.email}`);
+        //   this.logger.log(`   - FirstName: ${verificationUser.firstName}`);
+        //   this.logger.log(`   - LastName: ${verificationUser.lastName}`);
+        //   this.logger.log(`   - Enabled: ${verificationUser.enabled}`);
+        // }
+        
         this.logger.log(`Utilisateur ${updatedPersonnel.nom_utilisateur} synchronisé avec Keycloak`);
       } catch (error) {
         this.logger.warn('Erreur lors de la synchronisation avec Keycloak:', error.message);
@@ -669,5 +932,317 @@ export class UsersService {
         // Ne pas faire échouer la réactivation si l'email échoue
       }
     }
+  }
+
+  async deletePersonnel(id: number, reason?: string): Promise<void> {
+    // Récupérer les informations du personnel avant suppression
+    const personnel = await this.personnelRepository.findOne({ where: { id } });
+    if (!personnel) {
+      throw new NotFoundException('Personnel non trouvé');
+    }
+
+    // Supprimer l'utilisateur de Keycloak d'abord
+    if (personnel.keycloak_id) {
+      try {
+        await this.keycloakService.deleteUser(personnel.keycloak_id);
+        this.logger.log(`Utilisateur ${personnel.nom_utilisateur} supprimé de Keycloak`);
+      } catch (error) {
+        this.logger.warn(`Erreur lors de la suppression dans Keycloak: ${error.message}`);
+        // On continue même si Keycloak échoue
+      }
+    }
+
+    // Envoyer l'email de notification avant suppression
+    if (personnel.email && reason) {
+      try {
+        const fullName = `${personnel.prenom} ${personnel.nom}`;
+        await this.emailService.sendPersonnelDeactivationEmail(
+          personnel.email,
+          fullName,
+          'desactive',
+          `Compte supprimé. Raison: ${reason}`
+        );
+      } catch (error) {
+        console.error('Erreur envoi email suppression:', error);
+        // Ne pas faire échouer la suppression si l'email échoue
+      }
+    }
+
+    // Supprimer les objectifs commerciaux associés
+    try {
+      await this.objectifComRepository.delete({ id_personnel: id });
+      this.logger.log(`Objectifs commerciaux supprimés pour le personnel ${id}`);
+    } catch (error) {
+      this.logger.warn(`Erreur suppression objectifs pour personnel ${id}:`, error.message);
+    }
+
+    // Supprimer le personnel de la base de données
+    const result = await this.personnelRepository.delete(id);
+    if (result.affected === 0) {
+      throw new NotFoundException('Personnel non trouvé pour suppression');
+    }
+
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} supprimé avec succès`);
+  }
+
+  // Obtenir l'activité d'un personnel depuis Keycloak
+  async getPersonnelActivity(id: number): Promise<any> {
+    const personnel = await this.personnelRepository.findOne({ where: { id } });
+    if (!personnel) {
+      throw new NotFoundException('Personnel non trouvé');
+    }
+
+    if (!personnel.keycloak_id) {
+      return {
+        success: false,
+        message: 'Aucun ID Keycloak associé à ce personnel',
+        activity: null,
+      };
+    }
+
+    try {
+      const activity = await this.keycloakService.getUserActivity(personnel.keycloak_id);
+      
+      return {
+        success: true,
+        message: 'Activité récupérée avec succès',
+        activity: {
+          ...activity,
+          personnelInfo: {
+            id: personnel.id,
+            nom: personnel.nom,
+            prenom: personnel.prenom,
+            nom_utilisateur: personnel.nom_utilisateur,
+            statut: personnel.statut,
+            keycloak_id: personnel.keycloak_id,
+          },
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération de l'activité: ${error.message}`);
+      return {
+        success: false,
+        message: 'Erreur lors de la récupération de l\'activité depuis Keycloak',
+        activity: null,
+      };
+    }
+  }
+
+  // Obtenir les sessions actives d'un personnel
+  async getPersonnelSessions(id: number): Promise<any> {
+    const personnel = await this.personnelRepository.findOne({ where: { id } });
+    if (!personnel) {
+      throw new NotFoundException('Personnel non trouvé');
+    }
+
+    if (!personnel.keycloak_id) {
+      return {
+        success: false,
+        message: 'Aucun ID Keycloak associé à ce personnel',
+        sessions: [],
+      };
+    }
+
+    try {
+      const sessions = await this.keycloakService.getUserSessions(personnel.keycloak_id);
+      
+      return {
+        success: true,
+        message: 'Sessions récupérées avec succès',
+        sessions: sessions.map(session => ({
+          id: session.id,
+          start: session.start ? new Date(session.start) : null,
+          lastAccess: session.lastAccess ? new Date(session.lastAccess) : null,
+          clients: session.clients || {},
+          userId: session.userId,
+          username: session.username,
+          ipAddress: session.ipAddress,
+        })),
+        personnelInfo: {
+          id: personnel.id,
+          nom: personnel.nom,
+          prenom: personnel.prenom,
+          nom_utilisateur: personnel.nom_utilisateur,
+          statut: personnel.statut,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération des sessions: ${error.message}`);
+      return {
+        success: false,
+        message: 'Erreur lors de la récupération des sessions depuis Keycloak',
+        sessions: [],
+      };
+    }
+  }
+
+  // Déconnecter toutes les sessions d'un personnel
+  async logoutAllPersonnelSessions(id: number): Promise<any> {
+    const personnel = await this.personnelRepository.findOne({ where: { id } });
+    if (!personnel) {
+      throw new NotFoundException('Personnel non trouvé');
+    }
+
+    if (!personnel.keycloak_id) {
+      return {
+        success: false,
+        message: 'Aucun ID Keycloak associé à ce personnel',
+      };
+    }
+
+    try {
+      const success = await this.keycloakService.logoutAllUserSessions(personnel.keycloak_id);
+      
+      return {
+        success,
+        message: success 
+          ? 'Toutes les sessions ont été fermées avec succès'
+          : 'Erreur lors de la fermeture des sessions',
+      };
+    } catch (error) {
+      this.logger.error(`Erreur lors de la fermeture des sessions: ${error.message}`);
+      return {
+        success: false,
+        message: 'Erreur lors de la fermeture des sessions',
+      };
+    }
+  }
+
+  async deactivateClient(id: number, statut: string, motif: string, notifyByEmail: boolean): Promise<void> {
+    // Récupérer les informations du client avec ses contacts
+    const client = await this.clientRepository.findOne({ 
+      where: { id },
+      relations: ['contacts']
+    });
+    if (!client) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    // Log de débogage pour vérifier les contacts
+    this.logger.log(`🔍 Client trouvé: ${client.nom}, Nombre de contacts: ${client.contacts?.length || 0}`);
+    if (client.contacts && client.contacts.length > 0) {
+      client.contacts.forEach((contact, index) => {
+        this.logger.log(`📧 Contact ${index + 1}: mail1=${contact.mail1}, mail2=${contact.mail2}`);
+      });
+    }
+
+    // Mettre à jour le statut
+    const result = await this.clientRepository.update(id, {
+      statut: statut, // 'desactive' ou 'suspendu'
+    });
+
+    if (result.affected === 0) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    // Envoyer un email de notification (toujours activé)
+    try {
+      // Priorité à mail1 de la table contact_client
+      let emailToUse = null;
+      
+      // 1. Chercher d'abord dans les contacts (priorité)
+      if (client.contacts && client.contacts.length > 0) {
+        const contact = client.contacts[0]; // Prendre le premier contact
+        emailToUse = contact.mail1 || contact.mail2;
+        this.logger.log(`Email trouvé dans contact_client: ${emailToUse} pour client ${client.nom}`);
+      }
+      
+      // 2. Fallback sur client.email si pas d'email dans les contacts
+      if (!emailToUse && client.email) {
+        emailToUse = client.email;
+        this.logger.log(`Email trouvé dans client: ${emailToUse} pour client ${client.nom}`);
+      }
+
+      if (emailToUse) {
+        this.logger.log(`Tentative d'envoi d'email de ${statut} à ${emailToUse} pour client ${client.nom}`);
+        
+        const emailSent = await this.emailService.sendClientDeactivationEmail(
+          emailToUse,
+          client.nom,
+          statut as 'desactive' | 'suspendu',
+          motif
+        );
+        
+        if (emailSent) {
+          this.logger.log(`✅ Email de notification envoyé avec succès à ${emailToUse} pour ${statut} du client ${client.nom}`);
+        } else {
+          this.logger.error(`❌ Échec de l'envoi de l'email de notification à ${emailToUse}`);
+        }
+      } else {
+        this.logger.error(`❌ Aucun email trouvé pour le client ${client.nom} (ID: ${id}) - Vérifiez la table contact_client`);
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email de notification: ${error.message}`, error.stack);
+    }
+
+    this.logger.log(`Client ${client.nom} ${statut === 'desactive' ? 'désactivé' : 'suspendu'}. Motif: ${motif}`);
+  }
+
+  async reactivateClient(id: number, notifyByEmail: boolean): Promise<void> {
+    // Récupérer les informations du client avec ses contacts
+    const client = await this.clientRepository.findOne({ 
+      where: { id },
+      relations: ['contacts']
+    });
+    if (!client) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    // Log de débogage pour vérifier les contacts
+    this.logger.log(`🔍 Client trouvé: ${client.nom}, Nombre de contacts: ${client.contacts?.length || 0}`);
+    if (client.contacts && client.contacts.length > 0) {
+      client.contacts.forEach((contact, index) => {
+        this.logger.log(`📧 Contact ${index + 1}: mail1=${contact.mail1}, mail2=${contact.mail2}`);
+      });
+    }
+
+    // Mettre à jour le statut
+    const result = await this.clientRepository.update(id, {
+      statut: 'actif',
+    });
+
+    if (result.affected === 0) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    // Envoyer un email de notification (toujours activé)
+    try {
+      // Priorité à mail1 de la table contact_client
+      let emailToUse = null;
+      
+      // 1. Chercher d'abord dans les contacts (priorité)
+      if (client.contacts && client.contacts.length > 0) {
+        const contact = client.contacts[0]; // Prendre le premier contact
+        emailToUse = contact.mail1 || contact.mail2;
+        this.logger.log(`Email trouvé dans contact_client: ${emailToUse} pour client ${client.nom}`);
+      }
+      
+      // 2. Fallback sur client.email si pas d'email dans les contacts
+      if (!emailToUse && client.email) {
+        emailToUse = client.email;
+        this.logger.log(`Email trouvé dans client: ${emailToUse} pour client ${client.nom}`);
+      }
+
+      if (emailToUse) {
+        this.logger.log(`Tentative d'envoi d'email de réactivation à ${emailToUse} pour client ${client.nom}`);
+        
+        const emailSent = await this.emailService.sendClientReactivationEmail(
+          emailToUse,
+          client.nom
+        );
+        
+        if (emailSent) {
+          this.logger.log(`✅ Email de réactivation envoyé avec succès à ${emailToUse} pour le client ${client.nom}`);
+        } else {
+          this.logger.error(`❌ Échec de l'envoi de l'email de réactivation à ${emailToUse}`);
+        }
+      } else {
+        this.logger.error(`❌ Aucun email trouvé pour le client ${client.nom} (ID: ${id}) - Vérifiez la table contact_client`);
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de l'envoi de l'email de réactivation: ${error.message}`, error.stack);
+    }
+
+    this.logger.log(`Client ${client.nom} réactivé avec succès`);
   }
 }

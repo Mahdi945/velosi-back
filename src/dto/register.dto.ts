@@ -87,6 +87,42 @@ export class CreateClientDto {
   pays?: string;
 
   @IsString()
+  @IsOptional()
+  code_postal?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['particulier', 'entreprise'], {
+    message: 'Le type de client doit être: particulier ou entreprise',
+  })
+  type_client?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['local', 'etranger'], {
+    message: 'La catégorie doit être: local ou etranger',
+  })
+  categorie?: string;
+
+  @IsString()
+  @IsOptional()
+  id_fiscal?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['assujetti_tva', 'exonere_tva', 'non_assujetti'], {
+    message: 'L\'état fiscal doit être: assujetti_tva, exonere_tva, ou non_assujetti',
+  })
+  etat_fiscal?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['TND', 'EUR', 'USD'], {
+    message: 'La devise doit être: TND, EUR, ou USD',
+  })
+  devise?: string;
+
+  @IsString()
   @IsNotEmpty({ message: 'Le mot de passe est requis' })
   @MinLength(6, {
     message: 'Le mot de passe doit contenir au moins 6 caractères',

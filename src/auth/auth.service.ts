@@ -259,37 +259,53 @@ export class AuthService {
     }
 
     try {
-      // Synchroniser l'utilisateur avec Keycloak seulement si activé et nécessaire
-      if (
-        this.configService.get('KEYCLOAK_ENABLED') === 'true' &&
-        !user.keycloak_id
-      ) {
-        // Keycloak est désactivé pour l'instant
-        // const keycloakId = await this.keycloakService?.createUser?.({
-        //   username: user.userType === 'personnel' ? user.nom_utilisateur : user.nom,
-        //   email: user.email || '',
-        //   firstName: user.userType === 'personnel' ? user.prenom : user.nom,
-        //   lastName: user.userType === 'personnel' ? user.nom : '',
-        //   enabled: true,
-        // });
-        // // Mettre à jour l'ID Keycloak dans la base de données
-        // if (keycloakId) {
-        //   if (user.userType === 'personnel') {
-        //     await this.personnelRepository.update(user.id, { keycloak_id: keycloakId });
-        //   } else {
-        //     await this.clientRepository.update(user.id, { keycloak_id: keycloakId });
-        //   }
-        // }
+      // 1. Créer l'utilisateur dans Keycloak s'il n'existe pas
+      if (!user.keycloak_id) {
+        this.logger.log(`Création utilisateur Keycloak pour: ${user.nom_utilisateur || user.nom}`);
+        
+        const keycloakId = await this.keycloakService.createUser({
+          username: user.userType === 'personnel' ? user.nom_utilisateur : user.nom,
+          email: user.email || `${user.nom_utilisateur || user.nom}@velosi.com`,
+          firstName: user.userType === 'personnel' ? user.prenom : user.nom,
+          lastName: user.userType === 'personnel' ? user.nom : '',
+          enabled: true,
+        });
+        
+        // Mettre à jour l'ID Keycloak dans la base de données
+        if (keycloakId) {
+          if (user.userType === 'personnel') {
+            await this.personnelRepository.update(user.id, { keycloak_id: keycloakId });
+            // Assigner le rôle dans Keycloak
+            await this.keycloakService.updateUserRole(keycloakId, user.role);
+          } else {
+            await this.clientRepository.update(user.id, { keycloak_id: keycloakId });
+            // Assigner le rôle client dans Keycloak
+            await this.keycloakService.updateUserRole(keycloakId, 'client');
+          }
+          user.keycloak_id = keycloakId;
+          this.logger.log(`Utilisateur créé dans Keycloak avec ID: ${keycloakId}`);
+        }
       }
+
+      // 2. Enregistrer l'activité de connexion dans Keycloak
+      if (user.keycloak_id) {
+        try {
+          // Enregistrer l'activité de connexion
+          await this.keycloakService.recordUserActivity(user.keycloak_id, 'login');
+          
+          // Créer une session utilisateur
+          await this.keycloakService.createUserSession(user.keycloak_id);
+          
+          this.logger.log(`Session et activité Keycloak enregistrées pour: ${user.nom_utilisateur || user.nom}`);
+        } catch (sessionError) {
+          this.logger.warn(`Erreur enregistrement session Keycloak: ${sessionError.message}`);
+        }
+      }
+      
     } catch (error) {
-      const keycloakEnabled =
-        this.configService.get('KEYCLOAK_ENABLED', 'true').toLowerCase() ===
-        'true';
-      if (keycloakEnabled) {
-        this.logger.warn(
-          `Erreur lors de la synchronisation Keycloak: ${error.message}`,
-        );
-      }
+      this.logger.warn(
+        `Erreur lors de la synchronisation Keycloak: ${error.message}`,
+      );
       // Ne pas bloquer la connexion si Keycloak n'est pas disponible
     }
   }
@@ -562,6 +578,23 @@ export class AuthService {
     } catch (keycloakError) {
       this.logger.warn('Synchronisation Keycloak échouée pour client:', keycloakError);
       // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
+    }
+
+    // Envoyer l'email avec les informations de connexion
+    try {
+      if (contactEmail && this.emailService) {
+        await this.emailService.sendClientCredentialsEmail(
+          contactEmail,
+          savedClient.nom,
+          createClientDto.mot_de_passe, // Mot de passe original non hashé
+          savedClient.nom,
+          savedClient.interlocuteur
+        );
+        this.logger.log(`Email d'informations client envoyé à ${contactEmail}`);
+      }
+    } catch (emailError) {
+      this.logger.warn('Erreur envoi email informations client:', emailError);
+      // Ne pas faire échouer l'inscription si l'envoi d'email échoue
     }
 
     // Générer les tokens

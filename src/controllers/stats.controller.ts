@@ -39,14 +39,14 @@ export class StatsController {
 
       const financiersCount = await this.personnelRepository.count({
         where: { 
-          role: 'financier',
+          role: 'finance',
           statut: 'actif'
         }
       });
 
       const exploiteursCount = await this.personnelRepository.count({
         where: { 
-          role: 'exploiteur',
+          role: 'exploitation',
           statut: 'actif'
         }
       });
@@ -55,6 +55,15 @@ export class StatsController {
       const totalPersonnelCount = await this.personnelRepository.count({
         where: { statut: 'actif' }
       });
+
+      // Debug: récupérer tous les rôles distincts
+      const allRoles = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .select('personnel.role', 'role')
+        .addSelect('COUNT(*)', 'count')
+        .where('personnel.statut = :statut', { statut: 'actif' })
+        .groupBy('personnel.role')
+        .getRawMany();
 
       const stats: UserStatsResponse = {
         clients: clientsCount,
@@ -67,7 +76,7 @@ export class StatsController {
       return {
         success: true,
         data: stats,
-        message: 'Statistiques récupérées avec succès'
+        message: `Statistiques récupérées avec succès - DEBUG: ${JSON.stringify(allRoles)}`
       };
 
     } catch (error) {
@@ -82,6 +91,34 @@ export class StatsController {
           total_personnel: 0
         },
         message: 'Erreur lors de la récupération des statistiques'
+      };
+    }
+  }
+
+  @Get('debug-roles')
+  async getDebugRoles(): Promise<{ success: boolean; data: any; message: string }> {
+    try {
+      // Récupérer tous les rôles distincts avec leur count
+      const rolesQuery = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .select('personnel.role', 'role')
+        .addSelect('COUNT(*)', 'count')
+        .where('personnel.statut = :statut', { statut: 'actif' })
+        .groupBy('personnel.role')
+        .getRawMany();
+
+      return {
+        success: true,
+        data: rolesQuery,
+        message: 'Rôles debug récupérés avec succès'
+      };
+
+    } catch (error) {
+      console.error('Erreur lors de la récupération des rôles debug:', error);
+      return {
+        success: false,
+        data: [],
+        message: 'Erreur lors de la récupération des rôles debug'
       };
     }
   }

@@ -164,15 +164,84 @@ export class KeycloakService {
     }
   }
 
-  // Authentifier un utilisateur avec username/password via Keycloak
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async authenticateUser(username: string, password: string): Promise<any> {
-    // Grant type 'password' désactivé car il cause des erreurs 401
-    // L'authentification se fait maintenant uniquement via le backend
-    this.logger.debug(
-      `Authentification Keycloak désactivée pour ${username} - utilisation du backend uniquement`,
-    );
-    return null;
+  // Enregistrer une activité de connexion dans Keycloak
+  async recordUserActivity(keycloakId: string, activityType: 'login' | 'logout' = 'login'): Promise<boolean> {
+    try {
+      const token = await this.getAccessToken();
+      
+      // Mettre à jour les attributs utilisateur pour enregistrer l'activité
+      const userUpdateUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      
+      const currentTime = new Date().toISOString();
+      const updateData = {
+        attributes: {
+          lastActivity: [currentTime],
+          lastActivityType: [activityType],
+          lastLoginTime: activityType === 'login' ? [currentTime] : undefined
+        }
+      };
+
+      const response = await fetch(userUpdateUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Activité ${activityType} enregistrée pour utilisateur Keycloak: ${keycloakId}`);
+        return true;
+      } else {
+        const errorData = await response.text();
+        this.logger.warn(`Erreur enregistrement activité ${activityType}: ${errorData}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur enregistrement activité ${activityType}:`, error.message);
+      return false;
+    }
+  }
+
+  // Créer une session utilisateur simulée dans Keycloak
+  async createUserSession(keycloakId: string, userAgent?: string, ipAddress?: string): Promise<boolean> {
+    try {
+      const token = await this.getAccessToken();
+      
+      // Enregistrer les détails de session comme attributs utilisateur
+      const userUpdateUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      
+      const sessionData = {
+        attributes: {
+          currentSessionStart: [new Date().toISOString()],
+          sessionUserAgent: userAgent ? [userAgent] : undefined,
+          sessionIpAddress: ipAddress ? [ipAddress] : undefined,
+          sessionActive: ['true']
+        }
+      };
+
+      const response = await fetch(userUpdateUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(sessionData),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Session créée pour utilisateur Keycloak: ${keycloakId}`);
+        return true;
+      } else {
+        const errorData = await response.text();
+        this.logger.warn(`Erreur création session: ${errorData}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur création session:`, error.message);
+      return false;
+    }
   }
 
   // Rafraîchir un token
@@ -642,4 +711,174 @@ export class KeycloakService {
       return false;
     }
   }
+
+  // Obtenir les sessions actives d'un utilisateur
+  async getUserSessions(keycloakId: string): Promise<any[]> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const sessionsUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}/sessions`;
+
+      const response = await fetch(sessionsUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (response.ok) {
+        const sessions = await response.json();
+        this.logger.debug(`${sessions.length} sessions trouvées pour l'utilisateur ${keycloakId}`);
+        return sessions;
+      } else {
+        this.logger.warn(`Impossible de récupérer les sessions: ${response.status}`);
+        return [];
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération des sessions: ${error.message}`);
+      return [];
+    }
+  }
+
+  // Obtenir les informations d'activité d'un utilisateur
+  async getUserActivity(keycloakId: string): Promise<{
+    lastLoginDate: Date | null;
+    totalSessions: number;
+    activeSessions: number;
+    accountCreated: Date | null;
+  }> {
+    try {
+      const accessToken = await this.getAccessToken();
+      
+      // Récupérer les informations de l'utilisateur
+      const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      const userResponse = await fetch(userUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      let accountCreated: Date | null = null;
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
+        accountCreated = userData.createdTimestamp ? new Date(userData.createdTimestamp) : null;
+      }
+
+      // Récupérer les sessions actives
+      const sessions = await this.getUserSessions(keycloakId);
+      const activeSessions = sessions.length;
+
+      // Calculer la dernière connexion
+      let lastLoginDate: Date | null = null;
+      if (sessions.length > 0) {
+        const timestamps = sessions
+          .map(session => session.lastAccess || session.start)
+          .filter(timestamp => timestamp)
+          .map(timestamp => new Date(timestamp));
+        
+        if (timestamps.length > 0) {
+          lastLoginDate = new Date(Math.max(...timestamps.map(d => d.getTime())));
+        }
+      }
+
+      // Pour obtenir le nombre total de sessions, nous utiliserions normalement
+      // l'API des événements Keycloak, mais celle-ci nécessite une configuration spéciale
+      // Pour l'instant, nous retournons le nombre de sessions actives
+      const totalSessions = activeSessions;
+
+      return {
+        lastLoginDate,
+        totalSessions,
+        activeSessions,
+        accountCreated,
+      };
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération de l'activité utilisateur: ${error.message}`);
+      return {
+        lastLoginDate: null,
+        totalSessions: 0,
+        activeSessions: 0,
+        accountCreated: null,
+      };
+    }
+  }
+
+  // Déconnecter toutes les sessions d'un utilisateur
+  async logoutAllUserSessions(keycloakId: string): Promise<boolean> {
+    try {
+      const accessToken = await this.getAccessToken();
+      const logoutUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}/logout`;
+
+      const response = await fetch(logoutUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (response.ok) {
+        this.logger.log(`Toutes les sessions de l'utilisateur ${keycloakId} ont été fermées`);
+        return true;
+      } else {
+        this.logger.warn(`Échec de la fermeture des sessions: ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la fermeture des sessions: ${error.message}`);
+      return false;
+    }
+  }
+
+  // Obtenir les statistiques d'utilisation du realm
+  async getRealmStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    totalSessions: number;
+  }> {
+    try {
+      const accessToken = await this.getAccessToken();
+      
+      // Récupérer le nombre total d'utilisateurs
+      const usersUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/count`;
+      const usersResponse = await fetch(usersUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      let totalUsers = 0;
+      if (usersResponse.ok) {
+        totalUsers = await usersResponse.json();
+      }
+
+      // Récupérer les statistiques des sessions
+      const sessionsUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/client-session-stats`;
+      const sessionsResponse = await fetch(sessionsUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      let totalSessions = 0;
+      let activeUsers = 0;
+      if (sessionsResponse.ok) {
+        const sessionStats = await sessionsResponse.json();
+        totalSessions = sessionStats.reduce((sum, stat) => sum + (stat.active || 0), 0);
+        activeUsers = sessionStats.length;
+      }
+
+      return {
+        totalUsers,
+        activeUsers,
+        totalSessions,
+      };
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération des statistiques du realm: ${error.message}`);
+      return {
+        totalUsers: 0,
+        activeUsers: 0,
+        totalSessions: 0,
+      };
+    }
+  }
+
+
 }

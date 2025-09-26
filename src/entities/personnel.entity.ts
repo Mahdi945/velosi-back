@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
@@ -39,6 +40,9 @@ export class Personnel {
 
   @CreateDateColumn({ type: 'timestamp' })
   created_at: Date;
+
+  @UpdateDateColumn({ type: 'timestamp' })
+  updated_at: Date;
 
   @Exclude()
   @Column({ type: 'varchar', nullable: false })

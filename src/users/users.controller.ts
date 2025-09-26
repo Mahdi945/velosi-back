@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Put,
+  Delete,
   Param,
   Body,
   UseGuards,
@@ -15,6 +16,7 @@ import {
   UsersService,
   CreateClientDto,
   CreatePersonnelDto,
+  UpdateClientDto,
 } from './users.service';
 import { TokenAuthGuard } from '../auth/token-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -76,11 +78,22 @@ export class UsersController {
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin', 'commercial')
   async getAllClients() {
-    const clients = await this.usersService.getAllClients();
-    return {
-      message: 'Liste des clients récupérée avec succès',
-      clients,
-    };
+    try {
+      const clients = await this.usersService.getAllClients();
+      return {
+        success: true,
+        message: 'Liste des clients récupérée avec succès',
+        data: clients,
+      };
+    } catch (error) {
+      console.error('Erreur lors de la récupération des clients:', error);
+      return {
+        success: false,
+        message: 'Erreur lors de la récupération des clients',
+        error: error.message,
+        data: []
+      };
+    }
   }
 
   @Get('personnel')
@@ -110,6 +123,35 @@ export class UsersController {
       message: 'Client récupéré avec succès',
       client,
     };
+  }
+
+  @Put('clients/:id')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin', 'commercial')
+  async updateClient(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateClientDto: UpdateClientDto,
+    @Request() req: any
+  ) {
+    try {
+      const currentUser = req.user;
+      console.log('🔄 [updateClient] Utilisateur connecté:', currentUser);
+      console.log('🔄 [updateClient] ID client à modifier:', id);
+      
+      const client = await this.usersService.updateClient(id, updateClientDto);
+      return {
+        success: true,
+        message: 'Client modifié avec succès',
+        data: client,
+      };
+    } catch (error) {
+      console.error('❌ [updateClient] Erreur:', error);
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la modification du client',
+        error: error.message,
+      };
+    }
   }
 
   @Get('personnel/:id')
@@ -254,6 +296,81 @@ export class UsersController {
     await this.usersService.updatePersonnelPassword(id, body.newPassword);
     return {
       message: 'Mot de passe mis à jour avec succès',
+      success: true
+    };
+  }
+
+  @Get('personnel/:id/activity')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin')
+  async getPersonnelActivity(@Param('id', ParseIntPipe) id: number) {
+    return await this.usersService.getPersonnelActivity(id);
+  }
+
+  @Get('personnel/:id/sessions')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin')
+  async getPersonnelSessions(@Param('id', ParseIntPipe) id: number) {
+    return await this.usersService.getPersonnelSessions(id);
+  }
+
+  @Post('personnel/:id/logout-all')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin')
+  @HttpCode(HttpStatus.OK)
+  async logoutAllPersonnelSessions(@Param('id', ParseIntPipe) id: number) {
+    return await this.usersService.logoutAllPersonnelSessions(id);
+  }
+
+  @Delete('personnel/:id')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin') // Seuls les administrateurs peuvent supprimer
+  @HttpCode(HttpStatus.OK)
+  async deletePersonnel(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { reason?: string }
+  ) {
+    try {
+      await this.usersService.deletePersonnel(id, body.reason);
+      return {
+        success: true,
+        message: 'Personnel supprimé avec succès'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la suppression du personnel',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('clients/:id/deactivate')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin', 'commercial')
+  @HttpCode(HttpStatus.OK)
+  async deactivateClient(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { statut: string; motif: string; notifyByEmail: boolean }
+  ) {
+    await this.usersService.deactivateClient(id, body.statut, body.motif, body.notifyByEmail);
+    return {
+      message: `Client ${body.statut === 'desactive' ? 'désactivé' : 'suspendu'} avec succès`,
+      success: true
+    };
+  }
+
+  @Post('clients/:id/reactivate')
+  @UseGuards(TokenAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin', 'commercial')
+  @HttpCode(HttpStatus.OK)
+  async reactivateClient(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { notifyByEmail: boolean }
+  ) {
+    await this.usersService.reactivateClient(id, body.notifyByEmail);
+    return {
+      message: 'Client réactivé avec succès',
       success: true
     };
   }

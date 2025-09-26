@@ -27,17 +27,17 @@ async function bootstrap() {
   });
 
   // Configuration pour servir les fichiers statiques (AVANT le préfixe global)
-  app.useStaticAssets(join(__dirname, '..', 'assets'), {
+  app.useStaticAssets(join(process.cwd(), 'assets'), {
     prefix: '/assets/',
   });
 
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads/',
   });
 
   // Ajout d'un log pour déboguer le chemin des uploads
-  console.log('📁 Chemin uploads:', join(__dirname, '..', 'uploads'));
-  console.log('📁 Chemin assets:', join(__dirname, '..', 'assets'));
+  console.log('📁 Chemin uploads:', join(process.cwd(), 'uploads'));
+  console.log('📁 Chemin assets:', join(process.cwd(), 'assets'));
 
   // Middleware pour les cookies
   app.use(cookieParser());
