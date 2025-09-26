@@ -183,8 +183,8 @@ export class CreateClientDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['actif', 'inactif', 'suspendu', 'bloque'], {
-    message: 'Le statut doit être: actif, inactif, suspendu, ou bloque',
+  @IsIn(['actif', 'inactif', 'suspendu'], {
+    message: 'Le statut doit être: actif, inactif, ou suspendu',
   })
   statut?: string;
 }

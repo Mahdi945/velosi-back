@@ -78,8 +78,15 @@ export class AuthService {
     });
 
     if (personnel && (await bcrypt.compare(password, personnel.mot_de_passe))) {
-      if (!personnel.isActive) {
-        throw new UnauthorizedException('Compte désactivé');
+      // Vérifier le statut du personnel
+      if (personnel.statut !== 'actif') {
+        const statusMessages = {
+          'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+          'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+          'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+        };
+        const message = statusMessages[personnel.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+        throw new UnauthorizedException(message);
       }
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { mot_de_passe, ...result } = personnel;
@@ -92,6 +99,17 @@ export class AuthService {
     });
 
     if (client && (await bcrypt.compare(password, client.mot_de_passe))) {
+      // Vérifier le statut du client
+      if (client.statut !== 'actif') {
+        const statusMessages = {
+          'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+          'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+          'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+        };
+        const message = statusMessages[client.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+        throw new UnauthorizedException(message);
+      }
+      // Vérifier également l'ancien champ blocage pour la compatibilité
       if (client.blocage) {
         throw new UnauthorizedException('Compte bloqué');
       }
@@ -106,6 +124,17 @@ export class AuthService {
       if (contactResult && contactResult.client) {
         const clientByEmail = contactResult.client;
         if (await bcrypt.compare(password, clientByEmail.mot_de_passe)) {
+          // Vérifier le statut du client
+          if (clientByEmail.statut !== 'actif') {
+            const statusMessages = {
+              'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+              'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+              'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+            };
+            const message = statusMessages[clientByEmail.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+            throw new UnauthorizedException(message);
+          }
+          // Vérifier également l'ancien champ blocage pour la compatibilité
           if (clientByEmail.blocage) {
             throw new UnauthorizedException('Compte bloqué');
           }
