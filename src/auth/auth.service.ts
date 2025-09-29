@@ -46,6 +46,7 @@ export interface AuthResult {
     userType: 'client' | 'personnel';
     fullName?: string;
     photo?: string; // Ajouter le champ photo
+    first_login?: boolean; // Indiquer si c'est le premier login
   };
   client?: {
     id: number;
@@ -206,6 +207,7 @@ export class AuthService {
         userType: user.userType,
         fullName: user.userType === 'personnel' ? user.fullName : user.nom,
         photo: user.photo || null, // Inclure le champ photo pour les deux types d'utilisateurs
+        first_login: user.first_login || false, // Inclure l'information du premier login
       },
     };
   }
@@ -1287,9 +1289,10 @@ export class AuthService {
         // Hasher le nouveau mot de passe
         const hashedNewPassword = await this.hashPassword(passwordData.newPassword);
 
-        // Mettre à jour le mot de passe
+        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
         await this.personnelRepository.update(personnel.id, {
-          mot_de_passe: hashedNewPassword
+          mot_de_passe: hashedNewPassword,
+          first_login: false
         });
 
         return { message: 'Mot de passe modifié avec succès' };
@@ -1312,15 +1315,110 @@ export class AuthService {
         // Hasher le nouveau mot de passe
         const hashedNewPassword = await this.hashPassword(passwordData.newPassword);
 
-        // Mettre à jour le mot de passe
+        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
         await this.clientRepository.update(client.id, {
-          mot_de_passe: hashedNewPassword
+          mot_de_passe: hashedNewPassword,
+          first_login: false
         });
 
         return { message: 'Mot de passe modifié avec succès' };
       }
     } catch (error) {
       this.logger.error(`Erreur changement mot de passe pour ${userType} ${userId}:`, error);
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Impossible de changer le mot de passe');
+    }
+  }
+
+  /**
+   * Changer le mot de passe lors du premier login (sans vérifier l'ancien mot de passe)
+   */
+  async changePasswordFirstLogin(userId: string, userType: 'personnel' | 'client', newPassword: string): Promise<any> {
+    try {
+      if (userType === 'personnel') {
+        const personnel = await this.personnelRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!personnel) {
+          this.logger.error(`Personnel non trouvé avec l'ID: ${userId}`);
+          throw new UnauthorizedException('Personnel non trouvé');
+        }
+
+        // LOG DETAILLÉ pour debugging
+        this.logger.debug(`Tentative de changement de mot de passe first-login pour personnel:`, {
+          id: personnel.id,
+          nom_utilisateur: personnel.nom_utilisateur,
+          first_login: personnel.first_login,
+          userType
+        });
+
+        // Vérifier que c'est vraiment le premier login
+        if (!personnel.first_login) {
+          this.logger.warn(`Tentative d'utilisation de changePasswordFirstLogin pour personnel non first-login:`, {
+            id: personnel.id,
+            nom_utilisateur: personnel.nom_utilisateur,
+            first_login: personnel.first_login
+          });
+          throw new UnauthorizedException('Cette méthode est réservée au premier login');
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedNewPassword = await this.hashPassword(newPassword);
+
+        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
+        await this.personnelRepository.update(personnel.id, {
+          mot_de_passe: hashedNewPassword,
+          first_login: false
+        });
+
+        this.logger.log(`Mot de passe changé lors du premier login pour le personnel: ${personnel.nom_utilisateur}`);
+        return { message: 'Mot de passe modifié avec succès lors du premier login' };
+
+      } else {
+        const client = await this.clientRepository.findOne({
+          where: { id: parseInt(userId) },
+        });
+
+        if (!client) {
+          this.logger.error(`Client non trouvé avec l'ID: ${userId}`);
+          throw new UnauthorizedException('Client non trouvé');
+        }
+
+        // LOG DETAILLÉ pour debugging
+        this.logger.debug(`Tentative de changement de mot de passe first-login pour client:`, {
+          id: client.id,
+          nom: client.nom,
+          first_login: client.first_login,
+          userType
+        });
+
+        // Vérifier que c'est vraiment le premier login
+        if (!client.first_login) {
+          this.logger.warn(`Tentative d'utilisation de changePasswordFirstLogin pour client non first-login:`, {
+            id: client.id,
+            nom: client.nom,
+            first_login: client.first_login
+          });
+          throw new UnauthorizedException('Cette méthode est réservée au premier login');
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedNewPassword = await this.hashPassword(newPassword);
+
+        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
+        await this.clientRepository.update(client.id, {
+          mot_de_passe: hashedNewPassword,
+          first_login: false
+        });
+
+        this.logger.log(`Mot de passe changé lors du premier login pour le client: ${client.nom}`);
+        return { message: 'Mot de passe modifié avec succès lors du premier login' };
+      }
+    } catch (error) {
+      this.logger.error(`Erreur changement mot de passe premier login pour ${userType} ${userId}:`, error);
       if (error instanceof UnauthorizedException) {
         throw error;
       }

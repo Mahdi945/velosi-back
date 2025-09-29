@@ -91,29 +91,56 @@ export class AuthController {
     const result = await this.authService.login(loginDto);
     console.log('🔑 Nouvelle connexion pour:', result.user.username, 'Rôle:', result.user.role);
 
-    // Définir les cookies sécurisés - Configuration 8 heures pour correspondre à Keycloak
+    // SOLUTION ALTERNATIVE : Cookies NON httpOnly pour permettre l'accès JavaScript
     const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const, // 'lax' au lieu de 'strict' pour permettre les requêtes cross-origin
-      maxAge: 8 * 60 * 60 * 1000, // 8 heures (28800 secondes) - cohérent avec Keycloak
-      path: '/' // Assurer que le cookie est accessible partout
-    };
+      httpOnly: false, // CHANGEMENT CRITIQUE : Permettre l'accès JavaScript
+      secure: false, // false en dev pour localhost
+      sameSite: 'lax' as const, // lax pour les requêtes same-site
+      maxAge: 8 * 60 * 60 * 1000, // 8 heures
+      path: '/' // Accessible partout
+    };    // NOUVELLE SÉCURITÉ : Ajouter l'ID utilisateur dans le nom du cookie pour éviter les conflits
+    const userCookieSuffix = `_${result.user.id}_${result.user.userType}`;
+    console.log('🔐 Création de cookies spécifiques à l\'utilisateur:', userCookieSuffix);
 
     const refreshCookieOptions = {
       ...cookieOptions,
       maxAge: 8 * 60 * 60 * 1000, // 8 heures - même durée pour éviter les incohérences
     };
 
-    // Définir les nouveaux cookies avec les bonnes informations utilisateur
+    // CORRECTION COMPLÈTE : Nettoyer TOUS les anciens cookies utilisateur 
+    if (req.headers.cookie) {
+      const existingCookies = req.headers.cookie.split(';');
+      existingCookies.forEach(cookie => {
+        const cookieName = cookie.split('=')[0].trim();
+        if (cookieName.startsWith('access_token_') || cookieName.startsWith('refresh_token_')) {
+          response.clearCookie(cookieName, cookieOptions);
+          console.log('🧹 Cookie spécifique ancien supprimé:', cookieName);
+        }
+      });
+    }
+
+    // PRIORITÉ : Définir d'abord les cookies génériques (pour compatibilité)
     response.cookie('access_token', result.access_token, cookieOptions);
-    response.cookie(
-      'refresh_token',
-      result.refresh_token,
-      refreshCookieOptions,
-    );
+    response.cookie('refresh_token', result.refresh_token, refreshCookieOptions);
+    
+    // BONUS : Ajouter aussi les cookies spécifiques (pour éviter conflits futurs)
+    response.cookie(`access_token${userCookieSuffix}`, result.access_token, cookieOptions);
+    response.cookie(`refresh_token${userCookieSuffix}`, result.refresh_token, refreshCookieOptions);
 
     console.log('✅ Nouveaux cookies définis pour:', result.user.username);
+    
+    // DEBUG : Vérifier que les cookies sont bien définis
+    console.log('🔍 DEBUG - Cookies définis dans la réponse:', {
+      access_token: 'Cookie générique défini',
+      [`access_token${userCookieSuffix}`]: 'Cookie spécifique défini',
+      cookieOptions: {
+        httpOnly: cookieOptions.httpOnly,
+        secure: cookieOptions.secure,
+        sameSite: cookieOptions.sameSite,
+        maxAge: cookieOptions.maxAge,
+        path: cookieOptions.path
+      }
+    });
 
     return {
       message: 'Connexion réussie',
@@ -182,6 +209,55 @@ export class AuthController {
   async changePassword(@Request() req, @Body() passwordData: { currentPassword: string; newPassword: string }) {
     const result = await this.authService.changeUserPassword(req.user.id, req.user.userType, passwordData);
     return result;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password-first-login')
+  async changePasswordFirstLogin(@Request() req, @Body() passwordData: { newPassword: string }) {
+    const result = await this.authService.changePasswordFirstLogin(req.user.id, req.user.userType, passwordData.newPassword);
+    return result;
+  }
+
+  @Get('debug-cookies')
+  @HttpCode(HttpStatus.OK)
+  debugCookies(@Request() req) {
+    console.log('🍪 DEBUG - Analyse des cookies reçus');
+    const cookieHeader = req.headers.cookie;
+    const cookies = req.cookies || {};
+    
+    console.log('📋 Headers cookies bruts:', cookieHeader);
+    console.log('📦 Cookies parsés:', cookies);
+    
+    return {
+      message: 'Debug des cookies',
+      cookieHeader,
+      parsedCookies: cookies,
+      availableCookies: Object.keys(cookies),
+      hasAccessToken: 'access_token' in cookies,
+      accessTokenPreview: cookies.access_token ? cookies.access_token.substring(0, 50) + '...' : 'Non trouvé'
+    };
+  }
+
+  @Post('invalidate-sessions')
+  @HttpCode(HttpStatus.OK)
+  async invalidateServerSessions(@Res({ passthrough: true }) response: Response) {
+    console.log('🧹 INVALIDATION FORCÉE DES SESSIONS SERVEUR');
+    
+    // Nettoyer TOUS les cookies d'authentification possibles
+    const allCookiePatterns = [
+      'access_token', 'refresh_token', 
+      'access_token_*', 'refresh_token_*', // Cookies spécifiques aux utilisateurs
+      'keycloak_token'
+    ];
+    
+    allCookiePatterns.forEach(pattern => {
+      response.clearCookie(pattern, { path: '/' });
+      response.clearCookie(pattern, { path: '/', domain: 'localhost' });
+      response.clearCookie(pattern, { path: '/', domain: '.localhost' });
+    });
+    
+    console.log('✅ Sessions serveur invalidées pour tous les utilisateurs');
+    return { message: 'Sessions invalidées avec succès' };
   }
 
   @UseGuards(JwtAuthGuard)

@@ -54,6 +54,9 @@ export class Personnel {
   @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
   photo: string; // URL ou chemin vers la photo de profil
 
+  @Column({ type: 'boolean', nullable: false, default: true })
+  first_login: boolean; // Flag pour indiquer si c'est le premier login (mot de passe à changer)
+
   // Relations
   @OneToMany(() => ObjectifCom, (objectif) => objectif.personnel)
   objectifs: ObjectifCom[];

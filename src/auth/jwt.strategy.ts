@@ -25,26 +25,44 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     console.log('JWT Strategy - Extraction depuis cookie (PRIORITÉ 2 - FALLBACK)');
     console.log('JWT Strategy - Cookies disponibles:', Object.keys(req.cookies || {}));
     
-    if (
-      req.cookies &&
-      'access_token' in req.cookies &&
-      req.cookies.access_token.length > 0
-    ) {
-      const token = req.cookies.access_token;
-      console.log('JWT Strategy - Token trouvé dans cookie (preview):', token.substring(0, 50) + '...');
-      
-      // Décoder le token pour voir l'utilisateur
-      try {
-        const jwt = require('jsonwebtoken');
-        const decoded = jwt.decode(token);
-        console.log('JWT Strategy - Utilisateur du cookie (UTILISÉ COMME FALLBACK):', decoded?.username, 'Rôle:', decoded?.role);
-      } catch (e) {
-        console.warn('JWT Strategy - Impossible de décoder le token cookie');
+    if (req.cookies) {
+      // CORRECTION : Chercher d'abord le cookie générique
+      if ('access_token' in req.cookies && req.cookies.access_token.length > 0) {
+        const token = req.cookies.access_token;
+        console.log('JWT Strategy - Token trouvé dans cookie générique (preview):', token.substring(0, 50) + '...');
+        
+        try {
+          const jwt = require('jsonwebtoken');
+          const decoded = jwt.decode(token);
+          console.log('JWT Strategy - Utilisateur du cookie générique (UTILISÉ):', decoded?.username, 'Rôle:', decoded?.role);
+        } catch (e) {
+          console.warn('JWT Strategy - Impossible de décoder le token cookie générique');
+        }
+        
+        return token;
       }
       
-      return token;
+      // NOUVEAU : Chercher les cookies spécifiques aux utilisateurs (access_token_ID_TYPE)
+      const cookieNames = Object.keys(req.cookies);
+      const userSpecificCookie = cookieNames.find(name => name.startsWith('access_token_') && name.includes('_client'));
+      
+      if (userSpecificCookie && req.cookies[userSpecificCookie].length > 0) {
+        const token = req.cookies[userSpecificCookie];
+        console.log('JWT Strategy - Token trouvé dans cookie spécifique:', userSpecificCookie, '(preview):', token.substring(0, 50) + '...');
+        
+        try {
+          const jwt = require('jsonwebtoken');
+          const decoded = jwt.decode(token);
+          console.log('JWT Strategy - Utilisateur du cookie spécifique (UTILISÉ):', decoded?.username, 'Rôle:', decoded?.role);
+        } catch (e) {
+          console.warn('JWT Strategy - Impossible de décoder le token cookie spécifique');
+        }
+        
+        return token;
+      }
     }
-    console.log('JWT Strategy - Aucun token dans cookie');
+    
+    console.log('JWT Strategy - Aucun token dans cookie (générique ou spécifique)');
     return null;
   }
 
@@ -79,6 +97,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       console.error('JWT Strategy - Payload invalide: aucun sub trouvé');
       return null;
     }
+
+    // NOUVELLE SÉCURITÉ : Vérification anti-conflit multi-utilisateur
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    console.log('🔍 Vérification anti-conflit utilisateur:', {
+      userId: payload.sub,
+      username: payload.username,
+      userType: payload.userType,
+      tokenAge: currentTimestamp - (payload.iat || 0),
+      remainingTime: (payload.exp || 0) - currentTimestamp
+    });
 
     // Vérifier l'expiration du token côté application
     const currentTime = Math.floor(Date.now() / 1000);

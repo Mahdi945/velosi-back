@@ -113,6 +113,9 @@ export class Client {
   @Column({ type: 'varchar', nullable: true, default: 'actif' })
   statut: string; // Statut du client (actif, inactif, suspendu, etc.)
 
+  @Column({ type: 'boolean', nullable: false, default: true })
+  first_login: boolean; // Flag pour indiquer si c'est le premier login (mot de passe à changer)
+
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];
