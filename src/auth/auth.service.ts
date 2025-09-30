@@ -324,8 +324,18 @@ export class AuthService {
           // Enregistrer l'activité de connexion
           await this.keycloakService.recordUserActivity(user.keycloak_id, 'login');
           
-          // Créer une session utilisateur
-          await this.keycloakService.createUserSession(user.keycloak_id);
+          // Créer une session utilisateur avec des détails
+          const userAgent = 'ERP-Velosi-Backend';
+          const ipAddress = 'backend-login';
+          await this.keycloakService.createUserSession(user.keycloak_id, userAgent, ipAddress);
+          
+          // Mettre à jour les attributs utilisateur avec les dernières informations
+          await this.keycloakService.updateUser(user.keycloak_id, {
+            email: user.email,
+            firstName: user.prenom || user.firstName,
+            lastName: user.nom || user.lastName,
+            enabled: user.statut === 'actif' || user.statut === undefined
+          });
           
           this.logger.log(`Session et activité Keycloak enregistrées pour: ${user.nom_utilisateur || user.nom}`);
         } catch (sessionError) {
@@ -1295,6 +1305,17 @@ export class AuthService {
           first_login: false
         });
 
+        // Synchroniser avec Keycloak si disponible
+        if (this.keycloakService && personnel.keycloak_id) {
+          try {
+            await this.keycloakService.updateUserPassword(personnel.keycloak_id, passwordData.newPassword);
+            this.logger.log(`Mot de passe synchronisé avec Keycloak pour le personnel: ${personnel.nom_utilisateur}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur synchronisation Keycloak pour ${personnel.nom_utilisateur}:`, keycloakError);
+            // Ne pas faire échouer le changement si Keycloak échoue
+          }
+        }
+
         return { message: 'Mot de passe modifié avec succès' };
 
       } else {
@@ -1320,6 +1341,17 @@ export class AuthService {
           mot_de_passe: hashedNewPassword,
           first_login: false
         });
+
+        // Synchroniser avec Keycloak si disponible
+        if (this.keycloakService && client.keycloak_id) {
+          try {
+            await this.keycloakService.updateUserPassword(client.keycloak_id, passwordData.newPassword);
+            this.logger.log(`Mot de passe synchronisé avec Keycloak pour le client: ${client.nom}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur synchronisation Keycloak pour ${client.nom}:`, keycloakError);
+            // Ne pas faire échouer le changement si Keycloak échoue
+          }
+        }
 
         return { message: 'Mot de passe modifié avec succès' };
       }
@@ -1374,6 +1406,17 @@ export class AuthService {
           first_login: false
         });
 
+        // Synchroniser avec Keycloak si disponible
+        if (this.keycloakService && personnel.keycloak_id) {
+          try {
+            await this.keycloakService.updateUserPassword(personnel.keycloak_id, newPassword);
+            this.logger.log(`Mot de passe first-login synchronisé avec Keycloak pour le personnel: ${personnel.nom_utilisateur}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur synchronisation Keycloak first-login pour ${personnel.nom_utilisateur}:`, keycloakError);
+            // Ne pas faire échouer le changement si Keycloak échoue
+          }
+        }
+
         this.logger.log(`Mot de passe changé lors du premier login pour le personnel: ${personnel.nom_utilisateur}`);
         return { message: 'Mot de passe modifié avec succès lors du premier login' };
 
@@ -1413,6 +1456,17 @@ export class AuthService {
           mot_de_passe: hashedNewPassword,
           first_login: false
         });
+
+        // Synchroniser avec Keycloak si disponible
+        if (this.keycloakService && client.keycloak_id) {
+          try {
+            await this.keycloakService.updateUserPassword(client.keycloak_id, newPassword);
+            this.logger.log(`Mot de passe first-login synchronisé avec Keycloak pour le client: ${client.nom}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur synchronisation Keycloak first-login pour ${client.nom}:`, keycloakError);
+            // Ne pas faire échouer le changement si Keycloak échoue
+          }
+        }
 
         this.logger.log(`Mot de passe changé lors du premier login pour le client: ${client.nom}`);
         return { message: 'Mot de passe modifié avec succès lors du premier login' };

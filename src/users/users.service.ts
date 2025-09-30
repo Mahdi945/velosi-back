@@ -718,6 +718,14 @@ export class UsersService {
   }
 
   async updateClientPassword(id: number, newPassword: string): Promise<void> {
+    // Récupérer l'utilisateur pour obtenir le keycloak_id
+    const client = await this.clientRepository.findOne({ where: { id } });
+    
+    if (!client) {
+      throw new NotFoundException('Client non trouvé');
+    }
+
+    // Mettre à jour le mot de passe en base
     const hashedPassword = await bcrypt.hash(newPassword, 12);
     const result = await this.clientRepository.update(id, {
       mot_de_passe: hashedPassword,
@@ -725,6 +733,17 @@ export class UsersService {
 
     if (result.affected === 0) {
       throw new NotFoundException('Client non trouvé');
+    }
+
+    // Synchroniser avec Keycloak si l'utilisateur a un keycloak_id
+    if (client.keycloak_id) {
+      try {
+        await this.keycloakService.updateUserPassword(client.keycloak_id, newPassword);
+        this.logger.log(`Mot de passe synchronisé avec Keycloak pour le client ${client.nom}`);
+      } catch (error) {
+        this.logger.warn(`Erreur lors de la synchronisation du mot de passe avec Keycloak: ${error.message}`);
+        // On continue même si la synchronisation Keycloak échoue
+      }
     }
   }
 

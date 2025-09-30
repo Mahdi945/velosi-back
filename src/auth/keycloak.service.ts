@@ -169,19 +169,40 @@ export class KeycloakService {
     try {
       const token = await this.getAccessToken();
       
-      // Mettre à jour les attributs utilisateur pour enregistrer l'activité
-      const userUpdateUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      // D'abord, récupérer les attributs existants de l'utilisateur
+      const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      const getUserResponse = await fetch(userUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      let existingAttributes: any = {};
+      let totalSessions = 1;
+
+      if (getUserResponse.ok) {
+        const userData = await getUserResponse.json();
+        existingAttributes = userData.attributes || {};
+        
+        // Incrémenter le compteur de sessions pour les connexions
+        if (activityType === 'login' && existingAttributes.totalSessions) {
+          totalSessions = parseInt(existingAttributes.totalSessions[0], 10) + 1;
+        }
+      }
       
+      // Mettre à jour les attributs utilisateur pour enregistrer l'activité
       const currentTime = new Date().toISOString();
       const updateData = {
         attributes: {
+          ...existingAttributes,
           lastActivity: [currentTime],
           lastActivityType: [activityType],
-          lastLoginTime: activityType === 'login' ? [currentTime] : undefined
+          lastLoginTime: activityType === 'login' ? [currentTime] : existingAttributes.lastLoginTime,
+          totalSessions: activityType === 'login' ? [totalSessions.toString()] : existingAttributes.totalSessions
         }
       };
 
-      const response = await fetch(userUpdateUrl, {
+      const response = await fetch(userUrl, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -191,7 +212,7 @@ export class KeycloakService {
       });
 
       if (response.ok) {
-        this.logger.log(`Activité ${activityType} enregistrée pour utilisateur Keycloak: ${keycloakId}`);
+        this.logger.log(`Activité ${activityType} enregistrée pour utilisateur Keycloak: ${keycloakId} (sessions: ${totalSessions})`);
         return true;
       } else {
         const errorData = await response.text();
@@ -351,6 +372,10 @@ export class KeycloakService {
         if (location) {
           const userId = location.substring(location.lastIndexOf('/') + 1);
           this.logger.debug(`Utilisateur Keycloak créé avec succès: ${userId}`);
+          
+          // Initialiser les attributs d'activité pour le nouvel utilisateur
+          await this.initializeUserActivity(userId);
+          
           return userId;
         }
       } else {
@@ -748,7 +773,7 @@ export class KeycloakService {
     try {
       const accessToken = await this.getAccessToken();
       
-      // Récupérer les informations de l'utilisateur
+      // Récupérer les informations de l'utilisateur avec ses attributs
       const userUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
       const userResponse = await fetch(userUrl, {
         headers: {
@@ -757,18 +782,31 @@ export class KeycloakService {
       });
 
       let accountCreated: Date | null = null;
+      let lastLoginFromAttributes: Date | null = null;
+      let totalSessionsFromAttributes = 0;
+
       if (userResponse.ok) {
         const userData = await userResponse.json();
         accountCreated = userData.createdTimestamp ? new Date(userData.createdTimestamp) : null;
+        
+        // Récupérer les informations d'activité depuis les attributs utilisateur
+        if (userData.attributes) {
+          if (userData.attributes.lastLoginTime && userData.attributes.lastLoginTime[0]) {
+            lastLoginFromAttributes = new Date(userData.attributes.lastLoginTime[0]);
+          }
+          if (userData.attributes.totalSessions && userData.attributes.totalSessions[0]) {
+            totalSessionsFromAttributes = parseInt(userData.attributes.totalSessions[0], 10) || 0;
+          }
+        }
       }
 
       // Récupérer les sessions actives
       const sessions = await this.getUserSessions(keycloakId);
       const activeSessions = sessions.length;
 
-      // Calculer la dernière connexion
-      let lastLoginDate: Date | null = null;
-      if (sessions.length > 0) {
+      // Calculer la dernière connexion - utiliser les attributs ou les sessions
+      let lastLoginDate: Date | null = lastLoginFromAttributes;
+      if (!lastLoginDate && sessions.length > 0) {
         const timestamps = sessions
           .map(session => session.lastAccess || session.start)
           .filter(timestamp => timestamp)
@@ -779,10 +817,8 @@ export class KeycloakService {
         }
       }
 
-      // Pour obtenir le nombre total de sessions, nous utiliserions normalement
-      // l'API des événements Keycloak, mais celle-ci nécessite une configuration spéciale
-      // Pour l'instant, nous retournons le nombre de sessions actives
-      const totalSessions = activeSessions;
+      // Utiliser le compteur des attributs ou le nombre de sessions actives
+      const totalSessions = Math.max(totalSessionsFromAttributes, activeSessions);
 
       return {
         lastLoginDate,
@@ -877,6 +913,43 @@ export class KeycloakService {
         activeUsers: 0,
         totalSessions: 0,
       };
+    }
+  }
+
+  // Initialiser les attributs d'activité d'un utilisateur
+  private async initializeUserActivity(keycloakId: string): Promise<void> {
+    try {
+      const token = await this.getAccessToken();
+      const userUpdateUrl = `${this.keycloakBaseUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
+      
+      const currentTime = new Date().toISOString();
+      const initData = {
+        attributes: {
+          totalSessions: ['0'],
+          accountCreated: [currentTime],
+          lastActivity: [currentTime],
+          lastActivityType: ['created'],
+          sessionActive: ['false']
+        }
+      };
+
+      const response = await fetch(userUpdateUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(initData),
+      });
+
+      if (response.ok) {
+        this.logger.log(`Attributs d'activité initialisés pour l'utilisateur Keycloak: ${keycloakId}`);
+      } else {
+        const errorData = await response.text();
+        this.logger.warn(`Erreur initialisation attributs activité: ${errorData}`);
+      }
+    } catch (error) {
+      this.logger.error(`Erreur initialisation attributs activité:`, error.message);
     }
   }
 

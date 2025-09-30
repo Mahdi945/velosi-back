@@ -16,6 +16,7 @@ import { Personnel } from './entities/personnel.entity';
 import { Client } from './entities/client.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
+import { ContactController } from './contact/contact.controller';
 
 @Module({
   imports: [
@@ -35,7 +36,7 @@ import { EmailService } from './services/email.service';
     FilesModule,
     TypeOrmModule.forFeature([Personnel, Client]), // Pour le SchedulerService et StatsController
   ],
-  controllers: [AppController, DiagnosticController, CleanupController, StatsController],
+  controllers: [AppController, DiagnosticController, CleanupController, StatsController, ContactController],
   providers: [AppService, SchedulerService, KeycloakService, EmailService],
 })
 export class AppModule {}

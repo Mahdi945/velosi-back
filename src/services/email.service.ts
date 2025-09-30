@@ -2580,5 +2580,407 @@ export class EmailService {
     `;
   }
 
+  /**
+   * Envoyer un email de contact avec le template Velosi
+   */
+  async sendContactEmail(contactData: {
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+    enquiryType: string;
+    message: string;
+  }): Promise<boolean> {
+    try {
+      const fullName = `${contactData.firstName} ${contactData.lastName}`;
+      const htmlTemplate = this.getContactEmailTemplate(contactData);
+      
+      // Obtenir le chemin du logo
+      const logoPath = this.getLogoPath();
+      
+      // Configuration de l'email avec pièce jointe du logo si disponible
+      const mailOptions: any = {
+        from: this.configService.get<string>('EMAIL_FROM') || 'no-reply@velosi.com',
+        to: 'velosierp@gmail.com',
+        subject: `Nouveau message de contact - ${contactData.enquiryType}`,
+        html: htmlTemplate,
+        attachments: []
+      };
 
+      // Ajouter le logo comme pièce jointe si disponible
+      if (logoPath) {
+        mailOptions.attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+        });
+      }
+
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email de contact envoyé avec succès à velosierp@gmail.com depuis ${contactData.email}`);
+      return true;
+    } catch (error) {
+      this.logger.error('❌ Erreur lors de l\'envoi de l\'email de contact:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Template HTML pour l'email de contact
+   */
+  private getContactEmailTemplate(contactData: {
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    email: string;
+    enquiryType: string;
+    message: string;
+  }): string {
+    const fullName = `${contactData.firstName} ${contactData.lastName}`;
+    const phoneRow = contactData.phone ? `
+                        <tr>
+                            <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; font-weight: 600; color: #4a5568; width: 140px;">Téléphone :</td>
+                            <td style="padding: 12px 0; border-bottom: 1px solid #e2e8f0; color: #2d3748;">${contactData.phone}</td>
+                        </tr>` : '';
+    
+    const enquiryTypeMap = {
+      'general': 'Demande générale',
+      'technical': 'Problème technique',
+      'bug': 'Signalement de bug',
+      'support': 'Support client',
+      'feature': 'Demande de fonctionnalité'
+    };
+    
+    const enquiryTypeLabel = enquiryTypeMap[contactData.enquiryType] || contactData.enquiryType;
+    const isPriorityHigh = contactData.enquiryType === 'bug' || contactData.enquiryType === 'technical';
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Nouveau message de contact - Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+            
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: #ffffff;
+                border-radius: 20px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                overflow: hidden;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, ${isPriorityHigh ? '#e74c3c 0%, #c0392b 100%' : '#5e72e4 0%, #825ee4 100%'});
+                padding: 40px 30px;
+                text-align: center;
+                color: white;
+                position: relative;
+            }
+            
+            .header::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 100" fill="rgba(255,255,255,0.1)"><polygon points="0,100 0,0 500,100 1000,0 1000,100"/></svg>');
+                background-size: cover;
+            }
+            
+            .logo {
+                position: relative;
+                z-index: 2;
+                margin-bottom: 20px;
+            }
+            
+            .logo-fallback {
+                width: 200px;
+                height: 100px;
+                background: rgba(255,255,255,0.2);
+                border-radius: 12px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 24px;
+                font-weight: bold;
+                color: #fff;
+                margin-bottom: 20px;
+                z-index: 2;
+                position: relative;
+            }
+            
+            .header h1 {
+                font-size: 28px;
+                font-weight: 700;
+                margin: 0;
+                position: relative;
+                z-index: 2;
+            }
+            
+            .header p {
+                font-size: 16px;
+                opacity: 0.9;
+                position: relative;
+                z-index: 2;
+                margin-top: 8px;
+            }
+            
+            .content {
+                padding: 40px 30px;
+            }
+            
+            .greeting {
+                font-size: 18px;
+                margin-bottom: 25px;
+                color: #2d3748;
+                font-weight: 500;
+            }
+            
+            .contact-section {
+                background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+                border-radius: 16px;
+                padding: 30px;
+                margin-bottom: 30px;
+                border: 2px solid #e2e8f0;
+                position: relative;
+            }
+            
+            .contact-section::before {
+                content: '👤';
+                position: absolute;
+                top: -15px;
+                left: 25px;
+                background: #fff;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                border: 2px solid #e2e8f0;
+            }
+            
+            .section-title {
+                font-size: 20px;
+                color: #2d3748;
+                margin-bottom: 20px;
+                font-weight: 600;
+            }
+            
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            
+            .info-table td {
+                padding: 12px 0;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            
+            .info-table td:first-child {
+                font-weight: 600;
+                color: #4a5568;
+                width: 140px;
+            }
+            
+            .info-table td:last-child {
+                color: #2d3748;
+            }
+            
+            .priority-badge {
+                display: inline-block;
+                padding: 6px 16px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                background: ${isPriorityHigh ? 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)' : 'linear-gradient(135deg, #5e72e4 0%, #825ee4 100%)'};
+                color: #fff;
+                box-shadow: 0 4px 12px ${isPriorityHigh ? 'rgba(231, 76, 60, 0.3)' : 'rgba(94, 114, 228, 0.3)'};
+            }
+            
+            .message-section {
+                background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+                border-radius: 16px;
+                padding: 30px;
+                margin-bottom: 30px;
+                border: 2px solid #feb2b2;
+                position: relative;
+            }
+            
+            .message-section::before {
+                content: '💬';
+                position: absolute;
+                top: -15px;
+                left: 25px;
+                background: #fff;
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                border: 2px solid #feb2b2;
+            }
+            
+            .message-content {
+                background: #fff;
+                padding: 25px;
+                border-radius: 12px;
+                color: #2d3748;
+                line-height: 1.8;
+                white-space: pre-wrap;
+                border: 1px solid #e2e8f0;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+                font-size: 15px;
+            }
+            
+            .actions-section {
+                background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+                border-radius: 16px;
+                padding: 25px;
+                margin-bottom: 30px;
+                border: 2px solid #9ae6b4;
+                text-align: center;
+            }
+            
+            .action-button {
+                display: inline-block;
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                color: #fff;
+                padding: 12px 30px;
+                border-radius: 25px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 14px;
+                box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3);
+                transition: all 0.3s ease;
+                margin: 5px 10px;
+            }
+            
+            .footer {
+                background: linear-gradient(135deg, #2d3748 0%, #1a202c 100%);
+                color: #e2e8f0;
+                padding: 30px;
+                text-align: center;
+                font-size: 14px;
+            }
+            
+            .system-info {
+                background: rgba(255,255,255,0.1);
+                padding: 20px;
+                border-radius: 12px;
+                margin-bottom: 20px;
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+            
+            .timestamp {
+                color: #a0aec0;
+                font-size: 13px;
+                margin-top: 10px;
+                font-weight: 500;
+            }
+            
+            .divider {
+                height: 2px;
+                background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+                margin: 25px 0;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                
+                <h1>${isPriorityHigh ? '🚨 ' : '📧 '}Nouveau Message de Contact</h1>
+                <p>Demande reçue depuis le système ERP Velosi</p>
+            </div>
+            
+            <div class="content">
+                <div class="greeting">
+                    Bonjour l'équipe Velosi,<br>
+                    Vous avez reçu ${isPriorityHigh ? 'une demande prioritaire' : 'un nouveau message'} depuis le formulaire de contact.
+                </div>
+                
+                <div class="contact-section">
+                    <h2 class="section-title">Informations du contact</h2>
+                    <table class="info-table">
+                        <tr>
+                            <td>Nom complet :</td>
+                            <td><strong>${fullName}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Email :</td>
+                            <td><a href="mailto:${contactData.email}" style="color: #5e72e4; text-decoration: none; font-weight: 500;">${contactData.email}</a></td>
+                        </tr>
+                        ${phoneRow}
+                        <tr>
+                            <td>Type de demande :</td>
+                            <td><span class="priority-badge">${enquiryTypeLabel}</span></td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div class="divider"></div>
+                
+                <div class="message-section">
+                    <h2 class="section-title">Message reçu</h2>
+                    <div class="message-content">${contactData.message}</div>
+                </div>
+                
+                <div class="actions-section">
+                    <h3 style="color: #2d3748; margin-bottom: 15px; font-size: 18px;">Actions recommandées</h3>
+                    <a href="mailto:${contactData.email}?subject=Re: ${enquiryTypeLabel} - Velosi ERP" class="action-button">
+                        📧 Répondre au client
+                    </a>
+                    ${isPriorityHigh ? '<a href="#" class="action-button" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);">🚨 Traiter en priorité</a>' : ''}
+                </div>
+            </div>
+            
+            <div class="footer">
+                <div class="system-info">
+                    <strong>📧 Système de Contact ERP Velosi</strong>
+                    <div class="timestamp">
+                        Reçu le ${new Date().toLocaleDateString('fr-FR', { 
+                          weekday: 'long',
+                          year: 'numeric', 
+                          month: 'long', 
+                          day: 'numeric', 
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })}
+                    </div>
+                </div>
+                <p style="margin: 15px 0 0 0; font-size: 12px; color: #a0aec0;">
+                    Cet email a été généré automatiquement par le système ERP Velosi.<br>
+                    Répondez directement à l'adresse email du client pour traiter sa demande.
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+  }
 }
