@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
@@ -104,6 +105,9 @@ export class Client {
   @CreateDateColumn({ type: 'timestamp' })
   created_at: Date;
 
+  @UpdateDateColumn({ type: 'timestamp' })
+  updated_at: Date;
+
   @Column({ type: 'uuid', nullable: true })
   keycloak_id: string;
 
@@ -115,6 +119,9 @@ export class Client {
 
   @Column({ type: 'boolean', nullable: false, default: true })
   first_login: boolean; // Flag pour indiquer si c'est le premier login (mot de passe à changer)
+
+  @Column({ type: 'boolean', nullable: false, default: false })
+  auto_delete: boolean; // Flag pour indiquer si le compte doit être supprimé automatiquement après 7 jours de désactivation
 
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)

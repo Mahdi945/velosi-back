@@ -676,8 +676,11 @@ export class EmailService {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Code de récupération Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        </style>
     </head>
-    <body style="font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px; margin: 0;">
+    <body style="font-family: 'Inter', Arial, sans-serif; background: #f0f0f0; padding: 20px; margin: 0;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; padding: 30px;">
             <div style="text-align: center; margin-bottom: 30px;">
                 <img src="${logoUrl}" alt="Logo Velosi" width="200" height="auto" style="display: block; margin: 0 auto;" />

@@ -23,7 +23,19 @@ export class CleanupController {
     const result = await this.schedulerService.manualCleanup();
     return {
       success: true,
-      message: `Nettoyage terminé: ${result.deleted} comptes supprimés`,
+      message: `Nettoyage personnel terminé: ${result.deleted} comptes supprimés`,
+      deleted: result.deleted,
+      errors: result.errors,
+    };
+  }
+
+  @Post('manual-clients')
+  @HttpCode(HttpStatus.OK)
+  async manualClientCleanup() {
+    const result = await this.schedulerService.manualClientCleanup();
+    return {
+      success: true,
+      message: `Nettoyage clients terminé: ${result.deleted} comptes supprimés`,
       deleted: result.deleted,
       errors: result.errors,
     };
@@ -35,8 +47,14 @@ export class CleanupController {
     return {
       success: true,
       message: 'Service de nettoyage automatique actif',
-      schedule: 'Tous les jours à 02:00',
-      warningSchedule: 'Tous les jours à 08:00',
+      personnel: {
+        schedule: 'Tous les jours à 02:00',
+        warningSchedule: 'Tous les jours à 08:00',
+      },
+      clients: {
+        schedule: 'Tous les jours à 03:00',
+        warningSchedule: 'Tous les jours à 09:00',
+      }
     };
   }
 }

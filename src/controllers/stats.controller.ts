@@ -6,6 +6,8 @@ import { Client } from '../entities/client.entity';
 
 export interface UserStatsResponse {
   clients: number;
+  chauffeur: number;
+  administratif: number;
   commercial: number;
   financiers: number;
   exploiteurs: number;
@@ -30,6 +32,20 @@ export class StatsController {
       });
 
       // Compter le personnel par rôle (seulement les actifs)
+      const chauffeurCount = await this.personnelRepository.count({
+        where: { 
+          role: 'chauffeur',
+          statut: 'actif'
+        }
+      });
+
+      const administratifCount = await this.personnelRepository.count({
+        where: { 
+          role: 'administratif',
+          statut: 'actif'
+        }
+      });
+
       const commercialCount = await this.personnelRepository.count({
         where: { 
           role: 'commercial',
@@ -67,6 +83,8 @@ export class StatsController {
 
       const stats: UserStatsResponse = {
         clients: clientsCount,
+        chauffeur: chauffeurCount,
+        administratif: administratifCount,
         commercial: commercialCount,
         financiers: financiersCount,
         exploiteurs: exploiteursCount,
@@ -85,6 +103,8 @@ export class StatsController {
         success: false,
         data: {
           clients: 0,
+          chauffeur: 0,
+          administratif: 0,
           commercial: 0,
           financiers: 0,
           exploiteurs: 0,

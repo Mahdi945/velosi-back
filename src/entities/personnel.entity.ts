@@ -57,6 +57,9 @@ export class Personnel {
   @Column({ type: 'boolean', nullable: false, default: true })
   first_login: boolean; // Flag pour indiquer si c'est le premier login (mot de passe à changer)
 
+  @Column({ type: 'boolean', nullable: false, default: false })
+  auto_delete: boolean; // Flag pour indiquer si le compte doit être supprimé automatiquement après 7 jours de désactivation
+
   // Relations
   @OneToMany(() => ObjectifCom, (objectif) => objectif.personnel)
   objectifs: ObjectifCom[];
