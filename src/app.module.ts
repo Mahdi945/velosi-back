@@ -18,6 +18,8 @@ import { Client } from './entities/client.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { ContactController } from './contact/contact.controller';
+import { LocationModule } from './modules/location.module';
+import { VechatModule } from './vechat/vechat.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { ContactController } from './contact/contact.controller';
     UsersModule,
     CrmModule,
     FilesModule,
+    LocationModule, // Module de géolocalisation
+    VechatModule, // Module VelosiChat
     TypeOrmModule.forFeature([Personnel, Client]), // Pour le SchedulerService et StatsController
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, ContactController],

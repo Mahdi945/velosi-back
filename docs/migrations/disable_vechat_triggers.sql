@@ -1,0 +1,3 @@
+-- Désactiver temporairement les triggers VelosiChat
+DROP TRIGGER IF EXISTS trg_vechat_update_conversation_after_message_insert ON vechat_messages;
+DROP TRIGGER IF EXISTS trg_vechat_update_conversation_after_message_read ON vechat_messages;

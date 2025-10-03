@@ -411,7 +411,12 @@ export class UsersService {
           mail1: contact?.mail1 || client.email || '',
           mail2: contact?.mail2 || '',
           fonction: contact?.fonction || '', // Ne pas utiliser le nom du client par défaut
+          charge_com: client.charge_com // S'assurer que charge_com est présent
         };
+        
+        // Debug spécifique pour charge_com
+        console.log(`   - charge_com BRUT: "${client.charge_com}"`);
+        console.log(`   - charge_com MAPPÉ: "${mappedClient.charge_com}"`);
         
         console.log(`✅ [getAllClients] Client mappé: ${client.nom} (ID: ${client.id}) - Email: "${mappedClient.email}" - Tel1: "${mappedClient.tel1}"`);
         return mappedClient;
@@ -442,6 +447,50 @@ export class UsersService {
         'created_at',
       ],
     });
+  }
+
+  async getClientWithContactData(clientId: number): Promise<any> {
+    console.log(`🔍 [getClientWithContactData] Récupération client ID: ${clientId}`);
+    
+    try {
+      const client = await this.clientRepository
+        .createQueryBuilder('client')
+        .leftJoinAndSelect('client.contacts', 'contact')
+        .where('client.id = :id', { id: clientId })
+        .getOne();
+
+      if (!client) {
+        throw new NotFoundException('Client non trouvé');
+      }
+
+      console.log(`📋 [getClientWithContactData] Client trouvé: ${client.nom}`);
+      console.log(`📋 [getClientWithContactData] Charge commercial: ${client.charge_com}`);
+      console.log(`📋 [getClientWithContactData] Contacts: ${client.contacts?.length || 0}`);
+
+      // Mapper les données comme pour getAllClients
+      const contact = client.contacts && client.contacts[0];
+      
+      const mappedClient = {
+        ...client,
+        // Mapper les champs de contact vers les champs attendus par le frontend
+        email: contact?.mail1 || client.email || '',
+        tel1: contact?.tel1 || '', 
+        tel2: contact?.tel2 || '',
+        tel3: contact?.tel3 || '',
+        fax: contact?.fax || '',
+        mail1: contact?.mail1 || '',
+        mail2: contact?.mail2 || '',
+        fonction: contact?.fonction || '',
+        charge_com: client.charge_com // S'assurer que charge_com est bien inclus
+      };
+
+      console.log(`✅ [getClientWithContactData] Client mappé - charge_com: "${mappedClient.charge_com}"`);
+      return mappedClient;
+
+    } catch (error) {
+      console.error(`❌ [getClientWithContactData] Erreur pour client ${clientId}:`, error);
+      throw error;
+    }
   }
 
   async getClientById(id: number): Promise<Client> {

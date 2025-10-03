@@ -14,6 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import { Client } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
+import { ContactClient } from '../entities/contact-client.entity';
 import { KeycloakService } from './keycloak.service';
 import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
 import { ContactClientService } from '../services/contact-client.service';
@@ -64,6 +65,8 @@ export class AuthService {
     private clientRepository: Repository<Client>,
     @InjectRepository(Personnel)
     private personnelRepository: Repository<Personnel>,
+    @InjectRepository(ContactClient)
+    private contactClientRepository: Repository<ContactClient>,
     private jwtService: JwtService,
     @Optional() private keycloakService: KeycloakService,
     private configService: ConfigService,
@@ -1531,12 +1534,18 @@ export class AuthService {
         }
       }
 
-      // Si pas trouvé, chercher dans la table client
+      // Si pas trouvé, chercher dans la table client via contact_client
       if (!user && email) {
-        user = await this.clientRepository.findOne({
-          where: { email: email }
+        // Les clients n'ont pas de champ email direct, il faut chercher via contact_client
+        const contactClient = await this.contactClientRepository.findOne({
+          where: [
+            { mail1: email },
+            { mail2: email }
+          ],
+          relations: ['client']
         });
-        if (user) {
+        if (contactClient && contactClient.client) {
+          user = contactClient.client;
           userType = 'client';
         }
       }
@@ -1572,11 +1581,27 @@ export class AuthService {
       // Récupérer les rôles depuis Keycloak
       const roles = this.extractRolesFromKeycloak(keycloakUserInfo);
 
+      // Pour les clients, récupérer l'email depuis contact_client
+      let userEmail = user.email || email; // utiliser l'email de Keycloak par défaut
+      if (userType === 'client') {
+        try {
+          const contactClient = await this.contactClientRepository.find({
+            where: { id_client: user.id }
+          });
+          if (contactClient && contactClient.length > 0) {
+            userEmail = contactClient[0].mail1 || contactClient[0].mail2 || email;
+          }
+        } catch (error) {
+          this.logger.warn(`Erreur récupération email contact_client pour ${user.nom}:`, error.message);
+          userEmail = email; // fallback sur l'email Keycloak
+        }
+      }
+
       return {
         user: {
           id: user.id,
           username: userType === 'personnel' ? user.nom_utilisateur : user.nom,
-          email: user.email,
+          email: userEmail,
           userType: userType,
           keycloak_id: user.keycloak_id,
           ...(userType === 'personnel' ? {

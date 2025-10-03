@@ -19,6 +19,7 @@ import {
   UpdateClientDto,
 } from './users.service';
 import { TokenAuthGuard } from '../auth/token-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 
@@ -75,8 +76,8 @@ export class UsersController {
   }
 
   @Get('clients')
-  @UseGuards(TokenAuthGuard, RolesGuard)
-  @Roles('administratif', 'admin', 'commercial')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin', 'commercial', 'client')
   async getAllClients() {
     try {
       const clients = await this.usersService.getAllClients();
@@ -97,6 +98,8 @@ export class UsersController {
   }
 
   @Get('personnel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('administratif', 'admin', 'commercial', 'client')
   async getAllPersonnel() {
     try {
       const personnel = await this.usersService.getAllPersonnel();
@@ -110,6 +113,46 @@ export class UsersController {
         success: false,
         message: 'Erreur lors de la récupération du personnel',
         error: error.message,
+      };
+    }
+  }
+
+  @Get('clients/me')
+  @UseGuards(JwtAuthGuard)
+  async getMyClientData(@Request() req: any) {
+    try {
+      const currentUser = req.user;
+      console.log('👤 [getMyClientData] Utilisateur courant:', currentUser);
+      
+      if (currentUser.userType !== 'client') {
+        return {
+          success: false,
+          message: 'Accès refusé - endpoint réservé aux clients',
+          data: null
+        };
+      }
+
+      const client = await this.usersService.getClientById(currentUser.id);
+      const clientData = await this.usersService.getClientWithContactData(currentUser.id);
+      
+      console.log('📋 [getMyClientData] Données client récupérées:', {
+        id: clientData?.id,
+        nom: clientData?.nom,
+        charge_com: clientData?.charge_com
+      });
+
+      return {
+        success: true,
+        message: 'Données client récupérées avec succès',
+        data: clientData,
+      };
+    } catch (error) {
+      console.error('❌ [getMyClientData] Erreur:', error);
+      return {
+        success: false,
+        message: 'Erreur lors de la récupération des données client',
+        error: error.message,
+        data: null
       };
     }
   }
