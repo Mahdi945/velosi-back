@@ -34,10 +34,10 @@ export class VechatMessage {
 
   @Column({
     type: 'enum',
-    enum: ['text', 'image', 'file', 'video', 'voice'],
+    enum: ['text', 'image', 'file', 'video', 'voice', 'audio', 'location'],
     default: 'text'
   })
-  message_type: 'text' | 'image' | 'file' | 'video' | 'voice';
+  message_type: 'text' | 'image' | 'file' | 'video' | 'voice' | 'audio' | 'location';
 
   @Column({ nullable: true })
   file_url: string;
@@ -80,6 +80,23 @@ export class VechatMessage {
 
   @Column({ type: 'text', nullable: true })
   original_message: string;
+
+  // Champs spécifiques pour la localisation
+  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true })
+  location_latitude: number;
+
+  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true })
+  location_longitude: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  location_accuracy: number;
+
+  // Champs spécifiques pour l'audio
+  @Column({ nullable: true })
+  audio_duration: number; // Durée en secondes
+
+  @Column({ nullable: true })
+  audio_waveform: string; // Données de forme d'onde (JSON)
 
   @CreateDateColumn()
   created_at: Date;

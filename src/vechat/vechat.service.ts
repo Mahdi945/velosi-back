@@ -236,7 +236,17 @@ export class VechatService {
       throw new ForbiddenException('Vous n\'êtes pas participant à cette conversation');
     }
 
+    console.log(`🔄 RESET UNREAD COUNT - État AVANT:`, {
+      conversationId,
+      userId,
+      userType,
+      isParticipant1,
+      currentCount1: conversation.unread_count_participant1,
+      currentCount2: conversation.unread_count_participant2
+    });
+
     // Remettre à zéro le compteur de messages non lus pour l'utilisateur
+    // et garantir qu'il ne peut jamais être négatif
     if (isParticipant1) {
       conversation.unread_count_participant1 = 0;
       console.log(`✅ Compteur participant1 remis à zéro pour conversation ${conversationId}`);
@@ -245,26 +255,73 @@ export class VechatService {
       console.log(`✅ Compteur participant2 remis à zéro pour conversation ${conversationId}`);
     }
 
+    // Mettre à jour le timestamp de modification
+    conversation.updated_at = new Date();
+
     const savedConversation = await this.conversationRepository.save(conversation);
+    
+    console.log(`📊 RESET UNREAD COUNT - État APRÈS sauvegarde:`, {
+      conversationId,
+      savedCount1: savedConversation.unread_count_participant1,
+      savedCount2: savedConversation.unread_count_participant2,
+      updatedAt: savedConversation.updated_at
+    });
     
     // Également marquer tous les messages reçus par cet utilisateur comme lus
     // Nous identifions les messages de cette conversation en utilisant les participants
     const otherParticipantId = isParticipant1 ? conversation.participant2_id : conversation.participant1_id;
     const otherParticipantType = isParticipant1 ? conversation.participant2_type : conversation.participant1_type;
 
-    await this.messageRepository.update(
+    // Compter d'abord combien de messages vont être marqués comme lus
+    const messagesToMarkRead = await this.messageRepository.count({
+      where: {
+        sender_id: otherParticipantId,
+        sender_type: otherParticipantType,
+        receiver_id: userId,
+        receiver_type: userType,
+        is_read: false,
+        is_deleted_by_receiver: false,
+        is_deleted_by_sender: false
+      }
+    });
+
+    console.log(`🔄 MARQUAGE MESSAGES - ${messagesToMarkRead} messages à marquer comme lus`);
+
+    // Marquer tous les messages reçus non lus comme lus
+    const updateResult = await this.messageRepository.update(
       {
         sender_id: otherParticipantId,
         sender_type: otherParticipantType,
         receiver_id: userId,
         receiver_type: userType,
-        is_read: false
+        is_read: false,
+        is_deleted_by_receiver: false,
+        is_deleted_by_sender: false
       },
       {
         is_read: true,
         read_at: new Date()
       }
     );
+
+    console.log(`✅ MARQUAGE MESSAGES - ${updateResult.affected} messages marqués comme lus`);
+
+    // Vérification finale - recompter pour s'assurer que le compteur est à zéro
+    const remainingUnread = await this.messageRepository.count({
+      where: {
+        sender_id: otherParticipantId,
+        sender_type: otherParticipantType,
+        receiver_id: userId,
+        receiver_type: userType,
+        is_read: false,
+        is_deleted_by_receiver: false,
+        is_deleted_by_sender: false
+      }
+    });
+
+    if (remainingUnread > 0) {
+      console.warn(`⚠️ Il reste ${remainingUnread} messages non lus après la remise à zéro!`);
+    }
 
     console.log(`🔄 Compteurs et messages marqués comme lus pour conversation ${conversationId}, utilisateur ${userId}`);
     
@@ -298,6 +355,79 @@ export class VechatService {
     await this.conversationRepository.delete(conversationId);
 
     return { success: true };
+  }
+
+  // Méthode utilitaire pour diagnostiquer et corriger tous les compteurs
+  async diagnoseAndFixAllCounters(): Promise<any> {
+    console.log('🔍 DIAGNOSTIC GLOBAL des compteurs...');
+    
+    const conversations = await this.conversationRepository.find();
+    const results = [];
+    
+    for (const conversation of conversations) {
+      const participant1UnreadActual = await this.messageRepository.count({
+        where: {
+          receiver_id: conversation.participant1_id,
+          receiver_type: conversation.participant1_type,
+          sender_id: conversation.participant2_id,
+          sender_type: conversation.participant2_type,
+          is_read: false,
+          is_deleted_by_receiver: false,
+          is_deleted_by_sender: false,
+        }
+      });
+      
+      const participant2UnreadActual = await this.messageRepository.count({
+        where: {
+          receiver_id: conversation.participant2_id,
+          receiver_type: conversation.participant2_type,
+          sender_id: conversation.participant1_id,
+          sender_type: conversation.participant1_type,
+          is_read: false,
+          is_deleted_by_receiver: false,
+          is_deleted_by_sender: false,
+        }
+      });
+      
+      const needsFix = conversation.unread_count_participant1 !== participant1UnreadActual ||
+                      conversation.unread_count_participant2 !== participant2UnreadActual;
+      
+      if (needsFix) {
+        console.log(`🔧 Correction conversation ${conversation.id}:`, {
+          p1_before: conversation.unread_count_participant1,
+          p1_after: participant1UnreadActual,
+          p2_before: conversation.unread_count_participant2,
+          p2_after: participant2UnreadActual
+        });
+        
+        conversation.unread_count_participant1 = Math.max(0, participant1UnreadActual);
+        conversation.unread_count_participant2 = Math.max(0, participant2UnreadActual);
+        conversation.updated_at = new Date();
+        
+        await this.conversationRepository.save(conversation);
+      }
+      
+      results.push({
+        conversationId: conversation.id,
+        participant1: {
+          before: conversation.unread_count_participant1,
+          actual: participant1UnreadActual,
+          fixed: needsFix
+        },
+        participant2: {
+          before: conversation.unread_count_participant2,
+          actual: participant2UnreadActual,
+          fixed: needsFix
+        }
+      });
+    }
+    
+    console.log('✅ Diagnostic terminé');
+    return {
+      totalConversations: conversations.length,
+      conversationsFixed: results.filter(r => r.participant1.fixed || r.participant2.fixed).length,
+      details: results
+    };
   }
 
   // === Service Messages ===
@@ -356,6 +486,16 @@ export class VechatService {
           sender_avatar: sender?.chat_avatar || sender?.avatar,
           receiver_name: receiver ? `${receiver.prenom} ${receiver.nom}` : null,
           receiver_avatar: receiver?.chat_avatar || receiver?.avatar,
+          // Ajouter les données enrichies pour les messages spéciaux
+          location_data: message.location_latitude && message.location_longitude ? {
+            latitude: message.location_latitude,
+            longitude: message.location_longitude,
+            accuracy: message.location_accuracy
+          } : undefined,
+          audio_metadata: message.message_type === 'audio' ? {
+            duration: message.audio_duration,
+            waveform: message.audio_waveform
+          } : undefined
         };
       })
     );
@@ -379,8 +519,11 @@ export class VechatService {
       throw new NotFoundException('Destinataire non trouvé');
     }
 
-    // Créer le message
-    const message = this.messageRepository.create({
+    // Valider les données spécifiques selon le type de message
+    await this.validateMessageData(createMessageDto);
+
+    // Créer le message avec les nouveaux champs
+    const messageData = {
       sender_id: senderId,
       sender_type: senderType,
       receiver_id: createMessageDto.receiver_id,
@@ -395,7 +538,22 @@ export class VechatService {
       is_read: false,
       is_deleted_by_sender: false,
       is_deleted_by_receiver: false,
-    });
+    };
+
+    // Ajouter les données de localisation si c'est un message de localisation
+    if (createMessageDto.message_type === 'location' && createMessageDto.location_data) {
+      messageData['location_latitude'] = createMessageDto.location_data.latitude;
+      messageData['location_longitude'] = createMessageDto.location_data.longitude;
+      messageData['location_accuracy'] = createMessageDto.location_data.accuracy;
+    }
+
+    // Ajouter les données audio si c'est un message audio
+    if (createMessageDto.message_type === 'audio') {
+      messageData['audio_duration'] = createMessageDto.audio_duration;
+      messageData['audio_waveform'] = createMessageDto.audio_waveform;
+    }
+
+    const message = this.messageRepository.create(messageData);
 
     const savedMessage = await this.messageRepository.save(message);
 
@@ -410,6 +568,16 @@ export class VechatService {
       sender_avatar: sender?.chat_avatar || sender?.avatar,
       receiver_name: receiver ? `${receiver.prenom} ${receiver.nom}` : null,
       receiver_avatar: receiver?.chat_avatar || receiver?.avatar,
+      // Ajouter les données enrichies pour les messages spéciaux
+      location_data: savedMessage.location_latitude && savedMessage.location_longitude ? {
+        latitude: savedMessage.location_latitude,
+        longitude: savedMessage.location_longitude,
+        accuracy: savedMessage.location_accuracy
+      } : undefined,
+      audio_metadata: savedMessage.message_type === 'audio' ? {
+        duration: savedMessage.audio_duration,
+        waveform: savedMessage.audio_waveform
+      } : undefined
     };
 
     // Émettre via WebSocket - géré par le gateway
@@ -559,6 +727,7 @@ export class VechatService {
     }
 
     // Compter les messages non lus pour chaque participant de manière optimisée
+    // Ajouter une condition pour exclure les messages supprimés
     const [unreadCountParticipant1, unreadCountParticipant2] = await Promise.all([
       this.messageRepository.count({
         where: {
@@ -567,6 +736,8 @@ export class VechatService {
           is_read: false,
           sender_id: conversation.participant2_id,
           sender_type: conversation.participant2_type,
+          is_deleted_by_receiver: false, // Exclure les messages supprimés par le destinataire
+          is_deleted_by_sender: false,   // Exclure les messages supprimés par l'expéditeur
         }
       }),
       this.messageRepository.count({
@@ -576,30 +747,46 @@ export class VechatService {
           is_read: false,
           sender_id: conversation.participant1_id,
           sender_type: conversation.participant1_type,
+          is_deleted_by_receiver: false, // Exclure les messages supprimés par le destinataire
+          is_deleted_by_sender: false,   // Exclure les messages supprimés par l'expéditeur
         }
       })
     ]);
 
+    // Garantir que les compteurs ne peuvent jamais être négatifs
+    const validCountParticipant1 = Math.max(0, unreadCountParticipant1);
+    const validCountParticipant2 = Math.max(0, unreadCountParticipant2);
+
     // Seulement mettre à jour si les compteurs ont changé
-    const hasChanged = conversation.unread_count_participant1 !== unreadCountParticipant1 ||
-                      conversation.unread_count_participant2 !== unreadCountParticipant2;
+    const hasChanged = conversation.unread_count_participant1 !== validCountParticipant1 ||
+                      conversation.unread_count_participant2 !== validCountParticipant2;
 
     if (hasChanged) {
-      conversation.unread_count_participant1 = unreadCountParticipant1;
-      conversation.unread_count_participant2 = unreadCountParticipant2;
+      // Log des changements pour débogage
+      console.log('📊 Changement compteurs détecté:', {
+        conversationId,
+        beforeP1: conversation.unread_count_participant1,
+        afterP1: validCountParticipant1,
+        beforeP2: conversation.unread_count_participant2,
+        afterP2: validCountParticipant2
+      });
+
+      conversation.unread_count_participant1 = validCountParticipant1;
+      conversation.unread_count_participant2 = validCountParticipant2;
+      conversation.updated_at = new Date();
 
       await this.conversationRepository.save(conversation);
       
       console.log('✅ Compteurs mis à jour:', {
         conversationId,
-        participant1: unreadCountParticipant1,
-        participant2: unreadCountParticipant2
+        participant1: validCountParticipant1,
+        participant2: validCountParticipant2
       });
     } else {
       console.log('📊 Compteurs déjà à jour:', {
         conversationId,
-        participant1: unreadCountParticipant1,
-        participant2: unreadCountParticipant2
+        participant1: validCountParticipant1,
+        participant2: validCountParticipant2
       });
     }
   }
@@ -692,7 +879,7 @@ export class VechatService {
     file: Express.Multer.File,
     receiverId: number,
     receiverType: 'personnel' | 'client',
-    messageType: 'image' | 'file' | 'video',
+    messageType: 'image' | 'file' | 'video' | 'audio',
     currentUser: any
   ) {
     if (!file) {
@@ -711,6 +898,8 @@ export class VechatService {
       subFolder = 'images';
     } else if (messageType === 'video') {
       subFolder = 'videos';
+    } else if (messageType === 'audio') {
+      subFolder = 'audio';
     }
 
     // Créer le répertoire de stockage si nécessaire
@@ -771,13 +960,67 @@ export class VechatService {
       throw new BadRequestException('Aucun fichier audio fourni');
     }
 
-    // Traiter comme un upload de fichier normal (temporairement comme 'file')
-    const result = await this.uploadFile(file, receiverId, receiverType, 'file', currentUser);
+    // Vérifier que c'est bien un fichier audio
+    if (!file.mimetype.startsWith('audio/')) {
+      throw new BadRequestException('Le fichier doit être un fichier audio');
+    }
 
-    // Ajouter la durée dans le message si nécessaire
-    // (vous pouvez stocker la durée dans un champ séparé ou dans les métadonnées)
+    // Vérifier la taille du fichier (5MB max pour l'audio)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      throw new BadRequestException('Fichier audio trop volumineux (max 5MB)');
+    }
 
-    return result;
+    // Créer le répertoire de stockage audio si nécessaire
+    const uploadDir = path.join(process.cwd(), 'uploads', 'vechat', 'audio');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    // Générer un nom de fichier unique
+    const fileExtension = path.extname(file.originalname);
+    const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+    const filePath = path.join(uploadDir, fileName);
+
+    // Sauvegarder le fichier
+    if (file.buffer) {
+      fs.writeFileSync(filePath, file.buffer);
+    } else if (file.path) {
+      fs.copyFileSync(file.path, filePath);
+      fs.unlinkSync(file.path);
+    } else {
+      throw new BadRequestException('Données de fichier invalides');
+    }
+
+    // URL d'accès au fichier via l'endpoint sécurisé
+    const fileUrl = `http://localhost:3000/api/vechat/files/audio/${fileName}`;
+
+    // Créer le message audio avec les métadonnées
+    const messageData: CreateMessageDto = {
+      receiver_id: receiverId,
+      receiver_type: receiverType,
+      message: `Message vocal (${this.formatDuration(duration)})`,
+      message_type: 'audio',
+      file_url: fileUrl,
+      file_name: file.originalname,
+      file_size: file.size,
+      file_type: file.mimetype,
+      audio_duration: duration,
+    };
+
+    const message = await this.sendMessage(messageData, currentUser);
+
+    return {
+      success: true,
+      message,
+      file_url: fileUrl,
+    };
+  }
+
+  private formatDuration(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
   // === Service Contacts ===
@@ -1291,7 +1534,7 @@ export class VechatService {
   async serveFile(type: string, filename: string, res: any) {
     try {
       // Validation du type
-      const allowedTypes = ['images', 'videos', 'files'];
+      const allowedTypes = ['images', 'videos', 'files', 'audio'];
       if (!allowedTypes.includes(type)) {
         throw new BadRequestException('Type de fichier non autorisé');
       }
@@ -1336,6 +1579,19 @@ export class VechatService {
           default: contentType = 'video/mp4';
         }
       }
+      // Types audio
+      else if (type === 'audio') {
+        switch (ext) {
+          case '.mp3': contentType = 'audio/mpeg'; break;
+          case '.wav': contentType = 'audio/wav'; break;
+          case '.webm': contentType = 'audio/webm'; break;
+          case '.ogg': contentType = 'audio/ogg'; break;
+          case '.m4a': contentType = 'audio/mp4'; break;
+          case '.aac': contentType = 'audio/aac'; break;
+          case '.flac': contentType = 'audio/flac'; break;
+          default: contentType = 'audio/mpeg';
+        }
+      }
       // Autres fichiers
       else {
         switch (ext) {
@@ -1354,8 +1610,8 @@ export class VechatService {
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache 1 an
       
-      // Si c'est une image ou vidéo, permettre l'affichage inline
-      if (type === 'images' || type === 'videos') {
+      // Si c'est une image, vidéo ou audio, permettre l'affichage inline
+      if (type === 'images' || type === 'videos' || type === 'audio') {
         res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
       } else {
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1494,5 +1750,77 @@ export class VechatService {
 
     console.log(`📬 Trouvé ${unreadMessages.length} messages non lus`);
     return unreadMessages;
+  }
+
+  // === Méthodes de validation ===
+
+  private async validateMessageData(createMessageDto: CreateMessageDto): Promise<void> {
+    const messageType = createMessageDto.message_type;
+
+    switch (messageType) {
+      case 'location':
+        this.validateLocationMessage(createMessageDto);
+        break;
+      case 'audio':
+        this.validateAudioMessage(createMessageDto);
+        break;
+      case 'voice': // Support pour l'ancien type 'voice'
+        this.validateAudioMessage(createMessageDto);
+        break;
+      case 'text':
+      case 'image':
+      case 'video':
+      case 'file':
+        // Validation standard déjà en place
+        break;
+      default:
+        throw new BadRequestException(`Type de message non supporté: ${messageType}`);
+    }
+  }
+
+  private validateLocationMessage(createMessageDto: CreateMessageDto): void {
+    if (!createMessageDto.location_data) {
+      throw new BadRequestException('Les données de localisation sont requises pour un message de localisation');
+    }
+
+    const { latitude, longitude, accuracy } = createMessageDto.location_data;
+
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      throw new BadRequestException('Latitude et longitude doivent être des nombres');
+    }
+
+    if (latitude < -90 || latitude > 90) {
+      throw new BadRequestException('Latitude doit être entre -90 et 90');
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      throw new BadRequestException('Longitude doit être entre -180 et 180');
+    }
+
+    if (accuracy !== undefined && (typeof accuracy !== 'number' || accuracy < 0)) {
+      throw new BadRequestException('L\'exactitude doit être un nombre positif');
+    }
+  }
+
+  private validateAudioMessage(createMessageDto: CreateMessageDto): void {
+    if (!createMessageDto.file_url) {
+      throw new BadRequestException('URL du fichier audio requise');
+    }
+
+    if (!createMessageDto.file_type || !createMessageDto.file_type.startsWith('audio/')) {
+      throw new BadRequestException('Type de fichier audio invalide');
+    }
+
+    if (createMessageDto.audio_duration !== undefined) {
+      if (typeof createMessageDto.audio_duration !== 'number' || createMessageDto.audio_duration <= 0) {
+        throw new BadRequestException('Durée audio doit être un nombre positif');
+      }
+    }
+
+    if (createMessageDto.audio_waveform !== undefined) {
+      if (typeof createMessageDto.audio_waveform !== 'string') {
+        throw new BadRequestException('Forme d\'onde audio doit être une chaîne de caractères');
+      }
+    }
   }
 }

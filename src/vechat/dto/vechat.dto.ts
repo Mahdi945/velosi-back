@@ -13,9 +13,9 @@ export class CreateMessageDto {
   @IsOptional()
   message?: string;
 
-  @IsEnum(['text', 'file', 'image', 'voice', 'video'])
+  @IsEnum(['text', 'file', 'image', 'voice', 'video', 'audio', 'location'])
   @IsOptional()
-  message_type?: 'text' | 'file' | 'image' | 'voice' | 'video' = 'text';
+  message_type?: 'text' | 'file' | 'image' | 'voice' | 'video' | 'audio' | 'location' = 'text';
 
   @IsString()
   @IsOptional()
@@ -36,6 +36,37 @@ export class CreateMessageDto {
   @IsNumber()
   @IsOptional()
   reply_to_message_id?: number;
+
+  // Champs pour la localisation
+  @IsNumber()
+  @IsOptional()
+  location_latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  location_longitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  location_accuracy?: number;
+
+  // Champs pour l'audio
+  @IsNumber()
+  @IsOptional()
+  audio_duration?: number;
+
+  @IsString()
+  @IsOptional()
+  audio_waveform?: string;
+
+  // Objet location_data pour faciliter l'envoi depuis le frontend
+  @IsOptional()
+  location_data?: {
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    timestamp?: number;
+  };
 }
 
 export class UpdateMessageDto {
