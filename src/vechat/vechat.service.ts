@@ -246,7 +246,6 @@ export class VechatService {
     });
 
     // Remettre à zéro le compteur de messages non lus pour l'utilisateur
-    // et garantir qu'il ne peut jamais être négatif
     if (isParticipant1) {
       conversation.unread_count_participant1 = 0;
       console.log(`✅ Compteur participant1 remis à zéro pour conversation ${conversationId}`);
@@ -255,16 +254,12 @@ export class VechatService {
       console.log(`✅ Compteur participant2 remis à zéro pour conversation ${conversationId}`);
     }
 
-    // Mettre à jour le timestamp de modification
-    conversation.updated_at = new Date();
-
     const savedConversation = await this.conversationRepository.save(conversation);
     
     console.log(`📊 RESET UNREAD COUNT - État APRÈS sauvegarde:`, {
       conversationId,
       savedCount1: savedConversation.unread_count_participant1,
-      savedCount2: savedConversation.unread_count_participant2,
-      updatedAt: savedConversation.updated_at
+      savedCount2: savedConversation.unread_count_participant2
     });
     
     // Également marquer tous les messages reçus par cet utilisateur comme lus
@@ -279,24 +274,19 @@ export class VechatService {
         sender_type: otherParticipantType,
         receiver_id: userId,
         receiver_type: userType,
-        is_read: false,
-        is_deleted_by_receiver: false,
-        is_deleted_by_sender: false
+        is_read: false
       }
     });
 
     console.log(`🔄 MARQUAGE MESSAGES - ${messagesToMarkRead} messages à marquer comme lus`);
 
-    // Marquer tous les messages reçus non lus comme lus
     const updateResult = await this.messageRepository.update(
       {
         sender_id: otherParticipantId,
         sender_type: otherParticipantType,
         receiver_id: userId,
         receiver_type: userType,
-        is_read: false,
-        is_deleted_by_receiver: false,
-        is_deleted_by_sender: false
+        is_read: false
       },
       {
         is_read: true,
@@ -305,23 +295,6 @@ export class VechatService {
     );
 
     console.log(`✅ MARQUAGE MESSAGES - ${updateResult.affected} messages marqués comme lus`);
-
-    // Vérification finale - recompter pour s'assurer que le compteur est à zéro
-    const remainingUnread = await this.messageRepository.count({
-      where: {
-        sender_id: otherParticipantId,
-        sender_type: otherParticipantType,
-        receiver_id: userId,
-        receiver_type: userType,
-        is_read: false,
-        is_deleted_by_receiver: false,
-        is_deleted_by_sender: false
-      }
-    });
-
-    if (remainingUnread > 0) {
-      console.warn(`⚠️ Il reste ${remainingUnread} messages non lus après la remise à zéro!`);
-    }
 
     console.log(`🔄 Compteurs et messages marqués comme lus pour conversation ${conversationId}, utilisateur ${userId}`);
     
@@ -355,79 +328,6 @@ export class VechatService {
     await this.conversationRepository.delete(conversationId);
 
     return { success: true };
-  }
-
-  // Méthode utilitaire pour diagnostiquer et corriger tous les compteurs
-  async diagnoseAndFixAllCounters(): Promise<any> {
-    console.log('🔍 DIAGNOSTIC GLOBAL des compteurs...');
-    
-    const conversations = await this.conversationRepository.find();
-    const results = [];
-    
-    for (const conversation of conversations) {
-      const participant1UnreadActual = await this.messageRepository.count({
-        where: {
-          receiver_id: conversation.participant1_id,
-          receiver_type: conversation.participant1_type,
-          sender_id: conversation.participant2_id,
-          sender_type: conversation.participant2_type,
-          is_read: false,
-          is_deleted_by_receiver: false,
-          is_deleted_by_sender: false,
-        }
-      });
-      
-      const participant2UnreadActual = await this.messageRepository.count({
-        where: {
-          receiver_id: conversation.participant2_id,
-          receiver_type: conversation.participant2_type,
-          sender_id: conversation.participant1_id,
-          sender_type: conversation.participant1_type,
-          is_read: false,
-          is_deleted_by_receiver: false,
-          is_deleted_by_sender: false,
-        }
-      });
-      
-      const needsFix = conversation.unread_count_participant1 !== participant1UnreadActual ||
-                      conversation.unread_count_participant2 !== participant2UnreadActual;
-      
-      if (needsFix) {
-        console.log(`🔧 Correction conversation ${conversation.id}:`, {
-          p1_before: conversation.unread_count_participant1,
-          p1_after: participant1UnreadActual,
-          p2_before: conversation.unread_count_participant2,
-          p2_after: participant2UnreadActual
-        });
-        
-        conversation.unread_count_participant1 = Math.max(0, participant1UnreadActual);
-        conversation.unread_count_participant2 = Math.max(0, participant2UnreadActual);
-        conversation.updated_at = new Date();
-        
-        await this.conversationRepository.save(conversation);
-      }
-      
-      results.push({
-        conversationId: conversation.id,
-        participant1: {
-          before: conversation.unread_count_participant1,
-          actual: participant1UnreadActual,
-          fixed: needsFix
-        },
-        participant2: {
-          before: conversation.unread_count_participant2,
-          actual: participant2UnreadActual,
-          fixed: needsFix
-        }
-      });
-    }
-    
-    console.log('✅ Diagnostic terminé');
-    return {
-      totalConversations: conversations.length,
-      conversationsFixed: results.filter(r => r.participant1.fixed || r.participant2.fixed).length,
-      details: results
-    };
   }
 
   // === Service Messages ===
@@ -727,7 +627,6 @@ export class VechatService {
     }
 
     // Compter les messages non lus pour chaque participant de manière optimisée
-    // Ajouter une condition pour exclure les messages supprimés
     const [unreadCountParticipant1, unreadCountParticipant2] = await Promise.all([
       this.messageRepository.count({
         where: {
@@ -736,8 +635,6 @@ export class VechatService {
           is_read: false,
           sender_id: conversation.participant2_id,
           sender_type: conversation.participant2_type,
-          is_deleted_by_receiver: false, // Exclure les messages supprimés par le destinataire
-          is_deleted_by_sender: false,   // Exclure les messages supprimés par l'expéditeur
         }
       }),
       this.messageRepository.count({
@@ -747,46 +644,30 @@ export class VechatService {
           is_read: false,
           sender_id: conversation.participant1_id,
           sender_type: conversation.participant1_type,
-          is_deleted_by_receiver: false, // Exclure les messages supprimés par le destinataire
-          is_deleted_by_sender: false,   // Exclure les messages supprimés par l'expéditeur
         }
       })
     ]);
 
-    // Garantir que les compteurs ne peuvent jamais être négatifs
-    const validCountParticipant1 = Math.max(0, unreadCountParticipant1);
-    const validCountParticipant2 = Math.max(0, unreadCountParticipant2);
-
     // Seulement mettre à jour si les compteurs ont changé
-    const hasChanged = conversation.unread_count_participant1 !== validCountParticipant1 ||
-                      conversation.unread_count_participant2 !== validCountParticipant2;
+    const hasChanged = conversation.unread_count_participant1 !== unreadCountParticipant1 ||
+                      conversation.unread_count_participant2 !== unreadCountParticipant2;
 
     if (hasChanged) {
-      // Log des changements pour débogage
-      console.log('📊 Changement compteurs détecté:', {
-        conversationId,
-        beforeP1: conversation.unread_count_participant1,
-        afterP1: validCountParticipant1,
-        beforeP2: conversation.unread_count_participant2,
-        afterP2: validCountParticipant2
-      });
-
-      conversation.unread_count_participant1 = validCountParticipant1;
-      conversation.unread_count_participant2 = validCountParticipant2;
-      conversation.updated_at = new Date();
+      conversation.unread_count_participant1 = unreadCountParticipant1;
+      conversation.unread_count_participant2 = unreadCountParticipant2;
 
       await this.conversationRepository.save(conversation);
       
       console.log('✅ Compteurs mis à jour:', {
         conversationId,
-        participant1: validCountParticipant1,
-        participant2: validCountParticipant2
+        participant1: unreadCountParticipant1,
+        participant2: unreadCountParticipant2
       });
     } else {
       console.log('📊 Compteurs déjà à jour:', {
         conversationId,
-        participant1: validCountParticipant1,
-        participant2: validCountParticipant2
+        participant1: unreadCountParticipant1,
+        participant2: unreadCountParticipant2
       });
     }
   }

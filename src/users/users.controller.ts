@@ -78,9 +78,9 @@ export class UsersController {
   @Get('clients')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('administratif', 'admin', 'commercial', 'client')
-  async getAllClients() {
+  async getAllClients(@Request() req) {
     try {
-      const clients = await this.usersService.getAllClients();
+      const clients = await this.usersService.getAllClients(req.user);
       return {
         success: true,
         message: 'Liste des clients récupérée avec succès',
@@ -112,6 +112,36 @@ export class UsersController {
       return {
         success: false,
         message: 'Erreur lors de la récupération du personnel',
+        error: error.message,
+      };
+    }
+  }
+
+  @Get('personnel/commerciaux')
+  async getCommerciaux() {
+    try {
+      // Endpoint public pour récupérer la liste des commerciaux
+      // Utile pour les listes déroulantes dans les formulaires
+      const personnel = await this.usersService.getPersonnelByRole(['commercial', 'Commercial', 'COMMERCIAL', 'sales']);
+      
+      // Ne retourner que les informations nécessaires (pas de données sensibles)
+      const commerciaux = personnel.map(p => ({
+        id: p.id,
+        nom: p.nom,
+        prenom: p.prenom,
+        nom_utilisateur: p.nom_utilisateur,
+        role: p.role
+      }));
+
+      return {
+        success: true,
+        message: 'Liste des commerciaux récupérée avec succès',
+        data: commerciaux,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la récupération des commerciaux',
         error: error.message,
       };
     }

@@ -1,0 +1,351 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
+import { OpportunityService } from '../../services/crm/opportunity.service';
+import {
+  CreateOpportunityDto,
+  UpdateOpportunityDto,
+  OpportunityQueryDto,
+  ConvertLeadToOpportunityDto,
+} from '../../dto/crm/opportunity.dto';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { RolesGuard } from '../../auth/roles.guard';
+import { Roles } from '../../auth/roles.decorator';
+
+@Controller('crm/opportunities')
+// @UseGuards(JwtAuthGuard, RolesGuard) // Temporairement désactivé pour debug
+export class OpportunityController {
+  constructor(private readonly opportunityService: OpportunityService) {}
+
+  /**
+   * Créer une nouvelle opportunité
+   * POST /api/crm/opportunities
+   */
+  @Post()
+  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
+  async create(@Body() createOpportunityDto: CreateOpportunityDto, @Request() req) {
+    try {
+      // Priorité : utilisateur authentifié > header personnalisé > défaut
+      let userId = 1; // ID par défaut (administratif)
+      
+      if (req.user && req.user.id) {
+        userId = req.user.id;
+        console.log('👤 Utilisateur authentifié pour création opportunité:', { 
+          id: userId, 
+          username: req.user.username, 
+          role: req.user.role 
+        });
+      } else if (req.headers['x-user-id']) {
+        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
+        if (!isNaN(headerUserId) && headerUserId > 0) {
+          userId = headerUserId;
+          console.log('👤 Utilisateur via header pour création opportunité:', { id: userId });
+        }
+      } else {
+        console.warn('⚠️ Pas d\'utilisateur identifié pour création opportunité, utilisation de l\'ID par défaut:', userId);
+      }
+      
+      const opportunity = await this.opportunityService.create(createOpportunityDto, userId);
+      return {
+        success: true,
+        message: 'Opportunité créée avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Obtenir toutes les opportunités avec filtres
+   * GET /api/crm/opportunities
+   */
+  @Get()
+  async findAll(@Query() query: OpportunityQueryDto) {
+    try {
+      const result = await this.opportunityService.findAll(query);
+      return {
+        success: true,
+        message: 'Opportunités récupérées avec succès',
+        data: result.data,
+        total: result.total,
+        totalPages: result.totalPages,
+        currentPage: query.page || 1,
+        pageSize: query.limit || 25,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Obtenir une opportunité par ID
+   * GET /api/crm/opportunities/:id
+   */
+  @Get(':id')
+  async findOne(@Param('id') id: string) {
+    try {
+      const opportunity = await this.opportunityService.findOne(+id);
+      return {
+        success: true,
+        message: 'Opportunité récupérée avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Mettre à jour une opportunité
+   * PATCH /api/crm/opportunities/:id
+   */
+  @Patch(':id')
+  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
+  async update(
+    @Param('id') id: string,
+    @Body() updateOpportunityDto: UpdateOpportunityDto,
+    @Request() req,
+  ) {
+    try {
+      console.log('🔄 Mise à jour opportunité ID:', id);
+      console.log('📝 Données reçues:', updateOpportunityDto);
+      console.log('👤 Utilisateur dans req:', req.user);
+      
+      // Priorité : utilisateur authentifié > header personnalisé > défaut
+      let userId = 1; // ID par défaut (administratif)
+      let userInfo = 'Utilisateur par défaut (ID: 1)';
+      
+      if (req.user && req.user.id) {
+        userId = req.user.id;
+        userInfo = `${req.user.username || 'N/A'} (ID: ${userId}, Rôle: ${req.user.role || 'N/A'})`;
+        console.log('👤 Utilisateur authentifié pour mise à jour opportunité:', { 
+          id: userId, 
+          username: req.user.username, 
+          role: req.user.role 
+        });
+      } else if (req.headers['x-user-id']) {
+        // Header personnalisé pour l'ID utilisateur
+        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
+        if (!isNaN(headerUserId) && headerUserId > 0) {
+          userId = headerUserId;
+          userInfo = `Via header (ID: ${userId})`;
+          console.log('👤 Utilisateur via header pour mise à jour opportunité:', { id: userId });
+        }
+      } else {
+        console.warn('⚠️ Pas d\'utilisateur identifié pour mise à jour opportunité, utilisation de l\'ID par défaut:', userId);
+      }
+      
+      const opportunity = await this.opportunityService.update(+id, updateOpportunityDto, userId);
+      return {
+        success: true,
+        message: 'Opportunité mise à jour avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Supprimer une opportunité
+   * DELETE /api/crm/opportunities/:id
+   */
+  @Delete(':id')
+  @Roles('admin')
+  async remove(@Param('id') id: string) {
+    try {
+      await this.opportunityService.remove(+id);
+      return {
+        success: true,
+        message: 'Opportunité supprimée avec succès',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Convertir un prospect en opportunité
+   * POST /api/crm/opportunities/convert-from-lead/:leadId
+   */
+  @Post('convert-from-lead/:leadId')
+  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
+  async convertFromLead(
+    @Param('leadId') leadId: string,
+    @Body() convertDto: ConvertLeadToOpportunityDto,
+    @Request() req,
+  ) {
+    try {
+      // Priorité : utilisateur authentifié > header personnalisé > défaut
+      let userId = 1; // ID par défaut (administratif)
+      let userInfo = 'Utilisateur par défaut (ID: 1)';
+      
+      if (req.user && req.user.id) {
+        // Utilisateur authentifié via JWT
+        userId = req.user.id;
+        userInfo = `${req.user.username || 'N/A'} (ID: ${userId}, Rôle: ${req.user.role || 'N/A'})`;
+        console.log('👤 Utilisateur authentifié pour conversion:', { 
+          id: userId, 
+          username: req.user.username, 
+          role: req.user.role 
+        });
+      } else if (req.headers['x-user-id']) {
+        // Header personnalisé pour l'ID utilisateur
+        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
+        if (!isNaN(headerUserId) && headerUserId > 0) {
+          userId = headerUserId;
+          userInfo = `Via header (ID: ${userId})`;
+          console.log('👤 Utilisateur via header pour conversion:', { id: userId });
+        }
+      } else {
+        console.warn('⚠️ Pas d\'utilisateur identifié, utilisation de l\'ID par défaut:', userId);
+      }
+      
+      const opportunity = await this.opportunityService.convertFromLead(+leadId, convertDto, userId);
+      return {
+        success: true,
+        message: 'Prospect converti en opportunité avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Obtenir les statistiques des opportunités
+   * GET /api/crm/opportunities/stats
+   */
+  @Get('stats/summary')
+  async getStats(@Query('userId') userId?: string, @Request() req?) {
+    try {
+      // Utiliser l'ID fourni ou celui de l'utilisateur authentifié
+      const targetUserId = userId ? +userId : (req.user?.id || null);
+      const stats = await this.opportunityService.getStats(targetUserId);
+      return {
+        success: true,
+        message: 'Statistiques récupérées avec succès',
+        data: stats,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Changer le stage d'une opportunité
+   * PATCH /api/crm/opportunities/:id/stage
+   */
+  @Patch(':id/stage')
+  @Roles('commercial', 'admin')
+  async changeStage(
+    @Param('id') id: string,
+    @Body() body: { stage: string; lostReason?: string; lostToCompetitor?: string },
+    @Request() req,
+  ) {
+    try {
+      // Vérifier que l'utilisateur est authentifié
+      if (!req.user || !req.user.id) {
+        return {
+          success: false,
+          message: 'Utilisateur non authentifié',
+          error: 'UNAUTHORIZED',
+        };
+      }
+      
+      const updateData: UpdateOpportunityDto = { stage: body.stage as any };
+      
+      if (body.lostReason) {
+        updateData.lostReason = body.lostReason;
+      }
+      
+      if (body.lostToCompetitor) {
+        updateData.lostToCompetitor = body.lostToCompetitor;
+      }
+
+      const opportunity = await this.opportunityService.update(+id, updateData, req.user.id);
+      return {
+        success: true,
+        message: 'Stage de l\'opportunité mis à jour avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Obtenir les opportunités par stage (pour kanban)
+   * GET /api/crm/opportunities/by-stage
+   */
+  @Get('by-stage/all')
+  async getByStage(@Query('assignedToId') assignedToId?: string) {
+    try {
+      const stages = ['prospecting', 'qualification', 'needs_analysis', 'proposal', 'negotiation'];
+      const result = {};
+
+      for (const stage of stages) {
+        const query: OpportunityQueryDto = { stage: stage as any };
+        if (assignedToId) {
+          query.assignedToId = +assignedToId;
+        }
+        const stageData = await this.opportunityService.findAll(query);
+        result[stage] = stageData.data;
+      }
+
+      return {
+        success: true,
+        message: 'Opportunités par stage récupérées avec succès',
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+}

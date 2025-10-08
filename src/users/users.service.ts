@@ -202,10 +202,13 @@ export class UsersService {
   async createPersonnel(
     createPersonnelDto: CreatePersonnelDto,
   ): Promise<Personnel> {
-    // Vérifier si le personnel existe déjà
-    const existingPersonnel = await this.personnelRepository.findOne({
-      where: { nom_utilisateur: createPersonnelDto.nom_utilisateur },
-    });
+    // Vérifier si le personnel existe déjà - insensible à la casse
+    const existingPersonnel = await this.personnelRepository
+      .createQueryBuilder('personnel')
+      .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { 
+        username: createPersonnelDto.nom_utilisateur 
+      })
+      .getOne();
 
     if (existingPersonnel) {
       throw new ConflictException(
@@ -334,11 +337,12 @@ export class UsersService {
     return savedPersonnel;
   }
 
-  async getAllClients(): Promise<any[]> {
+  async getAllClients(user?: any): Promise<any[]> {
     try {
       console.log('🔍 [getAllClients] Début de la récupération des clients...');
+      console.log('👤 [getAllClients] Utilisateur connecté:', user?.username || user?.nom_utilisateur, 'Rôle:', user?.role);
       
-      const clients = await this.clientRepository
+      let query = this.clientRepository
         .createQueryBuilder('client')
         .leftJoinAndSelect('client.contacts', 'contact')
         .select([
@@ -382,8 +386,18 @@ export class UsersService {
           'contact.mail1',
           'contact.mail2',
           'contact.fonction'
-        ])
-        .getMany();
+        ]);
+
+      // Si l'utilisateur est commercial, filtrer par charge_com
+      if (user && user.role === 'commercial') {
+        const username = user.username || user.nom_utilisateur;
+        console.log('🔒 [getAllClients] Filtrage commercial - charge_com:', username);
+        query = query.where('client.charge_com = :chargecom', { 
+          chargecom: username 
+        });
+      }
+
+      const clients = await query.getMany();
 
       console.log(`📊 [getAllClients] ${clients.length} clients trouvés dans la base`);
 
@@ -445,6 +459,22 @@ export class UsersService {
         'photo',
         'genre',
         'created_at',
+      ],
+    });
+  }
+
+  async getPersonnelByRole(roles: string[]): Promise<Personnel[]> {
+    return this.personnelRepository.find({
+      where: roles.map(role => ({ role })),
+      select: [
+        'id',
+        'nom',
+        'prenom',
+        'nom_utilisateur',
+        'role',
+        'telephone',
+        'email',
+        'statut',
       ],
     });
   }
@@ -627,11 +657,14 @@ export class UsersService {
       throw new NotFoundException('Personnel non trouvé');
     }
 
-    // Vérifier l'unicité du nom d'utilisateur si modifié
-    if (updateData.nom_utilisateur && updateData.nom_utilisateur !== existingPersonnel.nom_utilisateur) {
-      const existingUser = await this.personnelRepository.findOne({
-        where: { nom_utilisateur: updateData.nom_utilisateur }
-      });
+    // Vérifier l'unicité du nom d'utilisateur si modifié - insensible à la casse
+    if (updateData.nom_utilisateur && updateData.nom_utilisateur.toLowerCase() !== existingPersonnel.nom_utilisateur.toLowerCase()) {
+      const existingUser = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { 
+          username: updateData.nom_utilisateur 
+        })
+        .getOne();
 
       if (existingUser) {
         throw new ConflictException('Ce nom d\'utilisateur est déjà utilisé');

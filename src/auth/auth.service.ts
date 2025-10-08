@@ -76,10 +76,12 @@ export class AuthService {
   ) {}
 
   async validateUser(username: string, password: string): Promise<any> {
-    // Rechercher d'abord dans le personnel (par nom_utilisateur OU email)
-    const personnel = await this.personnelRepository.findOne({
-      where: [{ nom_utilisateur: username }, { email: username }],
-    });
+    // Rechercher d'abord dans le personnel (par nom_utilisateur OU email) - insensible à la casse
+    const personnel = await this.personnelRepository
+      .createQueryBuilder('personnel')
+      .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { username })
+      .orWhere('LOWER(personnel.email) = LOWER(:username)', { username })
+      .getOne();
 
     if (personnel && (await bcrypt.compare(password, personnel.mot_de_passe))) {
       // Vérifier le statut du personnel
@@ -97,10 +99,12 @@ export class AuthService {
       return { ...result, userType: 'personnel' };
     }
 
-    // Rechercher ensuite dans les clients (par nom OU interlocuteur)
-    const client = await this.clientRepository.findOne({
-      where: [{ nom: username }, { interlocuteur: username }],
-    });
+    // Rechercher ensuite dans les clients (par nom OU interlocuteur) - insensible à la casse
+    const client = await this.clientRepository
+      .createQueryBuilder('client')
+      .where('LOWER(client.nom) = LOWER(:username)', { username })
+      .orWhere('LOWER(client.interlocuteur) = LOWER(:username)', { username })
+      .getOne();
 
     if (client && (await bcrypt.compare(password, client.mot_de_passe))) {
       // Vérifier le statut du client
@@ -426,10 +430,13 @@ export class AuthService {
   async registerPersonnel(
     createPersonnelDto: CreatePersonnelDto,
   ): Promise<AuthResult> {
-    // Vérifier si l'utilisateur existe déjà
-    const existingPersonnel = await this.personnelRepository.findOne({
-      where: { nom_utilisateur: createPersonnelDto.nom_utilisateur },
-    });
+    // Vérifier si l'utilisateur existe déjà - insensible à la casse
+    const existingPersonnel = await this.personnelRepository
+      .createQueryBuilder('personnel')
+      .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { 
+        username: createPersonnelDto.nom_utilisateur 
+      })
+      .getOne();
 
     if (existingPersonnel) {
       throw new ConflictException("Ce nom d'utilisateur existe déjà");
@@ -1550,11 +1557,12 @@ export class AuthService {
         }
       }
 
-      // Si pas trouvé par email, chercher par nom d'utilisateur
+      // Si pas trouvé par email, chercher par nom d'utilisateur - insensible à la casse
       if (!user && username) {
-        user = await this.personnelRepository.findOne({
-          where: { nom_utilisateur: username }
-        });
+        user = await this.personnelRepository
+          .createQueryBuilder('personnel')
+          .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { username })
+          .getOne();
         if (user) {
           userType = 'personnel';
         }

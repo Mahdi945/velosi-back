@@ -23,6 +23,7 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
+      'x-user-id', // Header personnalisé pour l'ID utilisateur
     ],
   });
 

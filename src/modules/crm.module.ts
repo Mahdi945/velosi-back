@@ -11,10 +11,14 @@ import { ContactClient } from '../entities/contact-client.entity';
 import { ObjectifCom } from '../entities/objectif-com.entity';
 import { Client } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
+import { LeadModule } from './crm/lead.module';
+import { OpportunityModule } from './crm/opportunity.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ContactClient, ObjectifCom, Client, Personnel]),
+    LeadModule, // Module pour la gestion des prospects/leads
+    OpportunityModule, // Module pour la gestion des opportunités
   ],
   controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],

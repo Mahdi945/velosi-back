@@ -12,7 +12,6 @@ import {
   UseInterceptors,
   UploadedFile,
   Res,
-  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
@@ -336,18 +335,6 @@ export class VechatController {
       userType,
       req.user,
     );
-  }
-
-  // === Diagnostic et maintenance ===
-
-  @Get('admin/diagnose-counters')
-  async diagnoseCounters(@Request() req: any) {
-    // Vérifier que l'utilisateur a les droits admin
-    if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
-      throw new ForbiddenException('Accès réservé aux administrateurs');
-    }
-    
-    return this.vechatService.diagnoseAndFixAllCounters();
   }
 
   // === Serving Files ===
