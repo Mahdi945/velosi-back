@@ -84,6 +84,7 @@ export class OpportunityService {
       .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
       .leftJoinAndSelect('opportunity.lead', 'lead')
       .leftJoinAndSelect('opportunity.client', 'client')
+      .leftJoinAndSelect('client.contacts', 'contacts')
       .leftJoinAndSelect('opportunity.createdBy', 'createdBy');
 
     // Appliquer les filtres
@@ -119,7 +120,7 @@ export class OpportunityService {
   async findOne(id: number): Promise<Opportunity> {
     const opportunity = await this.opportunityRepository.findOne({
       where: { id },
-      relations: ['assignedTo', 'lead', 'client', 'createdBy', 'updatedBy'],
+      relations: ['assignedTo', 'lead', 'client', 'client.contacts', 'createdBy', 'updatedBy'],
     });
 
     if (!opportunity) {
