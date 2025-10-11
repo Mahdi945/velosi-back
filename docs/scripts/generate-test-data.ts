@@ -3,7 +3,7 @@ import { AppModule } from '../../src/app.module';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Personnel } from '../../src/entities/personnel.entity';
-import { Client } from '../../src/entities/client.entity';
+import { Client, EtatFiscal } from '../../src/entities/client.entity';
 import { ContactClient } from '../../src/entities/contact-client.entity';
 import { ObjectifCom } from '../../src/entities/objectif-com.entity';
 import { KeycloakSyncService } from '../../src/services/keycloak-sync.service';
@@ -229,7 +229,7 @@ class TestDataGenerator {
         pays,
         id_fiscal: `${pays.substring(0, 2).toUpperCase()}${Math.floor(Math.random() * 1000000000)}`,
         nature: 'Société',
-        etat_fiscal: 'Régulier',
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
         devise: isTunisian ? 'TND' : (Math.random() > 0.5 ? 'EUR' : 'USD'),
         solde: Math.floor(Math.random() * 50000) - 25000, // Solde entre -25000 et 25000
         statut: 'actif',
@@ -242,7 +242,7 @@ class TestDataGenerator {
       });
 
       const savedClient = await clientRepository.save(client);
-      clients.push(savedClient);
+      clients.push(savedClient as Client);
       
       console.log(`✅ Client créé: ${nom} (${pays}) - ${ville}`);
     }

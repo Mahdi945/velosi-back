@@ -53,6 +53,7 @@ export class ObjectifComService {
         date_fin: createObjectifComDto.date_fin ? new Date(createObjectifComDto.date_fin) : null,
         statut: createObjectifComDto.statut || 'en_cours',
         progression: createObjectifComDto.progression || 0,
+        is_active: createObjectifComDto.is_active !== undefined ? createObjectifComDto.is_active : true, // Par défaut actif
       };
 
       console.log('Données nettoyées pour création:', cleanedData);
@@ -128,12 +129,49 @@ export class ObjectifComService {
     }
   }
 
+  // Nouvelle méthode pour récupérer seulement les objectifs actifs d'un personnel
+  async findActiveByPersonnel(personnelId: number): Promise<ObjectifCom[]> {
+    console.log('Recherche des objectifs ACTIFS pour le personnel ID:', personnelId);
+    
+    try {
+      const objectifs = await this.objectifComRepository.find({
+        where: { 
+          id_personnel: personnelId,
+          is_active: true 
+        },
+        order: { created_at: 'DESC' },
+      });
+      
+      console.log('Objectifs actifs trouvés:', objectifs.length);
+      return objectifs;
+    } catch (error) {
+      console.error('Erreur lors de la recherche des objectifs actifs:', error);
+      return [];
+    }
+  }
+
+  // Méthode pour activer/désactiver un objectif
+  async toggleActiveStatus(id: number, isActive: boolean): Promise<ObjectifCom> {
+    console.log(`=== TOGGLE OBJECTIF STATUS ===`);
+    console.log(`Objectif ID: ${id}, Nouveau statut actif: ${isActive}`);
+    
+    const objectif = await this.findOne(id);
+    objectif.is_active = isActive;
+    objectif.updated_at = new Date();
+    
+    const updatedObjectif = await this.objectifComRepository.save(objectif);
+    console.log('Statut mis à jour avec succès');
+    
+    return updatedObjectif;
+  }
+
   async findActiveCommercialObjectives(): Promise<ObjectifCom[]> {
     const currentDate = new Date();
     return this.objectifComRepository
       .createQueryBuilder('objectif')
       .leftJoinAndSelect('objectif.personnel', 'personnel')
       .where('personnel.role = :role', { role: 'COMMERCIAL' })
+      .andWhere('objectif.is_active = :isActive', { isActive: true })
       .andWhere('objectif.date_debut <= :currentDate', { currentDate })
       .andWhere('objectif.date_fin >= :currentDate', { currentDate })
       .orderBy('objectif.date_debut', 'DESC')

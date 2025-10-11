@@ -8,6 +8,14 @@ import {
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { ContactClient } from './contact-client.entity';
+import { AutorisationTVA } from './autorisation-tva.entity';
+import { BCsusTVA } from './bcsus-tva.entity';
+
+export enum EtatFiscal {
+  ASSUJETTI_TVA = 'ASSUJETTI_TVA',
+  SUSPENSION_TVA = 'SUSPENSION_TVA',
+  EXONERE = 'EXONERE',
+}
 
 @Entity('client')
 export class Client {
@@ -50,8 +58,12 @@ export class Client {
   @Column({ type: 'integer', nullable: true })
   nbr_jour_ech: number;
 
-  @Column({ type: 'varchar', nullable: true })
-  etat_fiscal: string;
+  @Column({
+    type: 'enum',
+    enum: EtatFiscal,
+    default: EtatFiscal.ASSUJETTI_TVA,
+  })
+  etat_fiscal: EtatFiscal;
 
   @Column({ type: 'varchar', nullable: true })
   n_auto: string;
@@ -127,6 +139,9 @@ export class Client {
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];
 
+  @OneToMany(() => AutorisationTVA, (autorisation) => autorisation.client, { cascade: true })
+  autorisationsTVA: AutorisationTVA[];
+
   // Méthode virtuelle pour obtenir le nom d'utilisateur (utilise le nom ou l'id)
   get username(): string {
     return this.nom || `client_${this.id}`;
@@ -143,5 +158,80 @@ export class Client {
   // Rôle par défaut pour les clients
   get role(): string {
     return 'client';
+  }
+
+  // Méthodes pour la gestion de l'état fiscal
+  get isSuspensionTVA(): boolean {
+    return this.etat_fiscal === EtatFiscal.SUSPENSION_TVA;
+  }
+
+  get isAssujettiTVA(): boolean {
+    return this.etat_fiscal === EtatFiscal.ASSUJETTI_TVA;
+  }
+
+  get isExonere(): boolean {
+    return this.etat_fiscal === EtatFiscal.EXONERE;
+  }
+
+  // Vérifie si le client a des autorisations TVA valides
+  hasValidAutorisationsTVA(): boolean {
+    if (!this.autorisationsTVA || this.autorisationsTVA.length === 0) {
+      return false;
+    }
+    return this.autorisationsTVA.some(autorisation => autorisation.isValid);
+  }
+
+  // Obtient l'autorisation TVA active (la plus récente et valide)
+  getActiveAutorisationTVA(): AutorisationTVA | null {
+    if (!this.autorisationsTVA || this.autorisationsTVA.length === 0) {
+      return null;
+    }
+    
+    const validAutorisations = this.autorisationsTVA.filter(auth => auth.isValid);
+    if (validAutorisations.length === 0) {
+      return null;
+    }
+
+    // Retourne la plus récente
+    return validAutorisations.reduce((latest, current) => {
+      return current.dateAutorisation > latest.dateAutorisation ? current : latest;
+    });
+  }
+
+  // Obtient tous les bons de commande via les autorisations
+  getAllBonsCommande(): BCsusTVA[] {
+    if (!this.autorisationsTVA || this.autorisationsTVA.length === 0) {
+      return [];
+    }
+    
+    return this.autorisationsTVA
+      .filter(auth => auth.bonsCommande && auth.bonsCommande.length > 0)
+      .flatMap(auth => auth.bonsCommande)
+      .filter(bc => bc.is_active);
+  }
+
+  // Obtient le montant total des bons de commande actifs
+  getTotalMontantBonsCommande(): number {
+    const bonsCommande = this.getAllBonsCommande();
+    return bonsCommande
+      .filter(bc => bc.statut === 'ACTIF')
+      .reduce((total, bc) => total + Number(bc.montantBonCommande), 0);
+  }
+
+  // Valide la cohérence de l'état fiscal avec les autorisations
+  validateEtatFiscal(): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    if (this.etat_fiscal === EtatFiscal.SUSPENSION_TVA) {
+      const activeAutorisation = this.getActiveAutorisationTVA();
+      if (!activeAutorisation || activeAutorisation.statutAutorisation !== 'SUSPENDU') {
+        errors.push('Client en suspension TVA sans autorisation de suspension valide');
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    };
   }
 }

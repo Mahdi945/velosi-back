@@ -36,9 +36,20 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
+  // Configuration spécifique pour les dossiers d'autorisations et bons de commande
+  app.useStaticAssets(join(process.cwd(), 'uploads', 'autorisations'), {
+    prefix: '/uploads/autorisations/',
+  });
+
+  app.useStaticAssets(join(process.cwd(), 'uploads', 'bons-de-commande'), {
+    prefix: '/uploads/bons-de-commande/',
+  });
+
   // Ajout d'un log pour déboguer le chemin des uploads
   console.log('📁 Chemin uploads:', join(process.cwd(), 'uploads'));
   console.log('📁 Chemin assets:', join(process.cwd(), 'assets'));
+  console.log('📁 Chemin autorisations:', join(process.cwd(), 'uploads', 'autorisations'));
+  console.log('📁 Chemin bons-de-commande:', join(process.cwd(), 'uploads', 'bons-de-commande'));
 
   // Middleware pour les cookies
   app.use(cookieParser());
@@ -58,7 +69,7 @@ async function bootstrap() {
   // Préfixe global pour toutes les routes API (APRÈS les fichiers statiques)
   // Exclure les routes statiques du préfixe global
   app.setGlobalPrefix('api', {
-    exclude: ['/uploads/(.*)', '/assets/(.*)']
+    exclude: ['/uploads/(.*)', '/uploads/autorisations/(.*)', '/uploads/bons-de-commande/(.*)', '/assets/(.*)']
   });
 
   const port = process.env.PORT || 3000;

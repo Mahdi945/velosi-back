@@ -12,7 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
-import { Client } from '../entities/client.entity';
+import { Client, EtatFiscal } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { ContactClient } from '../entities/contact-client.entity';
 import { KeycloakService } from './keycloak.service';

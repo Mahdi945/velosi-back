@@ -15,11 +15,14 @@ import { typeOrmConfig } from './config/database.config';
 import { SchedulerService } from './services/scheduler.service';
 import { Personnel } from './entities/personnel.entity';
 import { Client } from './entities/client.entity';
+import { AutorisationTVA } from './entities/autorisation-tva.entity';
+import { BCsusTVA } from './entities/bcsus-tva.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { ContactController } from './contact/contact.controller';
 import { LocationModule } from './modules/location.module';
 import { VechatModule } from './vechat/vechat.module';
+import { ClientTVAModule } from './modules/client-tva.module';
 
 @Module({
   imports: [
@@ -40,7 +43,8 @@ import { VechatModule } from './vechat/vechat.module';
     FilesModule,
     LocationModule, // Module de géolocalisation
     VechatModule, // Module VelosiChat
-    TypeOrmModule.forFeature([Personnel, Client]), // Pour le SchedulerService et StatsController
+    ClientTVAModule, // Module de gestion des clients et autorisations TVA
+    TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA]), // Pour le SchedulerService et StatsController
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, ContactController],
   providers: [AppService, SchedulerService, KeycloakService, EmailService],

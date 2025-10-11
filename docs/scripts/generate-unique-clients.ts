@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { Client } from '../../src/entities/client.entity';
+import { Client, EtatFiscal } from '../../src/entities/client.entity';
 import { ContactClient } from '../../src/entities/contact-client.entity';
 import * as bcrypt from 'bcryptjs';
 
@@ -212,7 +212,7 @@ class ClientDataGenerator {
         pays,
         id_fiscal: `${pays.substring(0, 2).toUpperCase()}${Math.floor(Math.random() * 1000000000)}`,
         nature: 'Société',
-        etat_fiscal: 'Régulier',
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
         devise: isTunisian ? 'TND' : (Math.random() > 0.5 ? 'EUR' : 'USD'),
         solde: Math.floor(Math.random() * 50000) - 25000,
         statut: 'actif',
@@ -225,7 +225,7 @@ class ClientDataGenerator {
       });
 
       const savedClient = await clientRepository.save(client);
-      clients.push(savedClient);
+      clients.push(savedClient as Client);
 
       // Créer le contact client correspondant
       const tel1 = phoneCountry === 'tunisia' 
@@ -243,7 +243,7 @@ class ClientDataGenerator {
       const fonction = fonctions[Math.floor(Math.random() * fonctions.length)];
 
       const contact = contactRepository.create({
-        id_client: savedClient.id,
+        id_client: (savedClient as Client).id,
         tel1,
         tel2,
         tel3: null,
@@ -251,7 +251,7 @@ class ClientDataGenerator {
         mail1,
         mail2,
         fonction,
-        client: savedClient
+        client: savedClient as Client
       });
 
       await contactRepository.save(contact);

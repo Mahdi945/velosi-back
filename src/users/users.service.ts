@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
-import { Client } from '../entities/client.entity';
+import { Client, EtatFiscal } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { ObjectifCom } from '../entities/objectif-com.entity';
 import { ContactClient } from '../entities/contact-client.entity';
@@ -53,7 +53,7 @@ export interface UpdateClientDto {
   nature?: string;
   c_douane?: string;
   nbr_jour_ech?: number;
-  etat_fiscal?: string;
+  etat_fiscal?: EtatFiscal;
   n_auto?: string;
   date_auto?: string;
   franchise_sur?: number;

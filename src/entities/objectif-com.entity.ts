@@ -33,12 +33,15 @@ export class ObjectifCom {
 
   @Column({ type: 'date', nullable: true })
   date_fin: Date;
-
+ 
   @Column({ type: 'varchar', nullable: true, default: 'en_cours' })
   statut: string; // en_cours, atteint, non_atteint, suspendu
 
   @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true })
   progression: number; // Pourcentage de progression
+
+  @Column({ type: 'boolean', nullable: false, default: true })
+  is_active: boolean; // Indique si l'objectif est actif ou désactivé
 
   @CreateDateColumn({ type: 'timestamp' })
   created_at: Date;

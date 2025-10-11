@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CreateObjectifComDto {
   @IsNumber()
@@ -14,6 +15,7 @@ export class CreateObjectifComDto {
 
   @IsOptional()
   @IsNumber()
+  @Transform(({ value }) => value !== '' && value !== null ? parseFloat(value) : undefined)
   objectif_ca?: number;
 
   @IsOptional()
@@ -34,7 +36,12 @@ export class CreateObjectifComDto {
 
   @IsOptional()
   @IsNumber()
+  @Transform(({ value }) => value !== '' && value !== null ? parseFloat(value) : undefined)
   progression?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
 }
 
 export class UpdateObjectifComDto {
@@ -52,6 +59,7 @@ export class UpdateObjectifComDto {
 
   @IsOptional()
   @IsNumber()
+  @Transform(({ value }) => value !== '' && value !== null ? parseFloat(value) : undefined)
   objectif_ca?: number;
 
   @IsOptional()
@@ -72,5 +80,10 @@ export class UpdateObjectifComDto {
 
   @IsOptional()
   @IsNumber()
+  @Transform(({ value }) => value !== '' && value !== null ? parseFloat(value) : undefined)
   progression?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
 }

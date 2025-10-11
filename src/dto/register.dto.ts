@@ -8,7 +8,9 @@ import {
   ValidateIf,
   Matches,
   Length,
+  IsEnum,
 } from 'class-validator';
+import { EtatFiscal } from '../entities/client.entity';
 
 export class CreatePersonnelDto {
   @IsString()
@@ -108,12 +110,11 @@ export class CreateClientDto {
   @IsOptional()
   id_fiscal?: string;
 
-  @IsString()
   @IsOptional()
-  @IsIn(['assujetti_tva', 'exonere_tva', 'non_assujetti'], {
-    message: 'L\'état fiscal doit être: assujetti_tva, exonere_tva, ou non_assujetti',
+  @IsEnum(EtatFiscal, {
+    message: 'L\'état fiscal doit être: ASSUJETTI_TVA, SUSPENSION_TVA, ou EXONERE',
   })
-  etat_fiscal?: string;
+  etat_fiscal?: EtatFiscal;
 
   @IsString()
   @IsOptional()
