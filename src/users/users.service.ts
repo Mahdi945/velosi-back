@@ -18,7 +18,7 @@ import { EmailService } from '../services/email.service';
 export interface CreateClientDto {
   nom: string;
   interlocuteur?: string;
-  mot_de_passe: string;
+  mot_de_passe?: string;
   adresse?: string;
   ville?: string;
   pays?: string;
@@ -31,6 +31,7 @@ export interface CreateClientDto {
   contact_mail1?: string;
   contact_mail2?: string;
   contact_fonction?: string;
+  is_permanent?: boolean;
 }
 
 export interface UpdateClientDto {
@@ -159,41 +160,57 @@ export class UsersService {
       }
     }
 
-    // Hasher le mot de passe
-    const hashedPassword = await bcrypt.hash(createClientDto.mot_de_passe, 12);
+    // Gérer le mot de passe selon le type de client
+    let hashedPassword: string | null = null;
+    
+    // Hasher le mot de passe seulement pour les clients permanents
+    if (createClientDto.is_permanent && createClientDto.mot_de_passe) {
+      hashedPassword = await bcrypt.hash(createClientDto.mot_de_passe, 12);
+    }
 
     // Créer le client
     const client = this.clientRepository.create({
       ...createClientDto,
       mot_de_passe: hashedPassword,
+      is_permanent: createClientDto.is_permanent || false,
       photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
     });
 
     const savedClient = await this.clientRepository.save(client);
+    
+    console.log(`📝 Client créé: ${savedClient.nom} (ID: ${savedClient.id})`);
+    console.log(`🔐 Type d'accès: ${savedClient.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}`);
 
-    // Créer l'utilisateur dans Keycloak seulement si activé
-    try {
-      if (this.configService.get('KEYCLOAK_ENABLED') === 'true') {
-        // Keycloak est désactivé pour l'instant
-        // const keycloakId = await this.keycloakService?.createUser?.({
-        //   username: savedClient.nom,
-        //   email:
-        //     savedClient.email ||
-        //     `${savedClient.nom.toLowerCase()}@client.velosi.com`,
-        //   firstName: savedClient.nom,
-        //   lastName: '',
-        //   enabled: true,
-        // });
-        // // Mettre à jour l'ID Keycloak
-        // if (keycloakId) {
-        //   await this.clientRepository.update(savedClient.id, {
-        //     keycloak_id: keycloakId,
-        //   });
-        //   savedClient.keycloak_id = keycloakId;
-        // }
+    // Créer l'utilisateur dans Keycloak SEULEMENT pour les clients permanents
+    if (createClientDto.is_permanent === true) {
+      console.log(`🔑 Client permanent détecté - Tentative de création compte Keycloak...`);
+      
+      try {
+        if (this.configService.get('KEYCLOAK_ENABLED') === 'true') {
+          // Keycloak est désactivé pour l'instant - décommentez si nécessaire
+          // const keycloakId = await this.keycloakService?.createUser?.({
+          //   username: savedClient.nom,
+          //   email: createClientDto.contact_mail1 || `${savedClient.nom.toLowerCase()}@client.velosi.com`,
+          //   firstName: savedClient.nom,
+          //   lastName: '',
+          //   enabled: true,
+          // });
+          // // Mettre à jour l'ID Keycloak
+          // if (keycloakId) {
+          //   await this.clientRepository.update(savedClient.id, {
+          //     keycloak_id: keycloakId,
+          //   });
+          //   savedClient.keycloak_id = keycloakId;
+          //   console.log(`✅ Utilisateur Keycloak créé pour client permanent ${savedClient.id}: ${keycloakId}`);
+          // }
+        } else {
+          console.log(`⚠️ Keycloak désactivé - pas de création de compte pour le client permanent`);
+        }
+      } catch (error) {
+        console.warn('Erreur lors de la création dans Keycloak:', error.message);
       }
-    } catch (error) {
-      console.warn('Erreur lors de la création dans Keycloak:', error.message);
+    } else {
+      console.log(`🕘 Client temporaire - AUCUNE création Keycloak (comportement voulu)`);
     }
 
     return savedClient;
@@ -379,6 +396,7 @@ export class UsersService {
           'client.sec_activite',
           'client.charge_com',
           'client.keycloak_id',
+          'client.is_permanent',
           'contact.tel1',
           'contact.tel2',
           'contact.tel3',

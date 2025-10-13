@@ -125,7 +125,7 @@ export class Lead {
   @Column({ name: 'postal_code', nullable: true, length: 20 })
   postalCode: string;
 
-  @Column({ length: 3, default: 'TUN' })
+  @Column({ nullable: true })
   country: string;
 
   @Column({ name: 'is_local', default: true })

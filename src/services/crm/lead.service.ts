@@ -167,6 +167,7 @@ export class LeadService {
   async update(id: number, updateLeadDto: UpdateLeadDto, userId: number): Promise<Lead> {
     console.log('🔍 Service update - ID:', id, 'userId:', userId);
     console.log('📝 Service update - Données:', updateLeadDto);
+    console.log('🎯 [SERVICE UPDATE] AssignedToId reçu:', updateLeadDto.assignedToId, 'type:', typeof updateLeadDto.assignedToId);
     
     const lead = await this.findOne(id);
     console.log('✅ Lead trouvé:', lead);
@@ -183,12 +184,15 @@ export class LeadService {
 
     // Vérifier si l'assigné existe
     if (updateLeadDto.assignedToId) {
+      console.log('🔍 [SERVICE UPDATE] Vérification du personnel ID:', updateLeadDto.assignedToId);
       const personnel = await this.personnelRepository.findOne({
         where: { id: updateLeadDto.assignedToId },
       });
       if (!personnel) {
+        console.error('❌ [SERVICE UPDATE] Personnel introuvable pour ID:', updateLeadDto.assignedToId);
         throw new NotFoundException('Personnel assigné introuvable');
       }
+      console.log('✅ [SERVICE UPDATE] Personnel trouvé:', { id: personnel.id, nom: personnel.nom, prenom: personnel.prenom });
     }
 
     // Mettre à jour les dates automatiques selon le statut
@@ -208,16 +212,61 @@ export class LeadService {
     };
     
     console.log('🔄 Données à appliquer:', updatedData);
+    console.log('🔍 [SERVICE UPDATE] AssignedToId AVANT mise à jour:', lead.assignedToId);
+    console.log('🔍 [SERVICE UPDATE] AssignedToId dans updatedData:', updatedData.assignedToId);
+    
     Object.assign(lead, updatedData);
+    
     console.log('📋 Lead après assign:', lead);
+    console.log('🔍 [SERVICE UPDATE] AssignedToId APRÈS assign:', lead.assignedToId);
 
-    const savedLead = await this.leadRepository.save(lead);
-    console.log('💾 Lead sauvegardé:', savedLead);
+    // Forcer la mise à jour avec une requête UPDATE directe
+    console.log('🔧 [SERVICE UPDATE] Forcer la mise à jour avec requête directe...');
+    const updateResult = await this.leadRepository.update(
+      { id: lead.id },
+      {
+        fullName: updatedData.fullName,
+        email: updatedData.email,
+        phone: updatedData.phone,
+        company: updatedData.company,
+        position: updatedData.position,
+        website: updatedData.website,
+        industry: updatedData.industry,
+        employeeCount: updatedData.employeeCount,
+        source: updatedData.source,
+        status: updatedData.status,
+        priority: updatedData.priority,
+        street: updatedData.street,
+        city: updatedData.city,
+        postalCode: updatedData.postalCode,
+        country: updatedData.country,
+        isLocal: updatedData.isLocal,
+        assignedToId: updatedData.assignedToId, // IMPORTANT : forcer la mise à jour de assignedToId
+        estimatedValue: updatedData.estimatedValue,
+        tags: updatedData.tags,
+        notes: updatedData.notes,
+        updatedById: updatedData.updatedById,
+        lastContactDate: updatedData.lastContactDate,
+      }
+    );
+    
+    console.log('✅ [SERVICE UPDATE] Résultat de la requête UPDATE:', updateResult);
+    
+    // Récupérer l'entité mise à jour
+    const savedLead = await this.leadRepository.findOne({ where: { id: lead.id } });
+    
+    console.log('💾 Lead sauvegardé avec transaction:', savedLead);
+    console.log('🔍 [SERVICE UPDATE] AssignedToId du lead sauvegardé:', savedLead.assignedToId);
+    
+    // Attendre un court délai pour s'assurer que les données sont persistées
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Recharger l'entité avec toutes ses relations pour avoir les données à jour
+    // Utiliser cache: false pour forcer une requête fraîche
     const reloadedLead = await this.leadRepository.findOne({
       where: { id: savedLead.id },
-      relations: ['assignedTo', 'createdBy', 'updatedBy']
+      relations: ['assignedTo', 'createdBy', 'updatedBy'],
+      cache: false
     });
     
     console.log('🔄 Lead rechargé avec relations:', {
@@ -225,6 +274,24 @@ export class LeadService {
       assignedToId: reloadedLead?.assignedToId,
       assignedToName: reloadedLead?.assignedTo ? `${reloadedLead.assignedTo.prenom} ${reloadedLead.assignedTo.nom}` : 'Aucun'
     });
+    
+    // Si le rechargement ne donne pas le bon assignedToId, utiliser le lead sauvegardé
+    if (reloadedLead && reloadedLead.assignedToId !== savedLead.assignedToId) {
+      console.warn('⚠️ [SERVICE UPDATE] Incohérence détectée après rechargement:');
+      console.warn('   - Lead sauvegardé assignedToId:', savedLead.assignedToId);
+      console.warn('   - Lead rechargé assignedToId:', reloadedLead.assignedToId);
+      console.warn('   - Utilisation du lead sauvegardé pour corriger le problème');
+      
+      // Corriger l'assignedToId dans l'entité rechargée
+      reloadedLead.assignedToId = savedLead.assignedToId;
+      
+      // Recharger la relation assignedTo avec le bon ID
+      if (savedLead.assignedToId) {
+        reloadedLead.assignedTo = await this.personnelRepository.findOne({
+          where: { id: savedLead.assignedToId }
+        });
+      }
+    }
     
     return reloadedLead || savedLead;
   }

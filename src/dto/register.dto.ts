@@ -9,6 +9,7 @@ import {
   Matches,
   Length,
   IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { EtatFiscal } from '../entities/client.entity';
 
@@ -123,12 +124,12 @@ export class CreateClientDto {
   })
   devise?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'Le mot de passe est requis' })
   @MinLength(6, {
     message: 'Le mot de passe doit contenir au moins 6 caractères',
   })
-  mot_de_passe: string;
+  mot_de_passe?: string;
 
   // Champs de contact - emails optionnels et validés seulement si non vides
   @IsOptional()
@@ -188,4 +189,8 @@ export class CreateClientDto {
     message: 'Le statut doit être: actif, inactif, ou suspendu',
   })
   statut?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_permanent?: boolean;
 }

@@ -15,6 +15,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { plainToClass, classToPlain } from 'class-transformer';
 import { ClientService } from '../services/client.service';
 import { CreateClientDto, UpdateClientDto } from '../dto/client.dto';
 import { Client, EtatFiscal } from '../entities/client.entity';
@@ -29,8 +30,38 @@ export class ClientController {
   }
 
   @Get()
-  async findAll(): Promise<Client[]> {
-    return await this.clientService.findAll();
+  async findAll(): Promise<any> {
+    const clients = await this.clientService.findAll();
+    
+    // Debug: Vérifier les données avant transformation
+    if (clients.length > 0) {
+      console.log('🔍 CONTROLLER - Premier client avant transformation:', {
+        id: clients[0].id,
+        nom: clients[0].nom,
+        is_permanent: clients[0].is_permanent,
+        type: typeof clients[0].is_permanent,
+        allFields: Object.keys(clients[0])
+      });
+    }
+    
+    // Utiliser class-transformer pour s'assurer que @Expose() est respecté
+    const transformedClients = classToPlain(clients, { 
+      excludeExtraneousValues: false,
+      enableImplicitConversion: true 
+    });
+    
+    // Debug: Vérifier les données après transformation
+    if (transformedClients.length > 0) {
+      console.log('🔍 CONTROLLER - Premier client après transformation:', {
+        id: transformedClients[0].id,
+        nom: transformedClients[0].nom,
+        is_permanent: transformedClients[0].is_permanent,
+        type: typeof transformedClients[0].is_permanent,
+        allFields: Object.keys(transformedClients[0])
+      });
+    }
+    
+    return transformedClients;
   }
 
   @Get('stats/tva')
@@ -72,6 +103,77 @@ export class ClientController {
       throw new BadRequestException('État fiscal invalide');
     }
     return await this.clientService.updateEtatFiscal(id, etatFiscal);
+  }
+
+  @Post(':id/make-permanent')
+  @HttpCode(HttpStatus.OK)
+  async makePermanent(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.clientService.makePermanent(id);
+    return {
+      success: result.success,
+      message: result.message,
+      data: result.keycloakUserId ? { keycloakUserId: result.keycloakUserId } : null
+    };
+  }
+
+  @Get('debug/is-permanent')
+  async debugIsPermanent(): Promise<any> {
+    try {
+      console.log('🔍 ENDPOINT debug/is-permanent appelé');
+      
+      // Test direct avec requête SQL brute
+      const rawResults = await this.clientService.debugRawQuery();
+      
+      // Test avec le service normal
+      const clients = await this.clientService.findAll();
+      
+      const result = {
+        success: true,
+        timestamp: new Date().toISOString(),
+        data: {
+          database: {
+            columnExists: rawResults.tableStructure.length > 0,
+            tableInfo: rawResults.tableStructure,
+            rawClients: rawResults.rawClients,
+            message: "Requête SQL directe sur la table client"
+          },
+          service: {
+            totalClients: clients.length,
+            firstThreeClients: clients.slice(0, 3).map(c => ({
+              id: c.id,
+              nom: c.nom,
+              is_permanent: c.is_permanent,
+              type: typeof c.is_permanent,
+              hasProperty: 'is_permanent' in c,
+              allKeys: Object.keys(c)
+            })),
+            distribution: {
+              permanent: clients.filter(c => c.is_permanent === true).length,
+              temporary: clients.filter(c => c.is_permanent === false).length,
+              null: clients.filter(c => c.is_permanent === null).length,
+              undefined: clients.filter(c => c.is_permanent === undefined).length
+            }
+          },
+          diagnosis: {
+            problemDetected: clients.every(c => c.is_permanent === false),
+            recommendation: clients.every(c => c.is_permanent === false) ? 
+              "Tous les clients sont temporaires - vérifier les données ou créer des clients permanents pour test" :
+              "Distribution normale détectée"
+          }
+        }
+      };
+      
+      console.log('📊 Résultat du diagnostic:', JSON.stringify(result, null, 2));
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Erreur dans debugIsPermanent:', error);
+      return {
+        success: false,
+        error: error.message,
+        stack: error.stack
+      };
+    }
   }
 
   @Post(':id/photo')
@@ -119,6 +221,25 @@ export class ClientController {
   @Get(':id/validate-tva')
   async validateTVACoherence(@Param('id', ParseIntPipe) id: number) {
     return await this.clientService.validateClientTVACoherence(id);
+  }
+
+  @Post('debug/force-permanent/:id')
+  async forceClientPermanent(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    try {
+      // Mettre à jour directement via une requête SQL brute pour contourner TypeORM
+      const result = await this.clientService.forceUpdatePermanent(id);
+      
+      return {
+        success: true,
+        message: `Client ${id} forcé comme permanent`,
+        data: result
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
   @Delete(':id')

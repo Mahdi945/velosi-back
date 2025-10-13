@@ -217,24 +217,34 @@ export class LeadController {
     @Request() req,
   ) {
     try {
-      console.log('🔄 Mise à jour prospect ID:', id);
-      console.log('📝 Données reçues:', updateLeadDto);
-      console.log('👤 Utilisateur dans req:', req.user);
+      console.log('🔄 [CONTROLLER UPDATE] Mise à jour prospect ID:', id);
+      console.log('📝 [CONTROLLER UPDATE] Données reçues:', updateLeadDto);
+      console.log('� [CONTROLLER UPDATE] AssignedToId reçu:', updateLeadDto.assignedToId, 'type:', typeof updateLeadDto.assignedToId);
+      console.log('�👤 [CONTROLLER UPDATE] Utilisateur dans req:', req.user);
       
-      // Essayer d'obtenir l'ID utilisateur, utiliser 1 par défaut si pas disponible
+      // Priorité : utilisateur authentifié > header personnalisé > défaut
       let userId = 1; // ID par défaut (administratif)
       let userInfo = 'Utilisateur par défaut (ID: 1)';
       
       if (req.user && req.user.id) {
+        // Utilisateur authentifié via JWT
         userId = req.user.id;
         userInfo = `${req.user.username || 'N/A'} (ID: ${userId}, Rôle: ${req.user.role || 'N/A'})`;
-        console.log('� Utilisateur authentifié pour mise à jour:', { 
+        console.log('👤 Utilisateur authentifié pour mise à jour:', { 
           id: userId, 
           username: req.user.username, 
           role: req.user.role 
         });
+      } else if (req.headers['x-user-id']) {
+        // Header personnalisé pour l'ID utilisateur
+        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
+        if (!isNaN(headerUserId) && headerUserId > 0) {
+          userId = headerUserId;
+          userInfo = `Via header (ID: ${userId})`;
+          console.log('👤 Utilisateur via header pour mise à jour:', { id: userId });
+        }
       } else {
-        console.warn('⚠️ Pas d\'utilisateur authentifié, utilisation de l\'ID par défaut:', userId);
+        console.warn('⚠️ Pas d\'utilisateur identifié, utilisation de l\'ID par défaut:', userId);
       }
       
       const lead = await this.leadService.update(+id, updateLeadDto, userId);

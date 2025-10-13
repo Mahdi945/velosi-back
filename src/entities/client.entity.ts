@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
-import { Exclude } from 'class-transformer';
+import { Exclude, Expose } from 'class-transformer';
 import { ContactClient } from './contact-client.entity';
 import { AutorisationTVA } from './autorisation-tva.entity';
 import { BCsusTVA } from './bcsus-tva.entity';
@@ -111,8 +111,8 @@ export class Client {
   solde: number;
 
   @Exclude()
-  @Column({ type: 'varchar', nullable: false })
-  mot_de_passe: string;
+  @Column({ type: 'varchar', nullable: true })
+  mot_de_passe?: string;
 
   @CreateDateColumn({ type: 'timestamp' })
   created_at: Date;
@@ -134,6 +134,10 @@ export class Client {
 
   @Column({ type: 'boolean', nullable: false, default: false })
   auto_delete: boolean; // Flag pour indiquer si le compte doit être supprimé automatiquement après 7 jours de désactivation
+
+  @Column({ type: 'boolean', nullable: true, default: false })
+  @Expose()
+  is_permanent: boolean; // Flag pour indiquer si le client a un accès permanent au site (avec mot de passe)
 
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)

@@ -110,9 +110,9 @@ export class CreateClientDto {
   @IsOptional()
   solde?: number;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  mot_de_passe: string;
+  mot_de_passe?: string;
 
   @IsOptional()
   @IsString()
@@ -121,6 +121,22 @@ export class CreateClientDto {
   @IsOptional()
   @IsString()
   statut?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_permanent?: boolean = false;
+
+  @IsOptional()
+  @IsString()
+  contact_tel1?: string;
+
+  @IsOptional()
+  @IsString()
+  contact_mail1?: string;
+
+  @IsOptional()
+  @IsString()
+  contact_fonction?: string;
 }
 
 export class UpdateClientDto {
@@ -238,4 +254,8 @@ export class UpdateClientDto {
   @IsOptional()
   @IsString()
   statut?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_permanent?: boolean;
 }

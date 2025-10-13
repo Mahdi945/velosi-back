@@ -129,9 +129,10 @@ export class OpportunityController {
     @Request() req,
   ) {
     try {
-      console.log('🔄 Mise à jour opportunité ID:', id);
-      console.log('📝 Données reçues:', updateOpportunityDto);
-      console.log('👤 Utilisateur dans req:', req.user);
+      console.log('🔄 [CONTROLLER UPDATE] Mise à jour opportunité ID:', id);
+      console.log('📝 [CONTROLLER UPDATE] Données reçues:', updateOpportunityDto);
+      console.log('🎯 [CONTROLLER UPDATE] AssignedToId reçu:', updateOpportunityDto.assignedToId, 'type:', typeof updateOpportunityDto.assignedToId);
+      console.log('👤 [CONTROLLER UPDATE] Utilisateur dans req:', req.user);
       
       // Priorité : utilisateur authentifié > header personnalisé > défaut
       let userId = 1; // ID par défaut (administratif)

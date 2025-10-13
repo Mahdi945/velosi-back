@@ -553,10 +553,11 @@ export class AuthService {
       throw new ConflictException('Ce nom de client existe déjà');
     }
 
-    // Hasher le mot de passe
-    const hashedPassword = await this.hashPassword(
-      createClientDto.mot_de_passe,
-    );
+    // Hasher le mot de passe seulement s'il est fourni (clients permanents)
+    let hashedPassword: string | null = null;
+    if (createClientDto.mot_de_passe) {
+      hashedPassword = await this.hashPassword(createClientDto.mot_de_passe);
+    }
 
     // Créer le client (sans email - l'email sera dans contact_client)
     const client = this.clientRepository.create({
@@ -606,46 +607,59 @@ export class AuthService {
       this.logger.warn(`Aucune donnée de contact fournie pour le client ${savedClient.nom}`);
     }
 
-    // Synchroniser avec Keycloak et sauvegarder l'ID  
-    try {
-      if (this.keycloakService) {
-        // Créer l'utilisateur Keycloak directement (sans délai)
-        const keycloakUser = {
-          username: savedClient.nom,
-          email: contactEmail || '',
-          firstName: savedClient.interlocuteur || savedClient.nom,
-          lastName: '',
-          enabled: true,
-        };
-        
-        const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
-        if (keycloakUserId) {
-          // Sauvegarder l'ID Keycloak dans la base
-          savedClient.keycloak_id = keycloakUserId;
-          await this.clientRepository.save(savedClient);
-          this.logger.log(`Client ${savedClient.nom} synchronisé avec Keycloak: ${keycloakUserId}`);
+    // Synchroniser avec Keycloak SEULEMENT pour les clients permanents
+    if (createClientDto.is_permanent === true) {
+      this.logger.log(`🔑 Client permanent détecté - Tentative de création compte Keycloak...`);
+      
+      try {
+        if (this.keycloakService) {
+          // Créer l'utilisateur Keycloak directement (sans délai)
+          const keycloakUser = {
+            username: savedClient.nom,
+            email: contactEmail || '',
+            firstName: savedClient.interlocuteur || savedClient.nom,
+            lastName: '',
+            enabled: true,
+          };
+          
+          const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
+          if (keycloakUserId) {
+            // Sauvegarder l'ID Keycloak dans la base
+            savedClient.keycloak_id = keycloakUserId;
+            await this.clientRepository.save(savedClient);
+            this.logger.log(`✅ Client permanent ${savedClient.nom} synchronisé avec Keycloak: ${keycloakUserId}`);
+          }
         }
+      } catch (keycloakError) {
+        this.logger.warn('Synchronisation Keycloak échouée pour client permanent:', keycloakError);
+        // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
       }
-    } catch (keycloakError) {
-      this.logger.warn('Synchronisation Keycloak échouée pour client:', keycloakError);
-      // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
+    } else {
+      this.logger.log(`🕘 Client temporaire - AUCUNE création Keycloak (comportement voulu)`);
+      // S'assurer que keycloak_id est null pour les clients temporaires
+      savedClient.keycloak_id = null;
+      await this.clientRepository.save(savedClient);
     }
 
-    // Envoyer l'email avec les informations de connexion
-    try {
-      if (contactEmail && this.emailService) {
-        await this.emailService.sendClientCredentialsEmail(
-          contactEmail,
-          savedClient.nom,
-          createClientDto.mot_de_passe, // Mot de passe original non hashé
-          savedClient.nom,
-          savedClient.interlocuteur
-        );
-        this.logger.log(`Email d'informations client envoyé à ${contactEmail}`);
+    // Envoyer l'email avec les informations de connexion SEULEMENT pour les clients permanents
+    if (createClientDto.is_permanent === true) {
+      try {
+        if (contactEmail && this.emailService && createClientDto.mot_de_passe) {
+          await this.emailService.sendClientCredentialsEmail(
+            contactEmail,
+            savedClient.nom,
+            createClientDto.mot_de_passe, // Mot de passe original non hashé
+            savedClient.nom,
+            savedClient.interlocuteur
+          );
+          this.logger.log(`📧 Email d'informations client permanent envoyé à ${contactEmail}`);
+        }
+      } catch (emailError) {
+        this.logger.warn('Erreur envoi email informations client permanent:', emailError);
+        // Ne pas faire échouer l'inscription si l'envoi d'email échoue
       }
-    } catch (emailError) {
-      this.logger.warn('Erreur envoi email informations client:', emailError);
-      // Ne pas faire échouer l'inscription si l'envoi d'email échoue
+    } else {
+      this.logger.log(`📧 Client temporaire - Aucun email de credentials envoyé (comportement voulu)`);
     }
 
     // Générer les tokens

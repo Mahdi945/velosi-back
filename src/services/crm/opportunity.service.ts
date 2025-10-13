@@ -136,17 +136,22 @@ export class OpportunityService {
   async update(id: number, updateOpportunityDto: UpdateOpportunityDto, userId: number): Promise<Opportunity> {
     console.log('🔍 Service update - ID:', id, 'userId:', userId);
     console.log('📝 Service update - Données:', updateOpportunityDto);
+    console.log('🎯 [OPPORTUNITY SERVICE UPDATE] AssignedToId reçu:', updateOpportunityDto.assignedToId, 'type:', typeof updateOpportunityDto.assignedToId);
 
     const opportunity = await this.findOne(id);
+    console.log('✅ Opportunité trouvée:', opportunity.id);
 
     // Vérifier si le commercial assigné existe
     if (updateOpportunityDto.assignedToId) {
+      console.log('🔍 [OPPORTUNITY SERVICE UPDATE] Vérification du personnel ID:', updateOpportunityDto.assignedToId);
       const personnel = await this.personnelRepository.findOne({
         where: { id: updateOpportunityDto.assignedToId },
       });
       if (!personnel) {
+        console.error('❌ [OPPORTUNITY SERVICE UPDATE] Personnel introuvable pour ID:', updateOpportunityDto.assignedToId);
         throw new NotFoundException('Personnel assigné introuvable');
       }
+      console.log('✅ [OPPORTUNITY SERVICE UPDATE] Personnel trouvé:', { id: personnel.id, nom: personnel.nom, prenom: personnel.prenom });
     }
 
     // Gestion des changements de stage
@@ -165,12 +170,52 @@ export class OpportunityService {
     };
 
     console.log('🔄 Données à appliquer:', updatedData);
-    Object.assign(opportunity, updatedData);
+    console.log('🔍 [OPPORTUNITY SERVICE UPDATE] AssignedToId AVANT mise à jour:', opportunity.assignedToId);
+    console.log('🔍 [OPPORTUNITY SERVICE UPDATE] AssignedToId dans updatedData:', updatedData.assignedToId);
 
-    const savedOpportunity = await this.opportunityRepository.save(opportunity);
-    console.log('💾 Opportunité sauvegardée:', savedOpportunity.id);
+    // Forcer la mise à jour avec une requête UPDATE directe comme pour les prospects
+    console.log('🔧 [OPPORTUNITY SERVICE UPDATE] Forcer la mise à jour avec requête directe...');
+    
+    // Préparer les données de mise à jour en ne incluant que les champs qui existent dans l'entité
+    const updateFields: any = {};
+    if (updatedData.title !== undefined) updateFields.title = updatedData.title;
+    if (updatedData.description !== undefined) updateFields.description = updatedData.description;
+    if (updatedData.value !== undefined) updateFields.value = updatedData.value;
+    if (updatedData.probability !== undefined) updateFields.probability = updatedData.probability;
+    if (updatedData.stage !== undefined) updateFields.stage = updatedData.stage;
+    if (updatedData.expectedCloseDate !== undefined) updateFields.expectedCloseDate = updatedData.expectedCloseDate;
+    if (updatedData.assignedToId !== undefined) updateFields.assignedToId = updatedData.assignedToId; // IMPORTANT
+    if (updatedData.source !== undefined) updateFields.source = updatedData.source;
+    if (updatedData.priority !== undefined) updateFields.priority = updatedData.priority;
+    if (updatedData.tags !== undefined) updateFields.tags = updatedData.tags;
+    if (updatedData.originAddress !== undefined) updateFields.originAddress = updatedData.originAddress;
+    if (updatedData.destinationAddress !== undefined) updateFields.destinationAddress = updatedData.destinationAddress;
+    if (updatedData.transportType !== undefined) updateFields.transportType = updatedData.transportType;
+    if (updatedData.serviceFrequency !== undefined) updateFields.serviceFrequency = updatedData.serviceFrequency;
+    if (updatedData.vehicleTypes !== undefined) updateFields.vehicleTypes = updatedData.vehicleTypes;
+    if (updatedData.specialRequirements !== undefined) updateFields.specialRequirements = updatedData.specialRequirements;
+    if (updatedData.competitors !== undefined) updateFields.competitors = updatedData.competitors;
+    if (updatedData.lostReason !== undefined) updateFields.lostReason = updatedData.lostReason;
+    if (updatedData.lostToCompetitor !== undefined) updateFields.lostToCompetitor = updatedData.lostToCompetitor;
+    if (updatedData.updatedById !== undefined) updateFields.updatedById = updatedData.updatedById;
+    
+    const updateResult = await this.opportunityRepository.update(
+      { id: opportunity.id },
+      updateFields
+    );
 
-    return this.findOne(savedOpportunity.id);
+    console.log('✅ [OPPORTUNITY SERVICE UPDATE] Résultat de la requête UPDATE:', updateResult);
+
+    // Récupérer l'entité mise à jour avec les relations
+    const savedOpportunity = await this.opportunityRepository.findOne({ 
+      where: { id: opportunity.id },
+      relations: ['assignedTo', 'createdBy', 'updatedBy', 'lead', 'client']
+    });
+
+    console.log('💾 Opportunité sauvegardée:', savedOpportunity?.id);
+    console.log('🔍 [OPPORTUNITY SERVICE UPDATE] AssignedToId final:', savedOpportunity?.assignedToId);
+
+    return savedOpportunity || opportunity;
   }
 
   /**
@@ -217,11 +262,16 @@ export class OpportunityService {
       serviceFrequency: convertDto.serviceFrequency,
       vehicleTypes: convertDto.vehicleTypes || [],
       specialRequirements: convertDto.specialRequirements,
-      assignedToId: lead.assignedToId || lead.createdById, // Reprendre le commercial du lead
+      assignedToId: lead.assignedToId || null, // Utiliser seulement le commercial assigné au prospect, sinon null
       source: 'lead_conversion',
       priority: convertDto.priority || lead.priority,
       tags: lead.tags || [],
     };
+
+    console.log('📋 Assignation lors de la conversion:', {
+      prospectAssignedTo: lead.assignedToId,
+      opportunityWillBeAssignedTo: opportunityData.assignedToId
+    });
 
     const opportunity = await this.create(opportunityData, userId);
 
