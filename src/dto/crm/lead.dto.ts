@@ -1,6 +1,7 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsDateString, IsBoolean } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsDateString, IsBoolean, IsInt } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { LeadSource, LeadStatus, Priority } from '../../entities/crm/lead.entity';
+import { TransportType, TrafficType } from '../../entities/crm/opportunity.entity';
 
 export class CreateLeadDto {
   @IsNotEmpty()
@@ -110,6 +111,10 @@ export class CreateLeadDto {
   @IsOptional()
   @IsDateString()
   nextFollowupDate?: string;
+
+  @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
 }
 
 export class UpdateLeadDto {
@@ -222,6 +227,10 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsDateString()
   nextFollowupDate?: string;
+
+  @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
 }
 
 export class LeadQueryDto {
@@ -300,17 +309,16 @@ export class ConvertLeadDto {
   destinationAddress?: string;
 
   @IsOptional()
-  @IsString()
-  transportType?: string;
+  @IsEnum(TransportType)
+  transportType?: TransportType;
+
+  @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
 
   @IsOptional()
   @IsString()
   serviceFrequency?: string;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleTypes?: string[];
 
   @IsOptional()
   @IsString()

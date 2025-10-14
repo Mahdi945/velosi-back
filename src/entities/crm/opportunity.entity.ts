@@ -24,14 +24,15 @@ export enum OpportunityStage {
 }
 
 export enum TransportType {
-  NATIONAL = 'national',
-  INTERNATIONAL = 'international',
-  EXPRESS = 'express',
-  STANDARD = 'standard',
-  FREIGHT = 'freight',
-  LOGISTICS = 'logistics',
-  WAREHOUSING = 'warehousing',
-  DISTRIBUTION = 'distribution'
+  COMPLET = 'complet',
+  GROUPAGE = 'groupage',
+  AERIEN = 'aerien',
+  PROJET = 'projet'
+}
+
+export enum TrafficType {
+  IMPORT = 'import',
+  EXPORT = 'export'
 }
 
 export enum ServiceFrequency {
@@ -116,6 +117,14 @@ export class Opportunity {
   transportType: TransportType;
 
   @Column({
+    name: 'traffic',
+    type: 'enum',
+    enum: TrafficType,
+    nullable: true,
+  })
+  traffic: TrafficType;
+
+  @Column({
     name: 'service_frequency',
     type: 'enum',
     enum: ServiceFrequency,
@@ -123,8 +132,8 @@ export class Opportunity {
   })
   serviceFrequency: ServiceFrequency;
 
-  @Column({ name: 'vehicle_types', type: 'text', array: true, default: [] })
-  vehicleTypes: string[];
+  @Column({ name: 'engine_type', type: 'int', nullable: true })
+  engineType: number;
 
   @Column({ name: 'special_requirements', type: 'text', nullable: true })
   specialRequirements: string;

@@ -67,8 +67,10 @@ export class OpportunityService {
       updatedById: userId,
     });
 
+    console.log('🔍 AVANT SAUVEGARDE - Opportunité à sauvegarder:', JSON.stringify(opportunity, null, 2));
+
     const savedOpportunity = await this.opportunityRepository.save(opportunity);
-    console.log('💾 Opportunité créée:', savedOpportunity.id);
+    console.log('💾 APRÈS SAUVEGARDE - Opportunité créée:', JSON.stringify(savedOpportunity, null, 2));
 
     return this.findOne(savedOpportunity.id);
   }
@@ -191,8 +193,9 @@ export class OpportunityService {
     if (updatedData.originAddress !== undefined) updateFields.originAddress = updatedData.originAddress;
     if (updatedData.destinationAddress !== undefined) updateFields.destinationAddress = updatedData.destinationAddress;
     if (updatedData.transportType !== undefined) updateFields.transportType = updatedData.transportType;
+    if (updatedData.traffic !== undefined) updateFields.traffic = updatedData.traffic;
     if (updatedData.serviceFrequency !== undefined) updateFields.serviceFrequency = updatedData.serviceFrequency;
-    if (updatedData.vehicleTypes !== undefined) updateFields.vehicleTypes = updatedData.vehicleTypes;
+    if (updatedData.engineType !== undefined) updateFields.engineType = updatedData.engineType;
     if (updatedData.specialRequirements !== undefined) updateFields.specialRequirements = updatedData.specialRequirements;
     if (updatedData.competitors !== undefined) updateFields.competitors = updatedData.competitors;
     if (updatedData.lostReason !== undefined) updateFields.lostReason = updatedData.lostReason;
@@ -247,6 +250,15 @@ export class OpportunityService {
       throw new BadRequestException('Ce prospect a déjà été converti');
     }
 
+    // L'engineType a déjà été traité dans le contrôleur
+    const finalEngineType = convertDto.engineType;
+    
+    if (finalEngineType) {
+      console.log('🔍 Utilisation de l\'engin ID:', finalEngineType);
+    } else {
+      console.log('ℹ️ Aucun engin spécifié pour cette conversion');
+    }
+
     // Créer l'opportunité
     const opportunityData: CreateOpportunityDto = {
       title: convertDto.opportunityTitle,
@@ -259,8 +271,9 @@ export class OpportunityService {
       originAddress: convertDto.originAddress,
       destinationAddress: convertDto.destinationAddress,
       transportType: convertDto.transportType,
+      traffic: convertDto.traffic,
       serviceFrequency: convertDto.serviceFrequency,
-      vehicleTypes: convertDto.vehicleTypes || [],
+      engineType: finalEngineType,
       specialRequirements: convertDto.specialRequirements,
       assignedToId: lead.assignedToId || null, // Utiliser seulement le commercial assigné au prospect, sinon null
       source: 'lead_conversion',
@@ -268,20 +281,36 @@ export class OpportunityService {
       tags: lead.tags || [],
     };
 
+    console.log('📋 Données de l\'opportunité à créer:', JSON.stringify(opportunityData, null, 2));
     console.log('📋 Assignation lors de la conversion:', {
       prospectAssignedTo: lead.assignedToId,
       opportunityWillBeAssignedTo: opportunityData.assignedToId
     });
 
-    const opportunity = await this.create(opportunityData, userId);
+    // Créer l'opportunité avec gestion d'erreur robuste
+    let opportunity;
+    try {
+      opportunity = await this.create(opportunityData, userId);
+      console.log('✅ Opportunité créée avec succès - ID:', opportunity.id);
+    } catch (error) {
+      console.error('❌ Erreur lors de la création de l\'opportunité:', error.message);
+      throw new BadRequestException(`Échec de la création de l'opportunité: ${error.message}`);
+    }
 
-    // Mettre à jour le statut du lead
-    lead.status = LeadStatus.CONVERTED;
-    lead.convertedDate = new Date();
-    lead.updatedById = userId;
-    await this.leadRepository.save(lead);
+    // Mettre à jour le statut du lead SEULEMENT si l'opportunité a été créée avec succès
+    try {
+      lead.status = LeadStatus.CONVERTED;
+      lead.convertedDate = new Date();
+      lead.updatedById = userId;
+      const savedLead = await this.leadRepository.save(lead);
+      console.log('✅ Statut du prospect mis à jour - maintenant CONVERTED');
+    } catch (error) {
+      console.error('⚠️ Erreur lors de la mise à jour du prospect:', error.message);
+      // L'opportunité a été créée mais le prospect n'a pas été marqué comme converti
+      // Ce n'est pas critique, on continue
+    }
 
-    console.log('✅ Conversion réussie - Opportunité créée:', opportunity.id);
+    console.log('🎉 Conversion terminée avec succès - Opportunité ID:', opportunity.id);
     return opportunity;
   }
 
@@ -368,6 +397,10 @@ export class OpportunityService {
 
     if (query.assignedToId) {
       queryBuilder.andWhere('opportunity.assignedToId = :assignedToId', { assignedToId: query.assignedToId });
+    }
+
+    if (query.leadId) {
+      queryBuilder.andWhere('opportunity.leadId = :leadId', { leadId: query.leadId });
     }
 
     if (query.source) {

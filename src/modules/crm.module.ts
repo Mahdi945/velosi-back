@@ -13,12 +13,14 @@ import { Client } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { LeadModule } from './crm/lead.module';
 import { OpportunityModule } from './crm/opportunity.module';
+import { PipelineModule } from './crm/pipeline.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ContactClient, ObjectifCom, Client, Personnel]),
     LeadModule, // Module pour la gestion des prospects/leads
     OpportunityModule, // Module pour la gestion des opportunités
+    PipelineModule, // Module pour le pipeline Kanban
   ],
   controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],

@@ -32,7 +32,37 @@ export class OpportunityController {
    */
   @Post()
   // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
-  async create(@Body() createOpportunityDto: CreateOpportunityDto, @Request() req) {
+  async create(@Body() rawBody: any, @Request() req) {
+    console.log('🔍 DEBUG CREATE - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+    
+    // Transformer engineTypes (array) en engineType (single) si nécessaire
+    const createOpportunityDto = { ...rawBody };
+    
+    // Traiter le nouveau format engineTypes (array)
+    if (rawBody.engineTypes && Array.isArray(rawBody.engineTypes) && rawBody.engineTypes.length > 0 && !rawBody.engineType) {
+      const firstEngineId = rawBody.engineTypes[0];
+      const parsedEngineType = parseInt(firstEngineId, 10);
+      if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+        createOpportunityDto.engineType = parsedEngineType;
+        console.log('🔄 CREATE - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
+      }
+      // Supprimer engineTypes pour éviter confusion
+      delete createOpportunityDto.engineTypes;
+    }
+    
+    // Compatibilité avec l'ancien format vehicleTypes
+    if (rawBody.vehicleTypes && Array.isArray(rawBody.vehicleTypes) && rawBody.vehicleTypes.length > 0 && !rawBody.engineType) {
+      const firstVehicleType = rawBody.vehicleTypes[0];
+      const parsedEngineType = parseInt(firstVehicleType, 10);
+      if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+        createOpportunityDto.engineType = parsedEngineType;
+        console.log('🔄 CREATE - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
+      }
+      // Supprimer vehicleTypes pour éviter confusion
+      delete createOpportunityDto.vehicleTypes;
+    }
+    
+    console.log('🔍 DEBUG CREATE - Données après transformation:', JSON.stringify(createOpportunityDto, null, 2));
     try {
       // Priorité : utilisateur authentifié > header personnalisé > défaut
       let userId = 1; // ID par défaut (administratif)
@@ -125,9 +155,40 @@ export class OpportunityController {
   // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
   async update(
     @Param('id') id: string,
-    @Body() updateOpportunityDto: UpdateOpportunityDto,
+    @Body() rawBody: any, // Accepter d'abord les données brutes
     @Request() req,
   ) {
+    console.log('🔍 DEBUG UPDATE - Opportunity ID:', id);
+    console.log('🔍 DEBUG UPDATE - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+    
+    // Transformer engineTypes (array) en engineType (single) si nécessaire
+    const updateOpportunityDto = { ...rawBody };
+    
+    // Traiter le nouveau format engineTypes (array)
+    if (rawBody.engineTypes && Array.isArray(rawBody.engineTypes) && rawBody.engineTypes.length > 0 && !rawBody.engineType) {
+      const firstEngineId = rawBody.engineTypes[0];
+      const parsedEngineType = parseInt(firstEngineId, 10);
+      if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+        updateOpportunityDto.engineType = parsedEngineType;
+        console.log('🔄 UPDATE - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
+      }
+      // Supprimer engineTypes pour éviter confusion
+      delete updateOpportunityDto.engineTypes;
+    }
+    
+    // Compatibilité avec l'ancien format vehicleTypes
+    if (rawBody.vehicleTypes && Array.isArray(rawBody.vehicleTypes) && rawBody.vehicleTypes.length > 0 && !rawBody.engineType) {
+      const firstVehicleType = rawBody.vehicleTypes[0];
+      const parsedEngineType = parseInt(firstVehicleType, 10);
+      if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+        updateOpportunityDto.engineType = parsedEngineType;
+        console.log('🔄 UPDATE - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
+      }
+      // Supprimer vehicleTypes pour éviter confusion
+      delete updateOpportunityDto.vehicleTypes;
+    }
+    
+    console.log('🔍 DEBUG UPDATE - Données après transformation:', JSON.stringify(updateOpportunityDto, null, 2));
     try {
       console.log('🔄 [CONTROLLER UPDATE] Mise à jour opportunité ID:', id);
       console.log('📝 [CONTROLLER UPDATE] Données reçues:', updateOpportunityDto);
@@ -203,10 +264,41 @@ export class OpportunityController {
   // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
   async convertFromLead(
     @Param('leadId') leadId: string,
-    @Body() convertDto: ConvertLeadToOpportunityDto,
+    @Body() rawBody: any, // Accepter d'abord les données brutes
     @Request() req,
   ) {
     try {
+      console.log('🔍 DEBUG CONVERSION - Lead ID:', leadId);
+      console.log('🔍 DEBUG CONVERSION - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+      
+      // Transformer engineTypes (array) en engineType (single) si nécessaire
+      const convertDto = { ...rawBody };
+      
+      // Traiter le nouveau format engineTypes (array)
+      if (rawBody.engineTypes && Array.isArray(rawBody.engineTypes) && rawBody.engineTypes.length > 0 && !rawBody.engineType) {
+        const firstEngineId = rawBody.engineTypes[0];
+        const parsedEngineType = parseInt(firstEngineId, 10);
+        if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+          convertDto.engineType = parsedEngineType;
+          console.log('🔄 CONVERT - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
+        }
+        // Supprimer engineTypes pour éviter confusion
+        delete convertDto.engineTypes;
+      }
+      
+      // Compatibilité avec l'ancien format vehicleTypes
+      if (rawBody.vehicleTypes && Array.isArray(rawBody.vehicleTypes) && rawBody.vehicleTypes.length > 0 && !rawBody.engineType) {
+        const firstVehicleType = rawBody.vehicleTypes[0];
+        const parsedEngineType = parseInt(firstVehicleType, 10);
+        if (!isNaN(parsedEngineType) && parsedEngineType > 0) {
+          convertDto.engineType = parsedEngineType;
+          console.log('🔄 CONVERT - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
+        }
+        // Supprimer vehicleTypes pour éviter confusion
+        delete convertDto.vehicleTypes;
+      }
+      
+      console.log('🔍 DEBUG CONVERSION - Données après transformation:', JSON.stringify(convertDto, null, 2));
       // Priorité : utilisateur authentifié > header personnalisé > défaut
       let userId = 1; // ID par défaut (administratif)
       let userInfo = 'Utilisateur par défaut (ID: 1)';

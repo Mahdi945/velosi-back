@@ -245,6 +245,7 @@ export class LeadService {
         estimatedValue: updatedData.estimatedValue,
         tags: updatedData.tags,
         notes: updatedData.notes,
+        traffic: updatedData.traffic, // AJOUT : champ traffic pour Import/Export
         updatedById: updatedData.updatedById,
         lastContactDate: updatedData.lastContactDate,
       }
@@ -335,8 +336,8 @@ export class LeadService {
         originAddress: convertDto.originAddress,
         destinationAddress: convertDto.destinationAddress,
         transportType: convertDto.transportType as any,
+        traffic: convertDto.traffic,
         serviceFrequency: convertDto.serviceFrequency as any,
-        vehicleTypes: convertDto.vehicleTypes || [],
         specialRequirements: convertDto.specialRequirements,
         assignedToId: lead.assignedToId || userId,
         source: 'lead_conversion',

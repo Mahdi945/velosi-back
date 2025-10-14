@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CrmModule } from './modules/crm.module';
+import { EnginModule } from './modules/engin.module';
 import { FilesModule } from './files/files.module';
 import { DiagnosticController } from './controllers/diagnostic.controller';
 import { CleanupController } from './controllers/cleanup.controller';
@@ -40,6 +41,7 @@ import { ClientTVAModule } from './modules/client-tva.module';
     AuthModule,
     UsersModule,
     CrmModule,
+    EnginModule,
     FilesModule,
     LocationModule, // Module de géolocalisation
     VechatModule, // Module VelosiChat

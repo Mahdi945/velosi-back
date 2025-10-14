@@ -36,6 +36,11 @@ export enum LeadStatus {
   LOST = 'lost',
 }
 
+export enum TrafficType {
+  IMPORT = 'import',
+  EXPORT = 'export',
+}
+
 export enum Priority {
   LOW = 'low',
   MEDIUM = 'medium',
@@ -102,6 +107,13 @@ export class Lead {
   // Transport spécifique
   @Column({ name: 'transport_needs', type: 'text', array: true, nullable: true })
   transportNeeds: string[];
+
+  @Column({
+    type: 'enum',
+    enum: TrafficType,
+    nullable: true,
+  })
+  traffic: TrafficType;
 
   @Column({ name: 'annual_volume', type: 'decimal', precision: 12, scale: 2, nullable: true })
   annualVolume: number;

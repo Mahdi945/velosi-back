@@ -12,7 +12,7 @@ import {
   IsInt,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { OpportunityStage, TransportType, ServiceFrequency, Priority } from '../../entities/crm/opportunity.entity';
+import { OpportunityStage, TransportType, ServiceFrequency, Priority, TrafficType } from '../../entities/crm/opportunity.entity';
 
 export class CreateOpportunityDto {
   @IsNotEmpty()
@@ -64,13 +64,16 @@ export class CreateOpportunityDto {
   transportType?: TransportType;
 
   @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
+
+  @IsOptional()
   @IsEnum(ServiceFrequency)
   serviceFrequency?: ServiceFrequency;
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleTypes?: string[] = [];
+  @IsInt()
+  engineType?: number;
 
   @IsOptional()
   @IsString()
@@ -153,13 +156,16 @@ export class UpdateOpportunityDto {
   transportType?: TransportType;
 
   @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
+
+  @IsOptional()
   @IsEnum(ServiceFrequency)
   serviceFrequency?: ServiceFrequency;
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleTypes?: string[];
+  @IsInt()
+  engineType?: number;
 
   @IsOptional()
   @IsString()
@@ -213,6 +219,11 @@ export class OpportunityQueryDto {
   @IsInt()
   @Transform(({ value }) => parseInt(value))
   assignedToId?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => parseInt(value))
+  leadId?: number;
 
   @IsOptional()
   @IsString()
@@ -283,6 +294,10 @@ export class ConvertLeadToOpportunityDto {
   transportType?: TransportType;
 
   @IsOptional()
+  @IsEnum(TrafficType)
+  traffic?: TrafficType;
+
+  @IsOptional()
   @IsString()
   originAddress?: string;
 
@@ -295,9 +310,8 @@ export class ConvertLeadToOpportunityDto {
   serviceFrequency?: ServiceFrequency;
 
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  vehicleTypes?: string[];
+  @IsInt()
+  engineType?: number;
 
   @IsOptional()
   @IsString()
@@ -312,4 +326,10 @@ export class ConvertLeadToOpportunityDto {
   @IsOptional()
   @IsEnum(Priority)
   priority?: Priority = Priority.MEDIUM;
+}
+
+export class MoveOpportunityDto {
+  @IsNotEmpty()
+  @IsEnum(OpportunityStage)
+  toStage: OpportunityStage;
 }
