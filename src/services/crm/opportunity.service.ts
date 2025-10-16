@@ -198,6 +198,7 @@ export class OpportunityService {
     if (updatedData.engineType !== undefined) updateFields.engineType = updatedData.engineType;
     if (updatedData.specialRequirements !== undefined) updateFields.specialRequirements = updatedData.specialRequirements;
     if (updatedData.competitors !== undefined) updateFields.competitors = updatedData.competitors;
+    if (updatedData.wonDescription !== undefined) updateFields.wonDescription = updatedData.wonDescription;
     if (updatedData.lostReason !== undefined) updateFields.lostReason = updatedData.lostReason;
     if (updatedData.lostToCompetitor !== undefined) updateFields.lostToCompetitor = updatedData.lostToCompetitor;
     if (updatedData.updatedById !== undefined) updateFields.updatedById = updatedData.updatedById;

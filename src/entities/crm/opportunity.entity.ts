@@ -158,6 +158,10 @@ export class Opportunity {
   @Column({ type: 'text', array: true, default: [] })
   competitors: string[];
 
+  // Si gagné
+  @Column({ name: 'won_description', type: 'text', nullable: true })
+  wonDescription: string;
+
   // Si perdu
   @Column({ name: 'lost_reason', type: 'text', nullable: true })
   lostReason: string;

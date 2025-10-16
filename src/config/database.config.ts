@@ -12,6 +12,8 @@ import { VechatPresence } from '../vechat/entities/vechat-presence.entity';
 import { VechatUserSettings } from '../vechat/entities/vechat-user-settings.entity';
 import { Lead } from '../entities/crm/lead.entity';
 import { Opportunity } from '../entities/crm/opportunity.entity';
+import { Activity } from '../crm/entities/activity.entity';
+import { ActivityParticipant } from '../crm/entities/activity-participant.entity';
 import { Engin } from '../entities/engin.entity';
 
 export const typeOrmConfig = (
@@ -23,7 +25,23 @@ export const typeOrmConfig = (
   username: configService.get('DB_USER') || 'msp',
   password: configService.get('DB_PASSWORD') || '87Eq8384',
   database: configService.get('DB_DATABASE') || 'velosi',
-  entities: [Client, Personnel, ContactClient, ObjectifCom, VechatMessage, VechatConversation, VechatPresence, VechatUserSettings, Lead, Opportunity, AutorisationTVA, BCsusTVA, Engin],
+  entities: [
+    Client, 
+    Personnel, 
+    ContactClient, 
+    ObjectifCom, 
+    VechatMessage, 
+    VechatConversation, 
+    VechatPresence, 
+    VechatUserSettings, 
+    Lead, 
+    Opportunity, 
+    Activity, 
+    ActivityParticipant, 
+    AutorisationTVA, 
+    BCsusTVA, 
+    Engin
+  ],
   synchronize: false, // Ne pas modifier automatiquement la structure de la DB
   logging: process.env.NODE_ENV === 'development',
   ssl:

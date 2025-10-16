@@ -103,6 +103,10 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  wonDescription?: string;
+
+  @IsOptional()
+  @IsString()
   lostReason?: string;
 
   @IsOptional()
@@ -192,6 +196,10 @@ export class UpdateOpportunityDto {
   @IsArray()
   @IsString({ each: true })
   competitors?: string[];
+
+  @IsOptional()
+  @IsString()
+  wonDescription?: string;
 
   @IsOptional()
   @IsString()

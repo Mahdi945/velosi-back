@@ -14,6 +14,7 @@ import { Personnel } from '../entities/personnel.entity';
 import { LeadModule } from './crm/lead.module';
 import { OpportunityModule } from './crm/opportunity.module';
 import { PipelineModule } from './crm/pipeline.module';
+import { ActivityModule } from './crm/activity.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PipelineModule } from './crm/pipeline.module';
     LeadModule, // Module pour la gestion des prospects/leads
     OpportunityModule, // Module pour la gestion des opportunités
     PipelineModule, // Module pour le pipeline Kanban
+    ActivityModule, // Module pour la gestion des activités CRM
   ],
   controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],

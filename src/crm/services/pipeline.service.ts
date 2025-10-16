@@ -52,6 +52,18 @@ export interface KanbanOpportunity {
   leadName: string | null;
   email?: string | null;
   phone?: string | null;
+  // Objet lead complet pour acc√®s aux d√©tails
+  lead?: {
+    id: number;
+    company: string;
+    fullName: string;
+    email: string;
+    phone?: string;
+    position?: string;
+    website?: string;
+    industry?: string;
+    employeeCount?: number;
+  } | null;
   transportType: string | null;
   traffic?: string | null;
   serviceFrequency: string | null;
@@ -60,6 +72,8 @@ export interface KanbanOpportunity {
   specialRequirements?: string | null;
   competitors?: string[] | null;
   source?: string | null;
+  wonDescription?: string | null; // Description du succ√®s pour les opportunit√©s gagn√©es
+  lostReason?: string | null; // Raison de la perte pour les opportunit√©s perdues
   createdAt: Date;
   updatedAt: Date;
 }
@@ -312,6 +326,18 @@ export class PipelineService {
       leadName: opportunity.lead?.fullName || null,
       email: opportunity.lead?.email || null,
       phone: opportunity.lead?.phone || null,
+      // Ajouter l'objet lead complet pour acc√®s aux d√©tails de l'entreprise
+      lead: opportunity.lead ? {
+        id: opportunity.lead.id,
+        company: opportunity.lead.company,
+        fullName: opportunity.lead.fullName,
+        email: opportunity.lead.email,
+        phone: opportunity.lead.phone,
+        position: opportunity.lead.position,
+        website: opportunity.lead.website,
+        industry: opportunity.lead.industry,
+        employeeCount: opportunity.lead.employeeCount
+      } : null,
       transportType: opportunity.transportType || null,
       traffic: opportunity.traffic || null,
       serviceFrequency: opportunity.serviceFrequency || null,
@@ -320,6 +346,8 @@ export class PipelineService {
       specialRequirements: opportunity.specialRequirements || null,
       competitors: opportunity.competitors || null,
       source: opportunity.source || null,
+      wonDescription: opportunity.wonDescription || null,
+      lostReason: opportunity.lostReason || null,
       createdAt: opportunity.createdAt,
       updatedAt: opportunity.updatedAt
     };
@@ -491,5 +519,29 @@ export class PipelineService {
     }
 
     return await this.opportunityRepository.save(opportunity);
+  }
+
+  /**
+   * RÈcupÈrer tous les prospects (leads)
+   */
+  async getAllLeads(): Promise<Lead[]> {
+    return await this.leadRepository.find({
+      order: {
+        createdAt: 'DESC'
+      },
+      relations: ['assignedTo']
+    });
+  }
+
+  /**
+   * RÈcupÈrer toutes les opportunitÈs
+   */
+  async getAllOpportunities(): Promise<Opportunity[]> {
+    return await this.opportunityRepository.find({
+      order: {
+        createdAt: 'DESC'
+      },
+      relations: ['lead', 'assignedTo']
+    });
   }
 }

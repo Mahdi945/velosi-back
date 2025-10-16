@@ -341,4 +341,64 @@ export class PipelineController {
       throw new BadRequestException(`Erreur lors du marquage: ${error.message}`);
     }
   }
+
+  /**
+   * GET /api/crm/leads
+   * Récupérer la liste de tous les prospects (leads)
+   */
+  @Get('/leads')
+  async getAllLeads(): Promise<{
+    success: boolean;
+    data: any[];
+    message: string;
+  }> {
+    this.logger.log('?? GET /api/crm/leads - Récupération liste des prospects');
+    
+    try {
+      const leads = await this.pipelineService.getAllLeads();
+
+      this.logger.log(`?  prospects récupérés`);
+
+      return {
+        success: true,
+        data: leads,
+        message: 'Liste des prospects récupérée avec succès'
+      };
+
+    } catch (error) {
+      this.logger.error('? Erreur récupération prospects:', error.message);
+      
+      throw new BadRequestException(`Erreur lors de la récupération des prospects: `);
+    }
+  }
+
+  /**
+   * GET /api/crm/opportunities
+   * Récupérer la liste de toutes les opportunités
+   */
+  @Get('/opportunities')
+  async getAllOpportunities(): Promise<{
+    success: boolean;
+    data: any[];
+    message: string;
+  }> {
+    this.logger.log('?? GET /api/crm/opportunities - Récupération liste des opportunités');
+    
+    try {
+      const opportunities = await this.pipelineService.getAllOpportunities();
+
+      this.logger.log(`?  opportunités récupérées`);
+
+      return {
+        success: true,
+        data: opportunities,
+        message: 'Liste des opportunités récupérée avec succès'
+      };
+
+    } catch (error) {
+      this.logger.error('? Erreur récupération opportunités:', error.message);
+      
+      throw new BadRequestException(`Erreur lors de la récupération des opportunités: `);
+    }
+  }
 }

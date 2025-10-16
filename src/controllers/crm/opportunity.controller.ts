@@ -371,7 +371,7 @@ export class OpportunityController {
   @Roles('commercial', 'admin')
   async changeStage(
     @Param('id') id: string,
-    @Body() body: { stage: string; lostReason?: string; lostToCompetitor?: string },
+    @Body() body: { stage: string; wonDescription?: string; lostReason?: string; lostToCompetitor?: string },
     @Request() req,
   ) {
     try {
@@ -385,6 +385,10 @@ export class OpportunityController {
       }
       
       const updateData: UpdateOpportunityDto = { stage: body.stage as any };
+      
+      if (body.wonDescription) {
+        updateData.wonDescription = body.wonDescription;
+      }
       
       if (body.lostReason) {
         updateData.lostReason = body.lostReason;
