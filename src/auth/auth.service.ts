@@ -365,9 +365,23 @@ export class AuthService {
     if (payload.userType === 'personnel') {
       console.log('validateJwtPayload - Recherche personnel avec ID:', payload.sub);
       user = await this.personnelRepository.findOne({
-        where: { id: parseInt(payload.sub) },
+        where: { 
+          id: parseInt(payload.sub),
+          statut: 'actif' // IMPORTANT: Vérifier explicitement le statut
+        },
       });
-      console.log('validateJwtPayload - Personnel trouvé:', user ? user.nom : 'null');
+      console.log('validateJwtPayload - Personnel trouvé:', user ? `${user.nom} (statut: ${user.statut})` : 'null');
+      
+      // Si l'utilisateur n'est pas trouvé, vérifier s'il existe mais avec un autre statut
+      if (!user) {
+        const userAnyStatus = await this.personnelRepository.findOne({
+          where: { id: parseInt(payload.sub) },
+        });
+        if (userAnyStatus) {
+          console.error(`validateJwtPayload - Personnel trouvé mais statut invalide: ${userAnyStatus.statut}`);
+          throw new UnauthorizedException(`Compte ${userAnyStatus.statut} - contactez l'administration`);
+        }
+      }
     } else {
       console.log('validateJwtPayload - Recherche client avec ID:', payload.sub);
       user = await this.clientRepository.findOne({

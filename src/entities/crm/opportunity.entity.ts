@@ -24,10 +24,10 @@ export enum OpportunityStage {
 }
 
 export enum TransportType {
-  COMPLET = 'complet',
-  GROUPAGE = 'groupage',
   AERIEN = 'aerien',
-  PROJET = 'projet'
+  GROUPAGE = 'groupage',
+  COMPLET = 'complet',
+  ROUTIER = 'routier'
 }
 
 export enum TrafficType {

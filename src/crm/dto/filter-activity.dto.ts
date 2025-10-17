@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsArray,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   ActivityType,
   ActivityStatus,
@@ -26,26 +27,32 @@ export class FilterActivityDto {
   priority?: ActivityPriority;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   leadId?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   opportunityId?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   quoteId?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   clientId?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   assignedTo?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   createdBy?: number;
 

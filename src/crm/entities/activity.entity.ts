@@ -135,10 +135,10 @@ export class Activity {
   meetingLink: string;
 
   // Gestion
-  @Column({ name: 'assigned_to' })
+  @Column({ name: 'assigned_to', nullable: true })
   assignedTo: number;
 
-  @ManyToOne(() => Personnel, { eager: true })
+  @ManyToOne(() => Personnel, { eager: true, nullable: true })
   @JoinColumn({ name: 'assigned_to' })
   assignedToPersonnel: Personnel;
 

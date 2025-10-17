@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, Like, In } from 'typeorm';
 import { Activity } from './entities/activity.entity';
 import { ActivityParticipant } from './entities/activity-participant.entity';
+import { Personnel } from '../entities/personnel.entity';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { FilterActivityDto } from './dto/filter-activity.dto';
@@ -18,6 +19,8 @@ export class ActivitiesService {
     private activityRepository: Repository<Activity>,
     @InjectRepository(ActivityParticipant)
     private participantRepository: Repository<ActivityParticipant>,
+    @InjectRepository(Personnel)
+    private personnelRepository: Repository<Personnel>,
   ) {}
 
   async create(createActivityDto: CreateActivityDto): Promise<Activity> {
@@ -191,16 +194,30 @@ export class ActivitiesService {
     id: number,
     updateActivityDto: UpdateActivityDto,
   ): Promise<Activity> {
-    const activity = await this.findOne(id);
+    // Vérifier que l'activité existe
+    const activity = await this.activityRepository.findOne({ where: { id } });
+    if (!activity) {
+      throw new NotFoundException(`Activity with ID ${id} not found`);
+    }
+    
+    console.log('📝 [SERVICE_UPDATE] Activité AVANT mise à jour:', {
+      id: activity.id,
+      assignedTo: activity.assignedTo,
+      title: activity.title
+    });
 
     const { participants, ...activityData } = updateActivityDto as any;
+    
+    console.log('📝 [SERVICE_UPDATE] Données à appliquer:', activityData);
 
-    // Mettre à jour l'activité
-    Object.assign(activity, activityData);
-    await this.activityRepository.save(activity);
+    // Utiliser update() de TypeORM au lieu de save() pour éviter les conflits avec les relations
+    await this.activityRepository.update(id, activityData);
+    
+    console.log('✅ [SERVICE_UPDATE] Mise à jour effectuée avec update()');
 
     // Mettre à jour les participants si fournis
     if (participants !== undefined) {
+      console.log('📝 [SERVICE_UPDATE] Mise à jour des participants...');
       // Supprimer les anciens participants
       await this.participantRepository.delete({ activityId: id });
 
@@ -214,9 +231,19 @@ export class ActivitiesService {
         );
         await this.participantRepository.save(participantEntities);
       }
+      console.log('✅ [SERVICE_UPDATE] Participants mis à jour');
     }
 
-    return this.findOne(id);
+    // Recharger l'activité avec toutes les relations
+    const updatedActivity = await this.findOne(id);
+    
+    console.log('📝 [SERVICE_UPDATE] Activité APRÈS rechargement:', {
+      id: updatedActivity.id,
+      assignedTo: updatedActivity.assignedTo,
+      title: updatedActivity.title
+    });
+
+    return updatedActivity;
   }
 
   async remove(id: number): Promise<void> {
@@ -315,5 +342,28 @@ export class ActivitiesService {
       completed,
       overdue,
     };
+  }
+
+  async getCommercials(): Promise<any[]> {
+    return this.personnelRepository.find({
+      where: { role: 'commercial' }, // ✅ Ne retourner que les commerciaux
+      select: ['id', 'prenom', 'nom', 'email', 'role', 'nom_utilisateur'],
+      order: { prenom: 'ASC' }
+    });
+  }
+
+  /**
+   * Trouve un personnel par son UUID Keycloak
+   */
+  async findPersonnelByKeycloakId(keycloakId: string): Promise<Personnel | null> {
+    try {
+      const personnel = await this.personnelRepository.findOne({
+        where: { keycloak_id: keycloakId }
+      });
+      return personnel || null;
+    } catch (error) {
+      console.error('Erreur lors de la recherche du personnel par Keycloak ID:', error);
+      return null;
+    }
   }
 }
