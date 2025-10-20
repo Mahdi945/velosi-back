@@ -11,7 +11,7 @@ import {
 import { Personnel } from '../../entities/personnel.entity';
 import { Lead } from '../../entities/crm/lead.entity';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
-// import { Quote } from '../../entities/crm/quote.entity'; // À implémenter
+import { Quote } from './quote.entity';
 import { Client } from '../../entities/client.entity';
 import { ActivityParticipant } from './activity-participant.entity';
 
@@ -100,9 +100,9 @@ export class Activity {
   @Column({ name: 'quote_id', nullable: true })
   quoteId: number;
 
-  // @ManyToOne(() => Quote, { nullable: true, onDelete: 'CASCADE' })
-  // @JoinColumn({ name: 'quote_id' })
-  // quote: Quote; // À implémenter quand Quote sera créé
+  @ManyToOne(() => Quote, (quote) => quote.activities, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'quote_id' })
+  quote: Quote;
 
   @Column({ name: 'client_id', nullable: true })
   clientId: number;

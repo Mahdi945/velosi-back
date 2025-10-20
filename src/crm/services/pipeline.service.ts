@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
-import { Lead } from '../../entities/crm/lead.entity';
+import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
 import { Personnel } from '../../entities/personnel.entity';
 import { Client } from '../../entities/client.entity';
 
@@ -169,11 +169,51 @@ export class PipelineService {
 
       console.log(`📈 Trouvé ${opportunities.length} opportunités`);
 
-      // 5. Grouper les opportunités par étape
+      // 5. Charger les leads/prospects pour la colonne "prospecting"
+      // 🎯 Afficher TOUS les prospects SAUF converted et lost
+      let leads: Lead[] = [];
+      let leadQueryBuilder = this.leadRepository
+        .createQueryBuilder('lead')
+        .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
+        .where('lead.status != :convertedStatus', { convertedStatus: LeadStatus.CONVERTED })
+        .andWhere('lead.status != :lostStatus', { lostStatus: LeadStatus.LOST });
+
+      // Appliquer les mêmes filtres aux prospects
+      if (filters.search) {
+        leadQueryBuilder = leadQueryBuilder.andWhere(
+          '(lead.company ILIKE :search OR lead.fullName ILIKE :search OR lead.email ILIKE :search)',
+          { search: `%${filters.search}%` }
+        );
+      }
+
+      if (filters.assignedToId) {
+        leadQueryBuilder = leadQueryBuilder.andWhere('lead.assignedToId = :assignedToId', {
+          assignedToId: filters.assignedToId
+        });
+      }
+
+      if (filters.priority) {
+        leadQueryBuilder = leadQueryBuilder.andWhere('lead.priority = :priority', {
+          priority: filters.priority
+        });
+      }
+
+      leads = await leadQueryBuilder.orderBy('lead.createdAt', 'DESC').getMany();
+      
+      console.log(`📋 Trouvé ${leads.length} prospects (leads) actifs pour la colonne prospecting`);
+
+      // 6. Grouper les opportunités par étape et ajouter les prospects
       const stagesWithOpportunities: KanbanStage[] = stages.map(stage => {
-        const stageOpportunities = opportunities
+        let stageOpportunities = opportunities
           .filter(opp => opp.stage === stage.stageEnum)
           .map(opp => this.transformToKanbanOpportunity(opp));
+
+        // 🎯 NOUVEAU: Ajouter les prospects (leads) à la colonne "prospecting"
+        if (stage.stageEnum === 'prospecting') {
+          const leadOpportunities = leads.map(lead => this.transformLeadToKanbanOpportunity(lead));
+          stageOpportunities = [...leadOpportunities, ...stageOpportunities];
+          console.log(`✨ Ajout de ${leadOpportunities.length} prospects actifs à la colonne prospecting`);
+        }
 
         const stageValue = stageOpportunities.reduce((sum, opp) => sum + opp.value, 0);
         const stageCount = stageOpportunities.length;
@@ -354,6 +394,59 @@ export class PipelineService {
   }
 
   /**
+   * 🆕 Transformer un Lead (prospect) en KanbanOpportunity pour l'affichage dans le pipeline
+   */
+  private transformLeadToKanbanOpportunity(lead: Lead): KanbanOpportunity {
+    const daysInStage = this.calculateDaysInStage(lead.updatedAt || lead.createdAt);
+    
+    return {
+      id: lead.id,
+      title: `${lead.company} - ${lead.fullName}`, // Titre combiné entreprise + nom
+      description: lead.notes || null,
+      value: Number(lead.estimatedValue || 0),
+      probability: 10, // Probabilité par défaut pour les prospects
+      expectedCloseDate: lead.nextFollowupDate || null,
+      assignedTo: lead.assignedTo?.id || 0,
+      assignedToName: lead.assignedTo 
+        ? `${lead.assignedTo.prenom} ${lead.assignedTo.nom}`.trim()
+        : 'Non assigné',
+      client: null, // Les prospects ne sont pas encore des clients
+      priority: lead.priority || 'medium',
+      stage: 'prospecting', // Toujours prospecting pour les leads
+      daysInStage,
+      tags: lead.tags ? lead.tags : [],
+      leadId: lead.id,
+      leadName: lead.fullName,
+      email: lead.email,
+      phone: lead.phone,
+      // Objet lead complet
+      lead: {
+        id: lead.id,
+        company: lead.company,
+        fullName: lead.fullName,
+        email: lead.email,
+        phone: lead.phone,
+        position: lead.position,
+        website: lead.website,
+        industry: lead.industry,
+        employeeCount: lead.employeeCount
+      },
+      transportType: lead.transportNeeds?.[0] || null, // Premier besoin de transport
+      traffic: lead.traffic || null,
+      serviceFrequency: null,
+      originAddress: null,
+      destinationAddress: null,
+      specialRequirements: null,
+      competitors: null,
+      source: lead.source || null,
+      wonDescription: null,
+      lostReason: null,
+      createdAt: lead.createdAt,
+      updatedAt: lead.updatedAt || lead.createdAt
+    };
+  }
+
+  /**
    * Calculer le nombre de jours dans l'étape actuelle
    */
   private calculateDaysInStage(updatedAt: Date): number {
@@ -522,7 +615,7 @@ export class PipelineService {
   }
 
   /**
-   * R�cup�rer tous les prospects (leads)
+   * R�cup�rer tous les prospects (leads)
    */
   async getAllLeads(): Promise<Lead[]> {
     return await this.leadRepository.find({
@@ -534,7 +627,7 @@ export class PipelineService {
   }
 
   /**
-   * R�cup�rer toutes les opportunit�s
+   * R�cup�rer toutes les opportunit�s
    */
   async getAllOpportunities(): Promise<Opportunity[]> {
     return await this.opportunityRepository.find({

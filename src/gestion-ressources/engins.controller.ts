@@ -53,7 +53,11 @@ export class EnginsController {
     console.log('📋 [ENGINS] Récupération des engins actifs');
     const engins = await this.enginsService.findAllActive();
     console.log(`✅ [ENGINS] ${engins.length} engins actifs récupérés`);
-    return engins;
+    return {
+      success: true,
+      message: 'Engins actifs récupérés avec succès',
+      data: engins
+    };
   }
 
   /**

@@ -15,6 +15,7 @@ import { LeadModule } from './crm/lead.module';
 import { OpportunityModule } from './crm/opportunity.module';
 import { PipelineModule } from './crm/pipeline.module';
 import { ActivityModule } from './crm/activity.module';
+import { QuoteModule } from './crm/quote.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ActivityModule } from './crm/activity.module';
     OpportunityModule, // Module pour la gestion des opportunités
     PipelineModule, // Module pour le pipeline Kanban
     ActivityModule, // Module pour la gestion des activités CRM
+    QuoteModule, // Module pour la gestion des cotations/devis
   ],
   controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],

@@ -51,7 +51,7 @@ export class ActivitiesService {
       .leftJoinAndSelect('activity.creator', 'creator')
       .leftJoinAndSelect('activity.lead', 'lead')
       .leftJoinAndSelect('activity.opportunity', 'opportunity')
-      // .leftJoinAndSelect('activity.quote', 'quote') // Décommenter quand Quote sera implémenté
+      .leftJoinAndSelect('activity.quote', 'quote') // ✅ Charger la relation quote
       .leftJoinAndSelect('activity.client', 'client')
       .leftJoinAndSelect('activity.participants', 'participants')
       .leftJoinAndSelect('participants.personnel', 'participantPersonnel');
@@ -176,7 +176,7 @@ export class ActivitiesService {
         'creator',
         'lead',
         'opportunity',
-        // 'quote', // Décommenter quand Quote sera implémenté
+        'quote', // ✅ Charger la relation quote
         'client',
         'participants',
         'participants.personnel',

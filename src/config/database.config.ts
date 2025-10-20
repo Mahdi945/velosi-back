@@ -14,6 +14,8 @@ import { Lead } from '../entities/crm/lead.entity';
 import { Opportunity } from '../entities/crm/opportunity.entity';
 import { Activity } from '../crm/entities/activity.entity';
 import { ActivityParticipant } from '../crm/entities/activity-participant.entity';
+import { Quote } from '../crm/entities/quote.entity';
+import { QuoteItem } from '../crm/entities/quote-item.entity';
 import { Engin } from '../entities/engin.entity';
 
 export const typeOrmConfig = (
@@ -38,6 +40,8 @@ export const typeOrmConfig = (
     Opportunity, 
     Activity, 
     ActivityParticipant, 
+    Quote,
+    QuoteItem,
     AutorisationTVA, 
     BCsusTVA, 
     Engin
