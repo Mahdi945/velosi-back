@@ -170,13 +170,14 @@ export class PipelineService {
       console.log(`📈 Trouvé ${opportunities.length} opportunités`);
 
       // 5. Charger les leads/prospects pour la colonne "prospecting"
-      // 🎯 Afficher TOUS les prospects SAUF converted et lost
+      // 🎯 Afficher TOUS les prospects SAUF converted, lost et client
       let leads: Lead[] = [];
       let leadQueryBuilder = this.leadRepository
         .createQueryBuilder('lead')
         .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
         .where('lead.status != :convertedStatus', { convertedStatus: LeadStatus.CONVERTED })
-        .andWhere('lead.status != :lostStatus', { lostStatus: LeadStatus.LOST });
+        .andWhere('lead.status != :lostStatus', { lostStatus: LeadStatus.LOST })
+        .andWhere('lead.status != :clientStatus', { clientStatus: LeadStatus.CLIENT });
 
       // Appliquer les mêmes filtres aux prospects
       if (filters.search) {

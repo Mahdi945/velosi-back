@@ -7,10 +7,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   canActivate(
     context: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
-    console.log('JWT Auth Guard - Vérification de l\'authentification');
+    console.log('🔐 [JWT Auth Guard] Vérification de l\'authentification');
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
-    console.log('JWT Auth Guard - Header Authorization:', authHeader ? 'Présent' : 'Absent');
+    const hasCookie = !!request.headers.cookie;
+    
+    console.log('🔐 [JWT Auth Guard] Headers:', {
+      authorization: authHeader ? 'Présent (Bearer ' + authHeader.substring(7, 37) + '...)' : 'Absent',
+      cookie: hasCookie ? 'Présent' : 'Absent',
+      url: request.url,
+      method: request.method
+    });
     
     return super.canActivate(context);
   }
@@ -18,7 +25,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   handleRequest(err, user, info, context, status) {
     const request = context.switchToHttp().getRequest();
     
-    console.log('JWT Auth Guard - Résultat de l\'authentification:', {
+    console.log('🔐 [JWT Auth Guard] Résultat de l\'authentification:', {
       err: err?.message,
       user: user ? { 
         id: user.id, 
@@ -27,7 +34,8 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         tokenInfo: user.tokenInfo 
       } : null,
       info: info?.message || info,
-      url: request.url
+      url: request.url,
+      method: request.method
     });
 
     if (err || !user) {
@@ -35,7 +43,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       let errorMessage = 'Token invalide ou expiré';
       let errorType = 'UNKNOWN';
       
-      if (info?.message === 'jwt expired') {
+      if (info?.message === 'No auth token') {
+        errorType = 'NO_TOKEN';
+        errorMessage = 'Aucun token d\'authentification fourni. Veuillez vous connecter.';
+      } else if (info?.message === 'jwt expired') {
         errorType = 'EXPIRED';
         errorMessage = 'Token JWT expiré - veuillez vous reconnecter';
       } else if (info?.message === 'invalid token') {
@@ -49,7 +60,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         errorMessage = 'Utilisateur non trouvé ou inactif';
       }
       
-      console.error('JWT Auth Guard - Échec d\'authentification:', {
+      console.error('❌ [JWT Auth Guard] Échec d\'authentification:', {
         url: request.url,
         method: request.method,
         errorType,
@@ -58,19 +69,26 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         headers: {
           authorization: request.headers.authorization ? 'Présent' : 'Absent',
           cookie: request.headers.cookie ? 'Présent' : 'Absent'
-        }
+        },
+        solution: errorType === 'NO_TOKEN' 
+          ? 'Vérifier que le frontend envoie bien le token dans le header Authorization' 
+          : 'Vérifier la validité du token'
       });
       
       throw err || new UnauthorizedException({
         message: errorMessage,
         errorType,
         timestamp: new Date().toISOString(),
-        path: request.url
+        path: request.url,
+        hint: errorType === 'NO_TOKEN' 
+          ? 'Le token doit être envoyé dans le header Authorization avec le format: Bearer <token>'
+          : 'Veuillez vous reconnecter pour obtenir un nouveau token'
       });
     }
     
     // Ajouter des informations de debug à la requête
     request.tokenInfo = user.tokenInfo;
+    console.log('✅ [JWT Auth Guard] Authentification réussie pour:', user.username);
     
     return user;
   }

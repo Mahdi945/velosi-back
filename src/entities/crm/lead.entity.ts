@@ -33,6 +33,7 @@ export enum LeadStatus {
   UNQUALIFIED = 'unqualified',
   NURTURING = 'nurturing',
   CONVERTED = 'converted',
+  CLIENT = 'client', // ✅ Prospect devenu client après acceptation d'une cotation
   LOST = 'lost',
 }
 

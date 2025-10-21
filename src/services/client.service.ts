@@ -67,6 +67,48 @@ export class ClientService {
     console.log(`📝 Client créé: ${savedClient.nom} (ID: ${savedClient.id})`);
     console.log(`🔐 Type d'accès: ${savedClient.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}`);
 
+    // ✅ NOUVEAU: Créer automatiquement l'entrée contact_client si email ou téléphone fourni
+    if (createClientDto.contact_mail1 || createClientDto.contact_tel1) {
+      try {
+        console.log(`\n🔄 INSERTION CONTACT_CLIENT pour client #${savedClient.id}`);
+        console.log(`   - contact_mail1 (DTO): ${createClientDto.contact_mail1 || 'NON FOURNI'}`);
+        console.log(`   - contact_tel1 (DTO): ${createClientDto.contact_tel1 || 'NON FOURNI'}`);
+        console.log(`   - contact_fonction (DTO): ${createClientDto.contact_fonction || 'NON FOURNI'}`);
+        
+        const insertResult = await this.clientRepository.query(`
+          INSERT INTO contact_client (id_client, mail1, tel1, fonction)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (id_client) 
+          DO UPDATE SET 
+            mail1 = EXCLUDED.mail1,
+            tel1 = EXCLUDED.tel1,
+            fonction = EXCLUDED.fonction
+          RETURNING id_client, mail1, tel1, fonction
+        `, [
+          savedClient.id,
+          createClientDto.contact_mail1 || null,
+          createClientDto.contact_tel1 || null,
+          createClientDto.contact_fonction || null
+        ]);
+        
+        console.log(`✅ CONTACT_CLIENT créé/mis à jour avec succès:`);
+        console.log(`   Résultat:`, JSON.stringify(insertResult, null, 2));
+        console.log(`   - id_client: ${insertResult[0]?.id_client}`);
+        console.log(`   - mail1 (BD): ${insertResult[0]?.mail1 || 'NULL'}`);
+        console.log(`   - tel1 (BD): ${insertResult[0]?.tel1 || 'NULL'}`);
+        console.log(`   - fonction (BD): ${insertResult[0]?.fonction || 'NULL'}\n`);
+      } catch (contactError) {
+        console.error(`\n❌ ERREUR INSERTION CONTACT_CLIENT pour client #${savedClient.id}:`);
+        console.error(`   Message: ${contactError.message}`);
+        console.error(`   Code: ${contactError.code}`);
+        console.error(`   Detail: ${contactError.detail}`);
+        console.error(`   Stack:`, contactError.stack);
+        // Ne pas bloquer la création du client
+      }
+    } else {
+      console.log(`⚠️ AUCUN contact_mail1 ou contact_tel1 fourni - Pas d'insertion dans contact_client`);
+    }
+
     // SEULEMENT si c'est un client permanent, créer automatiquement un utilisateur Keycloak
     if (createClientDto.is_permanent === true) {
       console.log(`🔑 Client permanent détecté - Création compte Keycloak...`);

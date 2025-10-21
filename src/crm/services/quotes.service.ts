@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere, Like, Between } from 'typeorm';
 import { Quote, QuoteStatus } from '../entities/quote.entity';
 import { QuoteItem } from '../entities/quote-item.entity';
-import { Lead } from '../../entities/crm/lead.entity';
+import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
 import { Opportunity, OpportunityStage } from '../../entities/crm/opportunity.entity';
 import { Client, EtatFiscal } from '../../entities/client.entity';
 import {
@@ -397,18 +397,8 @@ export class QuotesService {
    * Générer le HTML pour l'email de la cotation
    */
   private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto): string {
-    // Calcul des totaux
-    const subtotal = quote.subtotal || 0;
-    const taxAmount = quote.taxAmount || 0;
+    // Calcul du total
     const total = quote.total || 0;
-    const freightPurchased = quote.freightPurchased || 0;
-    const freightOffered = quote.freightOffered || 0;
-    const freightMargin = quote.freightMargin || 0;
-    const additionalCostsPurchased = quote.additionalCostsPurchased || 0;
-    const additionalCostsOffered = quote.additionalCostsOffered || 0;
-    const totalPurchases = quote.totalPurchases || 0;
-    const totalOffers = quote.totalOffers || 0;
-    const totalMargin = quote.totalMargin || 0;
 
     const formatAmount = (amount: number) => {
       return amount.toLocaleString('fr-FR', {
@@ -437,219 +427,175 @@ export class QuotesService {
             font-family: Arial, sans-serif;
             line-height: 1.6;
             color: #333;
-            max-width: 800px;
+            max-width: 600px;
             margin: 0 auto;
             padding: 20px;
+            background-color: #f5f5f5;
+          }
+          .container {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
           }
           .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 30px;
-            border-radius: 8px;
-            margin-bottom: 30px;
+            padding: 40px 30px;
+            text-align: center;
           }
           .header h1 {
             margin: 0 0 10px 0;
-            font-size: 28px;
+            font-size: 32px;
+          }
+          .header p {
+            margin: 5px 0;
+            font-size: 14px;
+            opacity: 0.9;
           }
           .content {
+            padding: 40px 30px;
+            text-align: center;
+          }
+          .greeting {
+            font-size: 18px;
+            color: #555;
+            margin-bottom: 25px;
+          }
+          ${sendData.emailBody ? `
+          .custom-message {
             background-color: #f8f9fa;
             padding: 20px;
             border-radius: 8px;
-            margin-bottom: 20px;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 15px 0;
-            background-color: white;
-          }
-          th, td {
-            padding: 12px;
+            margin-bottom: 30px;
             text-align: left;
-            border: 1px solid #ddd;
+            font-size: 15px;
+            line-height: 1.6;
           }
-          th {
-            background-color: #2196f3;
-            color: white;
+          ` : ''}
+      .amount-box {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); /* violet clair */
+  color: #4c1d95; /* violet profond, lisible */
+  padding: 12px 18px; /* plus petit et équilibré */
+  border-radius: 10px;
+  margin: 10px auto;
+  width: fit-content; /* largeur selon le texte */
+  min-width: 140px; /* limite minimale */
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: 0 2px 6px rgba(76, 29, 149, 0.15); /* ombre légère */
+  border: 1px solid #e0d7ff; /* contour fin */
+}
+
+.amount-box:hover {
+  background: linear-gradient(135deg, #ede9fe 0%, #e0d7ff 100%);
+  box-shadow: 0 4px 10px rgba(76, 29, 149, 0.25);
+  transform: translateY(-1px);
+}
+
+          .amount-label {
+            font-size: 14px;
+            opacity: 0.95;
+            margin-bottom: 8px;
+            font-weight: 500;
+          }
+          .amount-value {
+            font-size: 36px;
             font-weight: bold;
-          }
-          .totals-table {
-            margin-left: auto;
-            width: 60%;
-          }
-          .totals-table td {
-            padding: 10px 15px;
-          }
-          .totals-table .label {
-            font-weight: bold;
-            text-align: right;
-          }
-          .totals-table .value {
-            text-align: right;
-          }
-          .highlight {
-            background-color: #e3f2fd;
-            font-weight: bold;
-            font-size: 16px;
-          }
-          .success {
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            font-weight: bold;
-          }
-          .footer {
-            text-align: center;
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-top: 3px solid #2196f3;
-            margin-top: 30px;
-            color: #6c757d;
-            font-size: 12px;
-          }
-          .text-right {
-            text-align: right;
+            margin: 0;
+            letter-spacing: 1px;
           }
           .view-button {
             display: inline-block;
-            padding: 15px 30px;
+            padding: 18px 40px;
             background-color: #2196f3;
             color: white !important;
             text-decoration: none;
-            border-radius: 5px;
+            border-radius: 8px;
             font-weight: bold;
             font-size: 16px;
             margin: 20px 0;
+            transition: background-color 0.3s;
           }
           .view-button:hover {
             background-color: #1976d2;
           }
+          .info-text {
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+            line-height: 1.6;
+          }
+          .footer {
+            text-align: center;
+            padding: 30px;
+            background-color: #f8f9fa;
+            border-top: 3px solid #2196f3;
+            color: #6c757d;
+            font-size: 12px;
+          }
+          .company-info {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+          }
+          .company-info p {
+            margin: 5px 0;
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <h1>Cotation ${quote.quoteNumber}</h1>
-          <p style="margin: 5px 0;"><strong>Date:</strong> ${formatDate(quote.createdAt)}</p>
-          <p style="margin: 5px 0;"><strong>Validité:</strong> ${formatDate(quote.validUntil)}</p>
-        </div>
+        <div class="container">
+          <div class="header">
+            <h1>Cotation ${quote.quoteNumber}</h1>
+            <p><strong>Date:</strong> ${formatDate(quote.createdAt)}</p>
+            <p><strong>Validité:</strong> ${formatDate(quote.validUntil)}</p>
+          </div>
 
-        ${sendData.emailBody ? `
           <div class="content">
-            <p>${sendData.emailBody.replace(/\n/g, '<br>')}</p>
+            <div class="greeting">
+              Bonjour ${quote.clientName || 'Cher client'},
+            </div>
+
+            ${sendData.emailBody ? `
+              <div class="custom-message">
+                ${sendData.emailBody.replace(/\n/g, '<br>')}
+              </div>
+            ` : ''}
+
+            <div class="amount-box">
+              <div class="amount-label">Montant Total TTC</div>
+              <div class="amount-value">${formatAmount(total)} TND</div>
+            </div>
+
+            <p style="font-size: 16px; color: #555; margin: 25px 0;">
+              Pour savoir les détails et imprimer la cotation, cliquer sur ce bouton :
+            </p>
+
+            <a href="${viewLink}" class="view-button" target="_blank">
+              📄 Voir la cotation complète
+            </a>
+
+            <p class="info-text">
+              Ce lien vous permettra de consulter tous les détails de votre cotation,<br>
+              y compris les lignes détaillées et les conditions.
+            </p>
           </div>
-        ` : ''}
 
-        <!-- Bouton de visualisation avec tracking -->
-        <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #f0f7ff; border-radius: 8px;">
-          <p style="margin: 0 0 15px 0; font-size: 16px; color: #333;">
-            Cliquez sur le bouton ci-dessous pour visualiser votre cotation en ligne
-          </p>
-          <a href="${viewLink}" class="view-button" target="_blank">
-            📄 Voir la cotation
-          </a>
-          <p style="margin: 15px 0 0 0; font-size: 12px; color: #666;">
-            Ce lien vous permettra de consulter tous les détails de votre cotation
-          </p>
-        </div>
-
-        <div class="content">
-          <h2 style="color: #2196f3; margin-top: 0;">Informations Client</h2>
-          <p><strong>Nom:</strong> ${quote.clientName || '-'}</p>
-          <p><strong>Entreprise:</strong> ${quote.clientCompany || '-'}</p>
-          <p><strong>Email:</strong> ${quote.clientEmail || '-'}</p>
-          <p><strong>Téléphone:</strong> ${quote.clientPhone || '-'}</p>
-        </div>
-
-        <h2 style="color: #2196f3;">Détails de la cotation</h2>
-        <p><strong>Titre:</strong> ${quote.title}</p>
-
-        <h3>Lignes de cotation</h3>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 5%;">#</th>
-              <th style="width: 40%;">Description</th>
-              <th style="width: 10%;">Type</th>
-              <th style="width: 10%;">Qté</th>
-              <th style="width: 15%;">Prix unitaire</th>
-              <th style="width: 15%;">Total HT</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${quote.items?.map((item, index) => `
-              <tr>
-                <td>${index + 1}</td>
-                <td>${item.description}</td>
-                <td>${item.itemType === 'freight' ? 'Fret' : 'Frais annexe'}</td>
-                <td class="text-right">${item.quantity}</td>
-                <td class="text-right">${formatAmount(item.sellingPrice || item.unitPrice)} TND</td>
-                <td class="text-right">${formatAmount(item.totalPrice || 0)} TND</td>
-              </tr>
-            `).join('') || '<tr><td colspan="6" style="text-align: center;">Aucune ligne</td></tr>'}
-          </tbody>
-        </table>
-
-        <h3 style="color: #2196f3;">Résumé Financier</h3>
-        <table class="totals-table">
-          <tr>
-            <td colspan="2" style="background-color: #f5f5f5; font-weight: bold;">FRET</td>
-          </tr>
-          <tr>
-            <td class="label">Fret Offerte:</td>
-            <td class="value">${formatAmount(freightOffered)} TND</td>
-          </tr>
-          <tr style="background-color: #fff3e0;">
-            <td class="label">Marge Fret:</td>
-            <td class="value">${formatAmount(freightMargin)} TND</td>
-          </tr>
-          
-          <tr>
-            <td colspan="2" style="background-color: #f5f5f5; font-weight: bold;">FRAIS ADDITIONNELS</td>
-          </tr>
-          <tr>
-            <td class="label">Frais Offre:</td>
-            <td class="value">${formatAmount(additionalCostsOffered)} TND</td>
-          </tr>
-          
-          <tr>
-            <td colspan="2" style="background-color: #f5f5f5; font-weight: bold;">TOTAUX</td>
-          </tr>
-          <tr>
-            <td class="label">TOT.Offre (HT):</td>
-            <td class="value">${formatAmount(totalOffers)} TND</td>
-          </tr>
-          <tr>
-            <td class="label">Sous-total HT:</td>
-            <td class="value">${formatAmount(subtotal)} TND</td>
-          </tr>
-          <tr>
-            <td class="label">TVA (${quote.taxRate || 19}%):</td>
-            <td class="value">${formatAmount(taxAmount)} TND</td>
-          </tr>
-          <tr class="highlight">
-            <td class="label">Total TTC:</td>
-            <td class="value">${formatAmount(total)} TND</td>
-          </tr>
-          <tr class="success">
-            <td class="label">Marge Totale:</td>
-            <td class="value">${formatAmount(totalMargin)} TND</td>
-          </tr>
-        </table>
-
-        ${quote.termsConditions ? `
-          <div style="margin-top: 30px; padding: 20px; background-color: #f8f9fa; border-radius: 8px;">
-            <h3 style="color: #2196f3;">Conditions et Termes</h3>
-            <p>${quote.termsConditions.replace(/\n/g, '<br>')}</p>
+          <div class="footer">
+            <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 14px;">
+              © ${new Date().getFullYear()} VELOSI LOGISTICS - Tous droits réservés
+            </p>
+            <div class="company-info">
+              <p><strong>Adresse:</strong> 06 Av. H. Bourguiba Résidence ZOHRA 2040 Radès, Tunisie</p>
+              <p><strong>Tél:</strong> (+216) 71 460 969 / (+216) 71 460 991 / (+216) 79 459 553</p>
+              <p><strong>Email:</strong> contact@velosi.com | <strong>Web:</strong> www.velosi.com</p>
+            </div>
+            <p style="margin: 15px 0 0 0; font-size: 11px;">
+              Cet email a été envoyé automatiquement. Pour toute question, veuillez contacter notre service commercial.
+            </p>
           </div>
-        ` : ''}
-
-        <div class="footer">
-          <p style="margin: 0 0 8px 0; font-weight: 500;">
-            © ${new Date().getFullYear()} Velosi ERP - Tous droits réservés
-          </p>
-          <p style="margin: 0; font-size: 11px;">
-            Cet email a été envoyé automatiquement. Pour toute question, veuillez contacter notre service commercial.
-          </p>
         </div>
       </body>
       </html>
@@ -673,16 +619,22 @@ export class QuotesService {
 
   /**
    * Accepter un devis
+   * ✅ CORRECTION: Permettre l'acceptation depuis DRAFT, SENT ou VIEWED
    */
   async acceptQuote(id: number, acceptQuoteDto: AcceptQuoteDto): Promise<Quote> {
+    console.log(`🎯 DÉBUT acceptQuote pour cotation ID: ${id}`);
     const quote = await this.findOne(id);
+    console.log(`📋 Cotation trouvée: ${quote.quoteNumber}, Statut actuel: ${quote.status}`);
 
-    if (![QuoteStatus.SENT, QuoteStatus.VIEWED].includes(quote.status)) {
+    // ✅ CORRECTION: Permettre l'acceptation depuis DRAFT, SENT ou VIEWED
+    if (![QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.VIEWED].includes(quote.status)) {
+      console.error(`❌ Statut invalide pour acceptation: ${quote.status}`);
       throw new BadRequestException(
         `Impossible d'accepter un devis avec le statut ${quote.status}`,
       );
     }
 
+    console.log(`✅ Statut valide - Passage à ACCEPTED`);
     quote.status = QuoteStatus.ACCEPTED;
     quote.acceptedAt = new Date();
 
@@ -692,10 +644,13 @@ export class QuotesService {
         : `Acceptation: ${acceptQuoteDto.notes}`;
     }
 
+    console.log(`💾 Sauvegarde de la cotation avec statut ACCEPTED...`);
     const updatedQuote = await this.quoteRepository.save(quote);
+    console.log(`✅ Cotation sauvegardée: ${updatedQuote.quoteNumber} - Statut: ${updatedQuote.status}`);
 
     // 🎯 SYNCHRONISATION AUTOMATIQUE: Opportunité → CLOSED_WON
     if (updatedQuote.opportunityId) {
+      console.log(`🔄 Mise à jour opportunité ID: ${updatedQuote.opportunityId}`);
       await this.updateOpportunityStage(
         updatedQuote.opportunityId,
         'closed_won',
@@ -704,167 +659,356 @@ export class QuotesService {
     }
 
     // Conversion automatique prospect/opportunité vers client permanent
+    console.log(`🚀 Appel de autoConvertToClient...`);
     await this.autoConvertToClient(updatedQuote);
+    console.log(`✅ autoConvertToClient terminé`);
 
     return this.findOne(updatedQuote.id);
   }
 
   /**
-   * Convertir automatiquement un prospect/opportunité en client TEMPORAIRE
-   * lorsqu'une cotation est acceptée
-   * NOTE: Création d'un client SANS mot de passe et SANS compte Keycloak
+   * ✅ SIMPLIFICATION TOTALE: Convertir automatiquement en client TEMPORAIRE
+   * Utilise UNIQUEMENT les données de la cotation (pas de lead/opportunity)
+   * SANS mot de passe et SANS compte Keycloak
+   * ✅ Le statut du prospect est mis à jour automatiquement par un TRIGGER PostgreSQL
    */
   private async autoConvertToClient(quote: Quote): Promise<void> {
     try {
-      console.log(`🔄 Vérification de conversion automatique pour cotation ${quote.quoteNumber}...`);
+      console.log(`\n========================================`);
+      console.log(`🔄 CRÉATION CLIENT AUTOMATIQUE`);
+      console.log(`========================================`);
+      console.log(`📋 Cotation: ${quote.quoteNumber}`);
+      console.log(`📊 Client existant: ${quote.clientId || 'AUCUN'}`);
 
-      // Si la cotation est déjà liée à un client existant, ne rien faire
-      if (quote.clientId) {
+      // ✅ ÉTAPE 1: Vérifier si UN CLIENT EXISTE DÉJÀ
+      if (quote.clientId && quote.clientId > 0) {
         const existingClient = await this.clientRepository.findOne({
           where: { id: quote.clientId }
         });
 
         if (existingClient) {
-          console.log(`✅ Cotation déjà liée à un client existant (ID: ${existingClient.id})`);
+          console.log(`✅ Client existant trouvé: ${existingClient.nom} (ID: ${existingClient.id})`);
+          console.log(`ℹ️ Statut prospect mis à jour automatiquement par trigger PostgreSQL`);
+          console.log(`========================================\n`);
           return;
         }
       }
 
-      let newClient: Client | null = null;
-      let sourceType = '';
+      console.log(`🆕 Création d'un nouveau client depuis la cotation...`);
 
-      // Cas 1: Cotation liée à un lead (prospect)
-      if (quote.leadId) {
-        const lead = await this.leadRepository.findOne({
-          where: { id: quote.leadId }
-        });
+      // ✅ ÉTAPE 2: Créer le client UNIQUEMENT avec les données de la cotation
+      const isLocalCountry = !quote.country || quote.country.toLowerCase() === 'tunisie';
+      
+      const clientData: any = {
+        nom: quote.clientCompany || quote.clientName,
+        interlocuteur: quote.clientName,
+        categorie: isLocalCountry ? 'LOCAL' : 'ETRANGER',
+        type_client: 'CONVERTI',
+        adresse: quote.clientAddress || null,
+        pays: quote.country || 'Tunisie',
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
+        timbre: true,
+        statut: 'actif',
+        is_permanent: false,
+        mot_de_passe: null,
+        keycloak_id: null,
+        contact_mail1: quote.clientEmail,
+        contact_tel1: quote.clientPhone || null,
+        contact_fonction: null,
+      };
 
-        if (lead) {
-          console.log(`📋 Lead trouvé: ${lead.fullName} (${lead.company})`);
-          sourceType = 'Lead/Prospect';
+      console.log(`\n📊 DONNÉES CLIENT À ENVOYER (depuis quote #${quote.id}):`);
+      console.log(`   ========================================`);
+      console.log(`   - Nom: ${clientData.nom}`);
+      console.log(`   - Interlocuteur: ${clientData.interlocuteur}`);
+      console.log(`   - Catégorie: ${clientData.categorie}`);
+      console.log(`   - Type: ${clientData.type_client}`);
+      console.log(`   - is_permanent: ${clientData.is_permanent}`);
+      console.log(`   ----------------------------------------`);
+      console.log(`   📧 DONNÉES DE CONTACT (CRITIQUES):`);
+      console.log(`   - contact_mail1: "${clientData.contact_mail1}" (depuis quote.clientEmail: "${quote.clientEmail}")`);
+      console.log(`   - contact_tel1: "${clientData.contact_tel1}" (depuis quote.clientPhone: "${quote.clientPhone || 'NULL'}")`);
+      console.log(`   - contact_fonction: "${clientData.contact_fonction}"`);
+      console.log(`   ========================================\n`);
 
-          // Mapper les données du lead vers un nouveau client TEMPORAIRE
-          newClient = await this.createTemporaryClientFromLead(lead, quote);
-        }
-      }
-
-      // Cas 2: Cotation liée à une opportunité
-      if (quote.opportunityId && !newClient) {
-        const opportunity = await this.opportunityRepository.findOne({
-          where: { id: quote.opportunityId },
-          relations: ['lead']
-        });
-
-        if (opportunity) {
-          console.log(`💼 Opportunité trouvée: ${opportunity.title}`);
-          sourceType = 'Opportunité';
-
-          // Si l'opportunité a un lead lié, utiliser ces données
-          if (opportunity.lead) {
-            newClient = await this.createTemporaryClientFromLead(opportunity.lead, quote);
-          } else {
-            // Sinon, créer à partir des données de la cotation
-            newClient = await this.createTemporaryClientFromQuote(quote);
-          }
-        }
-      }
-
-      // Si un client a été créé, mettre à jour la cotation
-      if (newClient) {
-        console.log(`✅ Client temporaire créé avec succès: ${newClient.nom} (ID: ${newClient.id})`);
+      const newClient = await this.clientService.create(clientData);
+      
+      if (newClient && newClient.id) {
+        console.log(`✅ Client créé avec succès: ID ${newClient.id}`);
         
-        // Mettre à jour la cotation avec le nouveau client
+        // Mettre à jour la cotation
         await this.quoteRepository.update(quote.id, {
           clientId: newClient.id
         });
-
-        // Ajouter une note dans la cotation
-        const conversionNote = `\n\n[${new Date().toLocaleString('fr-FR')}] Client temporaire créé automatiquement depuis ${sourceType} suite à l'acceptation de la cotation.`;
-        await this.quoteRepository.update(quote.id, {
-          notes: quote.notes ? quote.notes + conversionNote : conversionNote
-        });
-
-        console.log(`✅ Cotation ${quote.quoteNumber} mise à jour avec le client ID: ${newClient.id}`);
-      } else {
-        console.log(`⚠️ Aucun client créé - données insuffisantes ou cotation sans lead/opportunité`);
+        
+        console.log(`✅ Cotation mise à jour avec clientId: ${newClient.id}`);
+        console.log(`ℹ️ Statut prospect mis à jour automatiquement par trigger PostgreSQL`);
       }
 
+      console.log(`========================================`);
+      console.log(`✅ FIN - CLIENT CRÉÉ ET LIÉ`);
+      console.log(`========================================\n`);
+
     } catch (error) {
-      console.error(`❌ Erreur lors de la conversion automatique en client:`, error);
-      // Ne pas faire échouer l'acceptation de la cotation si la conversion échoue
-      // L'utilisateur pourra créer le client manuellement si nécessaire
+      console.error(`\n❌ ERREUR création client:`, error.message);
+      console.error(`❌ Stack:`, error.stack);
+      // Ne pas bloquer l'acceptation de la cotation
     }
   }
 
   /**
-   * Créer un client TEMPORAIRE à partir d'un lead (prospect)
-   * SANS mot de passe et SANS compte Keycloak
+   * ✅ CORRECTION FINALE: Mettre à jour le statut du prospect vers CLIENT
+   * Exécutée TOUJOURS lors de l'acceptation d'une cotation
    */
-  private async createTemporaryClientFromLead(lead: Lead, quote: Quote): Promise<Client> {
-    const clientData = {
-      nom: lead.company || lead.fullName,
-      interlocuteur: lead.fullName,
-      categorie: 'CLIENT',
-      type_client: 'PROSPECT_CONVERTI',
-      adresse: lead.street || null,
-      code_postal: lead.postalCode || null,
-      ville: lead.city || null,
-      pays: lead.country || 'Tunisie',
-      nature: lead.industry || null,
-      etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
-      timbre: true,
-      statut: 'actif',
-      is_permanent: false, // CLIENT TEMPORAIRE
-      mot_de_passe: null, // PAS de mot de passe
-      keycloak_id: null, // PAS de compte Keycloak
-      // Contact
-      contact_mail1: lead.email,
-      contact_tel1: lead.phone || null,
-    };
-
-    console.log(`🔧 Création client TEMPORAIRE depuis lead: ${lead.fullName}`);
-    console.log(`   ⚠️ SANS mot de passe et SANS compte Keycloak`);
-    
-    const newClient = await this.clientService.create(clientData as any);
-
-    // NE PAS créer de compte Keycloak - Client temporaire uniquement
-    console.log(`✅ Client temporaire créé (ID: ${newClient.id}) - Aucun accès web`);
-
-    return newClient;
+  private async updateLeadStatusToClient(quote: Quote): Promise<void> {
+    try {
+      console.log(`🔍 updateLeadStatusToClient appelée pour cotation ${quote.quoteNumber}`);
+      console.log(`📊 Quote leadId: ${quote.leadId}, opportunityId: ${quote.opportunityId}`);
+      
+      // Cas 1: Cotation directement liée à un prospect
+      if (quote.leadId) {
+        console.log(`🎯 Mise à jour directe du prospect ID: ${quote.leadId}`);
+        
+        // Vérifier que le prospect existe
+        const lead = await this.leadRepository.findOne({
+          where: { id: quote.leadId }
+        });
+        
+        if (lead) {
+          console.log(`📋 Prospect trouvé - Statut actuel: ${lead.status}`);
+          console.log(`🔄 Mise à jour vers: CLIENT`);
+          
+          // ✅ CORRECTION: Utiliser LeadStatus.CLIENT (l'enum existe bien)
+          lead.status = LeadStatus.CLIENT;
+          await this.leadRepository.save(lead);
+          
+          console.log(`✅ Statut du prospect #${lead.id} mis à jour vers CLIENT`);
+        } else {
+          console.log(`⚠️ Prospect ID ${quote.leadId} non trouvé`);
+        }
+      } 
+      // Cas 2: Cotation liée à une opportunité qui a un prospect
+      else if (quote.opportunityId) {
+        console.log(`🎯 Recherche du prospect via opportunité ID: ${quote.opportunityId}`);
+        
+        const opportunity = await this.opportunityRepository.findOne({
+          where: { id: quote.opportunityId },
+          relations: ['lead']
+        });
+        
+        if (opportunity && opportunity.lead) {
+          console.log(`📋 Prospect trouvé via opportunité - ID: ${opportunity.lead.id}, Statut actuel: ${opportunity.lead.status}`);
+          console.log(`🔄 Mise à jour vers: CLIENT`);
+          
+          // ✅ CORRECTION: Utiliser LeadStatus.CLIENT (l'enum existe bien)
+          opportunity.lead.status = LeadStatus.CLIENT;
+          await this.leadRepository.save(opportunity.lead);
+          
+          console.log(`✅ Statut du prospect #${opportunity.lead.id} mis à jour vers CLIENT`);
+        } else {
+          console.log(`⚠️ Opportunité ou prospect non trouvé`);
+        }
+      } else {
+        console.log(`⚠️ Aucun leadId ni opportunityId dans la cotation`);
+      }
+    } catch (error) {
+      console.error(`❌ Erreur lors de la mise à jour du statut du prospect:`, error);
+      console.error(`❌ Stack trace:`, error.stack);
+      // Ne pas faire échouer le processus si cette étape échoue
+    }
   }
 
   /**
-   * Créer un client TEMPORAIRE à partir des données de cotation
+   * ✅ CORRECTION FINALE: Créer un client TEMPORAIRE à partir d'un PROSPECT
+   * SANS mot de passe et SANS compte Keycloak
+   * Utilise toutes les données du prospect pour un mapping correct
+   */
+  private async createTemporaryClientFromLead(lead: Lead, quote: Quote): Promise<Client> {
+    try {
+      console.log(`🔧 createTemporaryClientFromLead - Début de création`);
+      console.log(`📋 Données du prospect:`);
+      console.log(`   - ID: ${lead.id}`);
+      console.log(`   - Nom complet: ${lead.fullName}`);
+      console.log(`   - Société: ${lead.company || 'Non fournie'}`);
+      console.log(`   - Email: ${lead.email}`);
+      console.log(`   - Téléphone: ${lead.phone || 'Non fourni'}`);
+      console.log(`   - Pays: ${lead.country || 'Tunisie'}`);
+      console.log(`   - isLocal: ${lead.isLocal}`);
+      console.log(`   - Adresse: ${lead.street || 'Non fournie'}`);
+      console.log(`   - Ville: ${lead.city || 'Non fournie'}`);
+      console.log(`   - Code postal: ${lead.postalCode || 'Non fourni'}`);
+      
+      // ✅ Mapping correct des données du prospect vers le client
+      const clientData: any = {
+        nom: lead.company || lead.fullName,
+        interlocuteur: lead.fullName,
+        categorie: lead.isLocal ? 'LOCAL' : 'ETRANGER',
+        type_client: 'CONVERTI',
+        adresse: lead.street || null,
+        code_postal: lead.postalCode || null,
+        ville: lead.city || null,
+        pays: lead.country || 'Tunisie',
+        nature: lead.industry || null,
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
+        timbre: true,
+        statut: 'actif',
+        is_permanent: false,
+        mot_de_passe: null,
+        keycloak_id: null,
+        contact_mail1: lead.email,
+        contact_tel1: lead.phone || null,
+      };
+
+      console.log(`\n📊 DONNÉES CLIENT À CRÉER (depuis lead #${lead.id}):`);
+      console.log(`   ========================================`);
+      console.log(`   - nom: ${clientData.nom}`);
+      console.log(`   - interlocuteur: ${clientData.interlocuteur}`);
+      console.log(`   - categorie: ${clientData.categorie} (mappé depuis isLocal: ${lead.isLocal})`);
+      console.log(`   - type_client: ${clientData.type_client}`);
+      console.log(`   - is_permanent: ${clientData.is_permanent}`);
+      console.log(`   ----------------------------------------`);
+      console.log(`   📧 DONNÉES DE CONTACT (CRITIQUES):`);
+      console.log(`   - contact_mail1: "${clientData.contact_mail1}" (depuis lead.email: "${lead.email}")`);
+      console.log(`   - contact_tel1: "${clientData.contact_tel1}" (depuis lead.phone: "${lead.phone || 'NULL'}")`);
+      console.log(`   - contact_fonction: "${clientData.contact_fonction || 'NULL'}"`);
+      console.log(`   ========================================`);
+      console.log(`⚠️ Client TEMPORAIRE - SANS mot de passe et SANS compte Keycloak\n`);
+      
+      console.log(`🔄 Appel de clientService.create()...`);
+      const newClient = await this.clientService.create(clientData);
+      
+      if (newClient && newClient.id) {
+        console.log(`✅ Client temporaire créé avec succès!`);
+        console.log(`   - ID: ${newClient.id}`);
+        console.log(`   - Nom: ${newClient.nom}`);
+        console.log(`   - Catégorie: ${newClient.categorie}`);
+        console.log(`   - is_permanent: ${newClient.is_permanent}`);
+        console.log(`   - ✅ contact_client créé automatiquement par clientService`);
+      } else {
+        console.error(`❌ Client créé mais sans ID!`, newClient);
+        throw new Error('Client créé sans ID');
+      }
+
+      return newClient;
+    } catch (error) {
+      console.error(`❌ Erreur dans createTemporaryClientFromLead:`, error);
+      console.error(`❌ Message d'erreur:`, error.message);
+      console.error(`❌ Stack trace:`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * ⚠️ MÉTHODE OBSOLÈTE - Non utilisée depuis la simplification
+   * Créer un client TEMPORAIRE à partir d'un lead (prospect)
+   * SANS mot de passe et SANS compte Keycloak
+   */
+  /*private async createTemporaryClientFromLead(lead: Lead, quote: Quote): Promise<Client> {
+    try {
+      console.log(`🔧 createTemporaryClientFromLead - Début de création`);
+      console.log(`📋 Lead: ${lead.fullName} (${lead.company || 'Pas de société'})`);
+      
+      const clientData = {
+        nom: lead.company || lead.fullName,
+        interlocuteur: lead.fullName,
+        categorie: 'CLIENT',
+        type_client: 'PROSPECT_CONVERTI',
+        adresse: lead.street || null,
+        code_postal: lead.postalCode || null,
+        ville: lead.city || null,
+        pays: lead.country || 'Tunisie',
+        nature: lead.industry || null,
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
+        timbre: true,
+        statut: 'actif',
+        is_permanent: false, // CLIENT TEMPORAIRE
+        mot_de_passe: null, // PAS de mot de passe
+        keycloak_id: null, // PAS de compte Keycloak
+        // Contact
+        contact_mail1: lead.email,
+        contact_tel1: lead.phone || null,
+      };
+
+      console.log(`� Données client à créer:`, JSON.stringify(clientData, null, 2));
+      console.log(`⚠️ Client TEMPORAIRE - SANS mot de passe et SANS compte Keycloak`);
+      
+      console.log(`🔄 Appel de clientService.create()...`);
+      const newClient = await this.clientService.create(clientData as any);
+      
+      if (newClient && newClient.id) {
+        console.log(`✅ Client temporaire créé avec succès!`);
+        console.log(`   - ID: ${newClient.id}`);
+        console.log(`   - Nom: ${newClient.nom}`);
+        console.log(`   - Email: ${clientData.contact_mail1}`);
+        console.log(`   - is_permanent: ${newClient.is_permanent}`);
+        console.log(`   - Aucun accès web (pas de mot de passe)`);
+      } else {
+        console.log(`⚠️ Client créé mais sans ID?`, newClient);
+      }
+
+      return newClient;
+    } catch (error) {
+      console.error(`❌ Erreur dans createTemporaryClientFromLead:`, error);
+      console.error(`❌ Stack trace:`, error.stack);
+      throw error; // Relancer l'erreur pour qu'elle soit catchée par autoConvertToClient
+    }
+  }*/
+
+  /**
+   * ✅ Créer un client TEMPORAIRE à partir des données de cotation UNIQUEMENT
    * SANS mot de passe et SANS compte Keycloak
    */
   private async createTemporaryClientFromQuote(quote: Quote): Promise<Client> {
-    const clientData = {
-      nom: quote.clientCompany || quote.clientName,
-      interlocuteur: quote.clientName,
-      categorie: 'CLIENT',
-      type_client: 'PROSPECT_CONVERTI',
-      adresse: quote.clientAddress || null,
-      pays: quote.country || 'Tunisie',
-      etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
-      timbre: true,
-      statut: 'actif',
-      is_permanent: false, // CLIENT TEMPORAIRE
-      mot_de_passe: null, // PAS de mot de passe
-      keycloak_id: null, // PAS de compte Keycloak
-      // Contact
-      contact_mail1: quote.clientEmail,
-      contact_tel1: quote.clientPhone || null,
-    };
+    try {
+      console.log(`🔧 createTemporaryClientFromQuote - Début de création`);
+      console.log(`📋 Cotation: ${quote.quoteNumber} - Client: ${quote.clientName}`);
+      
+      // ✅ Déterminer la catégorie en fonction du pays
+      const isLocalCountry = !quote.country || quote.country.toLowerCase() === 'tunisie';
+      
+      const clientData = {
+        nom: quote.clientCompany || quote.clientName,
+        interlocuteur: quote.clientName,
+        categorie: isLocalCountry ? 'LOCAL' : 'ETRANGER',
+        type_client: 'CONVERTI',
+        adresse: quote.clientAddress || null,
+        pays: quote.country || 'Tunisie',
+        etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
+        timbre: true,
+        statut: 'actif',
+        is_permanent: false, // CLIENT TEMPORAIRE
+        mot_de_passe: null, // PAS de mot de passe
+        keycloak_id: null, // PAS de compte Keycloak
+        // ✅ CORRECTION: Email et téléphone depuis la cotation
+        contact_mail1: quote.clientEmail,
+        contact_tel1: quote.clientPhone || null,
+      };
 
-    console.log(`🔧 Création client TEMPORAIRE depuis cotation: ${quote.clientName}`);
-    console.log(`   ⚠️ SANS mot de passe et SANS compte Keycloak`);
-    
-    const newClient = await this.clientService.create(clientData as any);
+      console.log(`� Données client à créer:`, JSON.stringify(clientData, null, 2));
+      console.log(`⚠️ Client TEMPORAIRE - SANS mot de passe et SANS compte Keycloak`);
+      
+      console.log(`🔄 Appel de clientService.create()...`);
+      const newClient = await this.clientService.create(clientData as any);
+      
+      if (newClient && newClient.id) {
+        console.log(`✅ Client temporaire créé avec succès (FALLBACK depuis cotation)!`);
+        console.log(`   - ID: ${newClient.id}`);
+        console.log(`   - Nom: ${newClient.nom}`);
+        console.log(`   - Catégorie: ${clientData.categorie}`);
+        console.log(`   - Email: ${quote.clientEmail}`);
+        console.log(`   - Téléphone: ${quote.clientPhone || 'Non fourni'}`);
+        console.log(`   - is_permanent: ${newClient.is_permanent}`);
+        console.log(`   - ✅ contact_client créé automatiquement par clientService`);
+      } else {
+        console.log(`⚠️ Client créé mais sans ID?`, newClient);
+      }
 
-    // NE PAS créer de compte Keycloak - Client temporaire uniquement
-    console.log(`✅ Client temporaire créé (ID: ${newClient.id}) - Aucun accès web`);
-
-    return newClient;
+      return newClient;
+    } catch (error) {
+      console.error(`❌ Erreur dans createTemporaryClientFromQuote:`, error);
+      console.error(`❌ Stack trace:`, error.stack);
+      throw error;
+    }
   }
 
   /**
