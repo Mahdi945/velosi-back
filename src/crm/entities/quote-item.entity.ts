@@ -8,10 +8,11 @@ import {
 import { Quote } from './quote.entity';
 
 export enum QuoteItemCategory {
-  GROUPAGE = 'groupage',
-  AERIEN = 'aerien',
+  GROUPAGE = 'groupage', // LCL
+  COMPLET = 'complet', // FCL
   ROUTIER = 'routier',
-  COMPLET = 'complet',
+  AERIEN_NORMALE = 'aerien_normale',
+  AERIEN_EXPRESSE = 'aerien_expresse',
 }
 
 export enum VehicleType {
@@ -25,17 +26,8 @@ export enum VehicleType {
   CONTAINER = 'container',
 }
 
-export enum ServiceType {
-  PICKUP_DELIVERY = 'pickup_delivery',
-  DOOR_TO_DOOR = 'door_to_door',
-  EXPRESS_DELIVERY = 'express_delivery',
-  SCHEDULED_DELIVERY = 'scheduled_delivery',
-  SAME_DAY = 'same_day',
-  NEXT_DAY = 'next_day',
-  WAREHOUSING = 'warehousing',
-  PACKAGING = 'packaging',
-  INSURANCE = 'insurance',
-}
+// ServiceType n'est plus un enum mais stocké en VARCHAR
+// Valeurs possibles: "avec_livraison" ou "sans_livraison"
 
 @Entity('crm_quote_items')
 export class QuoteItem {
@@ -103,8 +95,22 @@ export class QuoteItem {
   @Column({ name: 'distance_km', type: 'decimal', precision: 8, scale: 2, nullable: true })
   distanceKm: number;
 
-  @Column({ name: 'volume_m3', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  @Column({ name: 'volume_m3', type: 'decimal', precision: 10, scale: 3, nullable: true })
   volumeM3: number;
+
+  // 🆕 Dimensions pour calcul de volume (aérien/groupage)
+  @Column({ name: 'length_cm', type: 'decimal', precision: 8, scale: 2, nullable: true })
+  lengthCm: number;
+
+  @Column({ name: 'width_cm', type: 'decimal', precision: 8, scale: 2, nullable: true })
+  widthCm: number;
+
+  @Column({ name: 'height_cm', type: 'decimal', precision: 8, scale: 2, nullable: true })
+  heightCm: number;
+
+  // 🆕 Poids volumétrique (calculé selon catégorie)
+  @Column({ name: 'volumetric_weight', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  volumetricWeight: number;
 
   @Column({
     name: 'vehicle_type',
@@ -114,13 +120,9 @@ export class QuoteItem {
   })
   vehicleType: VehicleType;
 
-  @Column({
-    name: 'service_type',
-    type: 'enum',
-    enum: ServiceType,
-    nullable: true,
-  })
-  serviceType: ServiceType;
+  // Service type devient VARCHAR pour stocker "avec_livraison" ou "sans_livraison"
+  @Column({ name: 'service_type', length: 50, nullable: true })
+  serviceType: string;
 
   // Prix et quantités
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 1 })

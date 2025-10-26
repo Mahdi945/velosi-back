@@ -216,6 +216,10 @@ export class Quote {
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason: string;
 
+  // QR Code
+  @Column({ name: 'qr_code_data', type: 'text', nullable: true })
+  qrCodeData: string;
+
   // Gestion commerciale
   @Column({ name: 'created_by' })
   createdBy: number;

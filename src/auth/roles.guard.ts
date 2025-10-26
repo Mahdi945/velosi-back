@@ -27,7 +27,8 @@ export class RolesGuard implements CanActivate {
     console.log('Roles Guard - Utilisateur:', user ? {
       id: user.id,
       username: user.username,
-      role: user.role
+      role: user.role,
+      roles: user.roles
     } : 'null');
 
     if (!user) {
@@ -35,23 +36,41 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Utilisateur non authentifié');
     }
 
+    // Récupérer les rôles de l'utilisateur (peut être un string ou un array)
+    let userRoles: string[] = [];
+    if (typeof user.role === 'string') {
+      userRoles.push(user.role);
+    } else if (Array.isArray(user.role)) {
+      userRoles = user.role;
+    }
+    
+    // Ajouter aussi user.roles s'il existe (Keycloak peut l'utiliser)
+    if (Array.isArray(user.roles)) {
+      userRoles = [...userRoles, ...user.roles];
+    } else if (typeof user.roles === 'string') {
+      userRoles.push(user.roles);
+    }
+
+    // Normaliser tous les rôles en minuscules pour une comparaison insensible à la casse
+    const normalizedUserRoles = userRoles.map(r => r.toLowerCase());
+
     const hasRole = requiredRoles.some(
-      (role) => user.role?.toLowerCase() === role.toLowerCase(),
+      (requiredRole) => normalizedUserRoles.includes(requiredRole.toLowerCase()),
     );
 
     console.log('Roles Guard - Vérification des rôles:', {
-      userRole: user.role,
+      userRoles: normalizedUserRoles,
       requiredRoles,
       hasRole
     });
 
     if (!hasRole) {
       console.error('Roles Guard - Accès refusé:', {
-        userRole: user.role,
+        userRoles: normalizedUserRoles,
         requiredRoles
       });
       throw new ForbiddenException(
-        `Accès refusé. Rôle actuel: ${user.role}. Rôles requis: ${requiredRoles.join(', ')}`,
+        `Accès refusé. Rôles actuels: ${normalizedUserRoles.join(', ')}. Rôles requis: ${requiredRoles.join(', ')}`,
       );
     }
 

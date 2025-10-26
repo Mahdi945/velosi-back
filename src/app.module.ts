@@ -13,12 +13,18 @@ import { FilesModule } from './files/files.module';
 import { DiagnosticController } from './controllers/diagnostic.controller';
 import { CleanupController } from './controllers/cleanup.controller';
 import { StatsController } from './controllers/stats.controller';
+import { DashboardController } from './controllers/dashboard.controller';
 import { typeOrmConfig } from './config/database.config';
 import { SchedulerService } from './services/scheduler.service';
+import { DashboardService } from './services/dashboard.service';
 import { Personnel } from './entities/personnel.entity';
 import { Client } from './entities/client.entity';
 import { AutorisationTVA } from './entities/autorisation-tva.entity';
 import { BCsusTVA } from './entities/bcsus-tva.entity';
+import { Lead } from './entities/crm/lead.entity';
+import { Opportunity } from './entities/crm/opportunity.entity';
+import { Quote } from './crm/entities/quote.entity';
+import { ObjectifCom } from './entities/objectif-com.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { ContactController } from './contact/contact.controller';
@@ -48,9 +54,9 @@ import { ClientTVAModule } from './modules/client-tva.module';
     LocationModule, // Module de géolocalisation
     VechatModule, // Module VelosiChat
     ClientTVAModule, // Module de gestion des clients et autorisations TVA
-    TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA]), // Pour le SchedulerService et StatsController
+    TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom]), // Pour le SchedulerService, StatsController et DashboardService
   ],
-  controllers: [AppController, DiagnosticController, CleanupController, StatsController, ContactController],
-  providers: [AppService, SchedulerService, KeycloakService, EmailService],
+  controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],
+  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService],
 })
 export class AppModule {}

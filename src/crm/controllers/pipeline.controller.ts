@@ -344,7 +344,7 @@ export class PipelineController {
 
   /**
    * GET /api/crm/leads
-   * Récupérer la liste de tous les prospects (leads)
+   * Rï¿½cupï¿½rer la liste de tous les prospects (leads)
    */
   @Get('/leads')
   async getAllLeads(): Promise<{
@@ -352,29 +352,29 @@ export class PipelineController {
     data: any[];
     message: string;
   }> {
-    this.logger.log('?? GET /api/crm/leads - Récupération liste des prospects');
+    this.logger.log('?? GET /api/crm/leads - Rï¿½cupï¿½ration liste des prospects');
     
     try {
       const leads = await this.pipelineService.getAllLeads();
 
-      this.logger.log(`?  prospects récupérés`);
+      this.logger.log(`?  prospects rï¿½cupï¿½rï¿½s`);
 
       return {
         success: true,
         data: leads,
-        message: 'Liste des prospects récupérée avec succès'
+        message: 'Liste des prospects rï¿½cupï¿½rï¿½e avec succï¿½s'
       };
 
     } catch (error) {
-      this.logger.error('? Erreur récupération prospects:', error.message);
+      this.logger.error('? Erreur rï¿½cupï¿½ration prospects:', error.message);
       
-      throw new BadRequestException(`Erreur lors de la récupération des prospects: `);
+      throw new BadRequestException(`Erreur lors de la rï¿½cupï¿½ration des prospects: `);
     }
   }
 
   /**
    * GET /api/crm/opportunities
-   * Récupérer la liste de toutes les opportunités
+   * Rï¿½cupï¿½rer la liste de toutes les opportunitï¿½s
    */
   @Get('/opportunities')
   async getAllOpportunities(): Promise<{
@@ -382,23 +382,23 @@ export class PipelineController {
     data: any[];
     message: string;
   }> {
-    this.logger.log('?? GET /api/crm/opportunities - Récupération liste des opportunités');
+    this.logger.log('?? GET /api/crm/opportunities - Rï¿½cupï¿½ration liste des opportunitï¿½s');
     
     try {
       const opportunities = await this.pipelineService.getAllOpportunities();
 
-      this.logger.log(`?  opportunités récupérées`);
+      this.logger.log(`?  opportunitï¿½s rï¿½cupï¿½rï¿½es`);
 
       return {
         success: true,
         data: opportunities,
-        message: 'Liste des opportunités récupérée avec succès'
+        message: 'Liste des opportunitï¿½s rï¿½cupï¿½rï¿½e avec succï¿½s'
       };
 
     } catch (error) {
-      this.logger.error('? Erreur récupération opportunités:', error.message);
+      this.logger.error('? Erreur rï¿½cupï¿½ration opportunitï¿½s:', error.message);
       
-      throw new BadRequestException(`Erreur lors de la récupération des opportunités: `);
+      throw new BadRequestException(`Erreur lors de la rï¿½cupï¿½ration des opportunitï¿½s: `);
     }
   }
 }

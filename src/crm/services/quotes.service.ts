@@ -40,6 +40,54 @@ export class QuotesService {
   ) {}
 
   /**
+   * 🎯 Générer un QR code pour la cotation
+   * Contient les informations essentielles : numéro, montant, date, validité, lien de visualisation
+   */
+  private async generateQRCode(quote: Quote): Promise<string> {
+    const QRCode = require('qrcode');
+    
+    // URL de visualisation publique de la cotation
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    const viewLink = `${frontendUrl}/public/quote-view/${quote.id}`;
+
+    // Données à encoder dans le QR code (format structuré pour faciliter le parsing)
+    const qrData = {
+      numero: quote.quoteNumber,
+      titre: quote.title,
+      client: quote.clientName,
+      montantTTC: quote.total,
+      devise: 'TND',
+      dateCreation: quote.createdAt?.toISOString().split('T')[0],
+      dateValidite: quote.validUntil?.toISOString().split('T')[0],
+      statut: quote.status,
+      lien: viewLink
+    };
+
+    // Encoder en JSON puis en base64 pour le QR code
+    const qrContent = JSON.stringify(qrData);
+
+    try {
+      // Générer le QR code en base64
+      const qrCodeBase64 = await QRCode.toDataURL(qrContent, {
+        errorCorrectionLevel: 'H', // Haute correction d'erreur
+        type: 'image/png',
+        quality: 0.95,
+        margin: 1,
+        width: 300,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      });
+
+      return qrCodeBase64;
+    } catch (error) {
+      console.error('❌ Erreur lors de la génération du QR code:', error);
+      return null;
+    }
+  }
+
+  /**
    * Génère un numéro de devis unique (format: Q25/0629)
    */
   private async generateQuoteNumber(): Promise<string> {
@@ -159,6 +207,13 @@ export class QuotesService {
 
       // Sauvegarder
       const savedQuote = await this.quoteRepository.save(quote);
+
+      // 🎯 Générer le QR code après la sauvegarde (on a besoin de l'ID)
+      const qrCode = await this.generateQRCode(savedQuote);
+      if (qrCode) {
+        savedQuote.qrCodeData = qrCode;
+        await this.quoteRepository.save(savedQuote);
+      }
 
       // 🎯 SYNCHRONISATION AUTOMATIQUE: Si cotation créée depuis opportunité, 
       // déplacer l'opportunité dans la colonne "proposal"
@@ -340,6 +395,13 @@ export class QuotesService {
 
     // Sauvegarder
     const updatedQuote = await this.quoteRepository.save(quote);
+
+    // 🎯 Régénérer le QR code après la mise à jour
+    const qrCode = await this.generateQRCode(updatedQuote);
+    if (qrCode) {
+      updatedQuote.qrCodeData = qrCode;
+      await this.quoteRepository.save(updatedQuote);
+    }
 
     return this.findOne(updatedQuote.id);
   }
@@ -699,6 +761,10 @@ export class QuotesService {
       // ✅ ÉTAPE 2: Créer le client UNIQUEMENT avec les données de la cotation
       const isLocalCountry = !quote.country || quote.country.toLowerCase() === 'tunisie';
       
+      // ✅ CORRECTION: S'assurer que l'email et le téléphone sont bien fournis
+      const clientEmail = quote.clientEmail;
+      const clientPhone = quote.clientPhone || null;
+      
       const clientData: any = {
         nom: quote.clientCompany || quote.clientName,
         interlocuteur: quote.clientName,
@@ -712,8 +778,9 @@ export class QuotesService {
         is_permanent: false,
         mot_de_passe: null,
         keycloak_id: null,
-        contact_mail1: quote.clientEmail,
-        contact_tel1: quote.clientPhone || null,
+        // ✅ CORRECTION: Champs critiques pour contact_client
+        contact_mail1: clientEmail,
+        contact_tel1: clientPhone,
         contact_fonction: null,
       };
 
@@ -730,6 +797,12 @@ export class QuotesService {
       console.log(`   - contact_tel1: "${clientData.contact_tel1}" (depuis quote.clientPhone: "${quote.clientPhone || 'NULL'}")`);
       console.log(`   - contact_fonction: "${clientData.contact_fonction}"`);
       console.log(`   ========================================\n`);
+      
+      // ✅ VÉRIFICATION: Alerter si l'email est manquant
+      if (!clientEmail) {
+        console.warn(`⚠️ ATTENTION: Cotation ${quote.quoteNumber} sans email client!`);
+        console.warn(`   → Le contact_client sera créé mais sans email`);
+      }
 
       const newClient = await this.clientService.create(clientData);
       

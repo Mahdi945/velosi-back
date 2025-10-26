@@ -25,10 +25,11 @@ export enum QuoteStatus {
 }
 
 export enum QuoteItemCategory {
-  GROUPAGE = 'groupage',
-  AERIEN = 'aerien',
+  GROUPAGE = 'groupage', // LCL
+  COMPLET = 'complet', // FCL
   ROUTIER = 'routier',
-  COMPLET = 'complet',
+  AERIEN_NORMALE = 'aerien_normale',
+  AERIEN_EXPRESSE = 'aerien_expresse',
 }
 
 export enum VehicleType {
@@ -42,17 +43,8 @@ export enum VehicleType {
   CONTAINER = 'container',
 }
 
-export enum ServiceType {
-  PICKUP_DELIVERY = 'pickup_delivery',
-  DOOR_TO_DOOR = 'door_to_door',
-  EXPRESS_DELIVERY = 'express_delivery',
-  SCHEDULED_DELIVERY = 'scheduled_delivery',
-  SAME_DAY = 'same_day',
-  NEXT_DAY = 'next_day',
-  WAREHOUSING = 'warehousing',
-  PACKAGING = 'packaging',
-  INSURANCE = 'insurance',
-}
+// ServiceType n'est plus un enum mais une string VARCHAR
+// Valeurs possibles: "avec_livraison" ou "sans_livraison"
 
 // DTO pour les lignes de devis
 export class CreateQuoteItemDto {
@@ -119,13 +111,32 @@ export class CreateQuoteItemDto {
   @IsNumber()
   volumeM3?: number;
 
+  // 🆕 Dimensions pour calcul de volume (aérien/groupage)
+  @IsOptional()
+  @IsNumber()
+  lengthCm?: number;
+
+  @IsOptional()
+  @IsNumber()
+  widthCm?: number;
+
+  @IsOptional()
+  @IsNumber()
+  heightCm?: number;
+
+  // 🆕 Poids volumétrique calculé
+  @IsOptional()
+  @IsNumber()
+  volumetricWeight?: number;
+
   @IsOptional()
   @IsEnum(VehicleType)
   vehicleType?: VehicleType;
 
+  // Service type devient string (VARCHAR)
   @IsOptional()
-  @IsEnum(ServiceType)
-  serviceType?: ServiceType;
+  @IsString()
+  serviceType?: string;
 
   @IsNumber()
   @Min(0)

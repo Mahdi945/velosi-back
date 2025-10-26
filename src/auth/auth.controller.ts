@@ -146,6 +146,7 @@ export class AuthController {
       message: 'Connexion réussie',
       user: result.user,
       access_token: result.access_token, // Pour compatibilité avec le frontend
+      refresh_token: result.refresh_token, // ✅ AJOUT: Retourner aussi le refresh_token dans le body
     };
   }
 
@@ -155,20 +156,41 @@ export class AuthController {
     @Request() req,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refresh_token = req.cookies?.refresh_token;
+    console.log('🔄 Endpoint refresh appelé');
+    
+    // ✅ AMÉLIORATION: Chercher le refresh_token dans plusieurs sources
+    let refresh_token = req.cookies?.refresh_token;
+    
+    // Si pas dans les cookies, chercher dans le body
+    if (!refresh_token && req.body?.refresh_token) {
+      refresh_token = req.body.refresh_token;
+      console.log('🔄 Refresh token trouvé dans le body');
+    }
+    
+    // Si toujours pas trouvé, chercher dans localStorage via l'Authorization header
+    if (!refresh_token) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        refresh_token = authHeader.substring(7);
+        console.log('🔄 Refresh token trouvé dans Authorization header');
+      }
+    }
 
     if (!refresh_token) {
+      console.log('❌ Token de rafraîchissement manquant');
       throw new UnauthorizedException('Token de rafraîchissement manquant');
     }
 
+    console.log('✅ Token de rafraîchissement trouvé, validation en cours...');
     const result = await this.authService.refreshToken(refresh_token);
 
     // Mettre à jour les cookies - Configuration 8 heures cohérente
     const cookieOptions = {
-      httpOnly: true,
+      httpOnly: false, // ✅ CHANGEMENT: Non httpOnly pour accès JavaScript
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax' as const,
       maxAge: 8 * 60 * 60 * 1000, // 8 heures - cohérent avec la configuration initiale
+      path: '/'
     };
 
     const refreshCookieOptions = {
@@ -183,10 +205,13 @@ export class AuthController {
       refreshCookieOptions,
     );
 
+    console.log('✅ Tokens refreshés et cookies mis à jour');
+
     return {
       message: 'Token rafraîchi avec succès',
       user: result.user,
       access_token: result.access_token,
+      refresh_token: result.refresh_token, // ✅ AJOUT: Retourner aussi le refresh_token
     };
   }
 
@@ -194,7 +219,10 @@ export class AuthController {
   @Get('profile')
   async getProfile(@Request() req) {
     const fullUserProfile = await this.authService.getFullUserProfile(req.user.id, req.user.userType);
-    return fullUserProfile;
+    // ✅ CORRECTION: Wrapper dans un objet user pour correspondre au frontend
+    return {
+      user: fullUserProfile
+    };
   }
 
   @UseGuards(JwtAuthGuard)
@@ -276,14 +304,64 @@ export class AuthController {
   @Get('check')
   @HttpCode(HttpStatus.OK)
   check(@Request() req) {
-    // Ne plus utiliser JwtAuthGuard qui cause les erreurs de cookies
-    // Retourner une réponse simple qui indique qu'il faut utiliser sync
-    return {
-      authenticated: false,
-      message: 'Utilisez /api/auth/sync pour l\'authentification',
-      requiresSync: true,
-      timestamp: new Date().toISOString()
-    };
+    console.log('🔍 Endpoint check appelé');
+    
+    // ✅ AMÉLIORATION: Vérifier le token dans plusieurs sources
+    let access_token = req.cookies?.access_token;
+    
+    // Chercher dans l'Authorization header
+    if (!access_token) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        access_token = authHeader.substring(7);
+        console.log('🔍 Token trouvé dans Authorization header');
+      }
+    }
+    
+    if (!access_token) {
+      console.log('❌ Aucun token trouvé - Non authentifié');
+      return {
+        authenticated: false,
+        message: 'Aucun token d\'authentification trouvé',
+        requiresLogin: true,
+        timestamp: new Date().toISOString()
+      };
+    }
+    
+    // Vérifier la validité du token
+    try {
+      const jwt = require('jsonwebtoken');
+      const secret = this.configService.get('JWT_SECRET') || 'velosi-secret-key-2025-ultra-secure';
+      const decoded = jwt.verify(access_token, secret);
+      
+      const currentTime = Math.floor(Date.now() / 1000);
+      const remainingTime = decoded.exp - currentTime;
+      
+      console.log('✅ Token valide, expire dans', Math.floor(remainingTime / 60), 'minutes');
+      
+      return {
+        authenticated: true,
+        message: 'Session valide',
+        user: {
+          id: decoded.sub,
+          username: decoded.username,
+          email: decoded.email,
+          role: decoded.role,
+          userType: decoded.userType
+        },
+        expiresIn: remainingTime,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      console.log('❌ Token invalide:', error.message);
+      return {
+        authenticated: false,
+        message: 'Token invalide ou expiré',
+        requiresLogin: true,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
+    }
   }
 
   @Post('register/personnel')
