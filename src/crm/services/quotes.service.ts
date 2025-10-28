@@ -242,6 +242,11 @@ export class QuotesService {
       search,
       startDate,
       endDate,
+      isArchived,
+      minTotal,
+      maxTotal,
+      importExport,
+      paymentMethod,
       page = 1,
       limit = 10,
       sortBy = 'createdAt',
@@ -258,6 +263,12 @@ export class QuotesService {
 
     // Recherche améliorée - Utiliser QueryBuilder pour rechercher dans plusieurs champs
     let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
+    
+    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
+    if (isArchived === true) {
+      queryBuilder = this.quoteRepository.createQueryBuilder('quote').withDeleted();
+      console.log('🔍 Mode archivé activé - withDeleted() appliqué');
+    }
     
     // Joindre les relations nécessaires
     queryBuilder
@@ -294,6 +305,34 @@ export class QuotesService {
         startDate,
         endDate,
       });
+    }
+
+    // Filtre par archivage (par défaut, ne montrer que les non archivés)
+    if (isArchived !== undefined) {
+      console.log('🔍 Filtre isArchived appliqué:', isArchived, 'type:', typeof isArchived);
+      queryBuilder.andWhere('quote.is_archived = :isArchived', { isArchived });
+    } else {
+      // Par défaut, ne montrer que les éléments non archivés
+      console.log('🔍 Filtre isArchived par défaut: false');
+      queryBuilder.andWhere('quote.is_archived = :isArchived', { isArchived: false });
+    }
+
+    // Filtre par montant total TTC
+    if (minTotal !== undefined) {
+      queryBuilder.andWhere('quote.total >= :minTotal', { minTotal });
+    }
+    if (maxTotal !== undefined) {
+      queryBuilder.andWhere('quote.total <= :maxTotal', { maxTotal });
+    }
+
+    // Filtre par import/export
+    if (importExport) {
+      queryBuilder.andWhere('quote.import_export = :importExport', { importExport });
+    }
+
+    // Filtre par mode de paiement
+    if (paymentMethod) {
+      queryBuilder.andWhere('quote.payment_method = :paymentMethod', { paymentMethod });
     }
 
     // Tri et pagination
@@ -1318,5 +1357,93 @@ export class QuotesService {
         ? (quotes.filter((q) => q.status === QuoteStatus.ACCEPTED).length / quotes.length) * 100
         : 0,
     };
+  }
+
+  /**
+   * 🗑️ SOFT DELETE - Archiver une cotation
+   * Ne supprime jamais physiquement - crucial pour audit et conformité légale
+   */
+  async archiveQuote(id: number, reason: string, userId: number): Promise<Quote> {
+    const quote = await this.findOne(id);
+
+    if (!quote) {
+      throw new NotFoundException(`Cotation #${id} introuvable`);
+    }
+
+    // Vérifier si déjà archivée
+    if (quote.deletedAt || quote.isArchived) {
+      throw new BadRequestException('Cette cotation est déjà archivée');
+    }
+
+    // Mettre à jour avec soft delete
+    await this.quoteRepository.update(id, {
+      deletedAt: new Date(),
+      isArchived: true,
+      archivedReason: reason,
+      archivedBy: userId,
+    });
+
+    return this.quoteRepository.findOne({
+      where: { id },
+      withDeleted: true, // Inclure les entités soft-deleted
+    });
+  }
+
+  /**
+   * ♻️ Restaurer une cotation archivée
+   */
+  async restoreQuote(id: number): Promise<Quote> {
+    const quote = await this.quoteRepository.findOne({
+      where: { id },
+      withDeleted: true,
+    });
+
+    if (!quote) {
+      throw new NotFoundException(`Cotation #${id} introuvable`);
+    }
+
+    if (!quote.deletedAt && !quote.isArchived) {
+      throw new BadRequestException('Cette cotation n\'est pas archivée');
+    }
+
+    // Restaurer
+    await this.quoteRepository.update(id, {
+      deletedAt: null,
+      isArchived: false,
+      archivedReason: null,
+      archivedBy: null,
+    });
+
+    return this.findOne(id);
+  }
+
+  /**
+   * 📋 Récupérer toutes les cotations archivées
+   */
+  async findAllArchived(filters?: QuoteFilterDto) {
+    const query = this.quoteRepository
+      .createQueryBuilder('quote')
+      .leftJoinAndSelect('quote.lead', 'lead')
+      .leftJoinAndSelect('quote.opportunity', 'opportunity')
+      .leftJoinAndSelect('quote.client', 'client')
+      .leftJoinAndSelect('quote.creator', 'creator')
+      .leftJoinAndSelect('quote.commercial', 'commercial')
+      .leftJoinAndSelect('quote.items', 'items')
+      .withDeleted() // Inclure les soft-deleted
+      .where('quote.deleted_at IS NOT NULL');
+
+    if (filters?.commercialId) {
+      query.andWhere('quote.commercialId = :commercialId', {
+        commercialId: filters.commercialId,
+      });
+    }
+
+    if (filters?.status) {
+      query.andWhere('quote.status = :status', { status: filters.status });
+    }
+
+    const quotes = await query.orderBy('quote.deletedAt', 'DESC').getMany();
+
+    return quotes;
   }
 }

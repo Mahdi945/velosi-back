@@ -82,14 +82,22 @@ export class LeadService {
       assignedToId,
       industry,
       isLocal,
+      isArchived,
       page,
       limit,
       sortBy,
       sortOrder,
     } = query;
 
-    const queryBuilder = this.leadRepository
-      .createQueryBuilder('lead')
+    let queryBuilder = this.leadRepository.createQueryBuilder('lead');
+    
+    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
+    if (isArchived === true) {
+      queryBuilder = this.leadRepository.createQueryBuilder('lead').withDeleted();
+      console.log('🔍 LEAD: Mode archivé activé - withDeleted() appliqué');
+    }
+    
+    queryBuilder
       .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
       .leftJoinAndSelect('lead.createdBy', 'createdBy')
       .leftJoinAndSelect('lead.updatedBy', 'updatedBy');
@@ -124,6 +132,17 @@ export class LeadService {
 
     if (isLocal !== undefined) {
       queryBuilder.andWhere('lead.isLocal = :isLocal', { isLocal });
+    }
+
+    // Filtre par archivage (par défaut, ne montrer que les non archivés)
+    if (isArchived !== undefined) {
+      console.log('🔍 Filtre isArchived appliqué:', isArchived, 'type:', typeof isArchived);
+      // Utiliser le nom de la colonne SQL directement pour éviter les problèmes de mapping
+      queryBuilder.andWhere('lead.is_archived = :isArchived', { isArchived });
+    } else {
+      // Par défaut, ne montrer que les éléments non archivés
+      console.log('🔍 Filtre isArchived par défaut: false');
+      queryBuilder.andWhere('lead.is_archived = :isArchived', { isArchived: false });
     }
 
     // Tri
@@ -472,5 +491,59 @@ export class LeadService {
     return await queryBuilder.getMany();
   }
 
+  /**
+   * 🗄️ Archiver un prospect
+   */
+  async archiveLead(id: number, reason: string, userId: number): Promise<Lead> {
+    const lead = await this.leadRepository.findOne({
+      where: { id },
+    });
+
+    if (!lead) {
+      throw new NotFoundException(`Prospect #${id} introuvable`);
+    }
+
+    if (lead.isArchived) {
+      throw new BadRequestException('Ce prospect est déjà archivé');
+    }
+
+    // Archiver avec soft delete
+    await this.leadRepository.update(id, {
+      deletedAt: new Date(),
+      isArchived: true,
+      archivedReason: reason,
+      archivedBy: userId,
+    });
+
+    return this.findOne(id);
+  }
+
+  /**
+   * ♻️ Restaurer un prospect archivé
+   */
+  async restoreLead(id: number): Promise<Lead> {
+    const lead = await this.leadRepository.findOne({
+      where: { id },
+      withDeleted: true,
+    });
+
+    if (!lead) {
+      throw new NotFoundException(`Prospect #${id} introuvable`);
+    }
+
+    if (!lead.deletedAt && !lead.isArchived) {
+      throw new BadRequestException('Ce prospect n\'est pas archivé');
+    }
+
+    // Restaurer
+    await this.leadRepository.update(id, {
+      deletedAt: null,
+      isArchived: false,
+      archivedReason: null,
+      archivedBy: null,
+    });
+
+    return this.findOne(id);
+  }
 
 }

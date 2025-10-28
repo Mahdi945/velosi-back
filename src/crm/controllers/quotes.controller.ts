@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -124,5 +125,34 @@ export class QuotesController {
   async duplicate(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     const userId = req.user?.userId || req.user?.id || 1;
     return this.quotesService.duplicate(id, userId);
+  }
+
+  /**
+   * 🗑️ Archiver une cotation (soft delete)
+   */
+  @Patch(':id/archive')
+  async archiveQuote(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() archiveData: { reason: string },
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId || req.user?.id || 1;
+    return this.quotesService.archiveQuote(id, archiveData.reason, userId);
+  }
+
+  /**
+   * ♻️ Restaurer une cotation archivée
+   */
+  @Patch(':id/restore')
+  async restoreQuote(@Param('id', ParseIntPipe) id: number) {
+    return this.quotesService.restoreQuote(id);
+  }
+
+  /**
+   * 📋 Récupérer les cotations archivées
+   */
+  @Get('archived/all')
+  async findAllArchived(@Query() filters: QuoteFilterDto) {
+    return this.quotesService.findAllArchived(filters);
   }
 }

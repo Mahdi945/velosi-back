@@ -9,6 +9,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { Personnel } from '../personnel.entity';
+import { BaseEntityWithSoftDelete } from '../../common/entities/base-soft-delete.entity';
 // TODO: Créer les entités Opportunity et Activity
 // import { Opportunity } from './opportunity.entity';
 // import { Activity } from './activity.entity';
@@ -50,7 +51,7 @@ export enum Priority {
 }
 
 @Entity('crm_leads')
-export class Lead {
+export class Lead extends BaseEntityWithSoftDelete {
   @PrimaryGeneratedColumn()
   id: number;
 

@@ -15,6 +15,7 @@ import { Personnel } from '../../entities/personnel.entity';
 import { Engin } from '../../entities/engin.entity';
 import { QuoteItem } from './quote-item.entity';
 import { Activity } from './activity.entity';
+import { BaseEntityWithSoftDelete } from '../../common/entities/base-soft-delete.entity';
 
 export enum QuoteStatus {
   DRAFT = 'draft',
@@ -27,7 +28,7 @@ export enum QuoteStatus {
 }
 
 @Entity('crm_quotes')
-export class Quote {
+export class Quote extends BaseEntityWithSoftDelete {
   @PrimaryGeneratedColumn()
   id: number;
 

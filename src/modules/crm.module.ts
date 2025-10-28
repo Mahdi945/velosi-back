@@ -17,6 +17,7 @@ import { PipelineModule } from './crm/pipeline.module';
 import { ActivityModule } from './crm/activity.module';
 import { QuoteModule } from './crm/quote.module';
 import { ReportModule } from './crm/report.module';
+import { IndustryModule } from './crm/industry.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ReportModule } from './crm/report.module';
     ActivityModule, // Module pour la gestion des activités CRM
     QuoteModule, // Module pour la gestion des cotations/devis
     ReportModule, // Module pour les rapports CRM
+    IndustryModule, // Module pour la gestion des secteurs d'activité
   ],
   controllers: [ContactClientController, ObjectifComController, SyncController, StatsController],
   providers: [ContactClientService, ObjectifComService, KeycloakSyncService],

@@ -99,6 +99,24 @@ export class ActivitiesService {
         });
       }
 
+      // ✅ NOUVEAU: Filtre par type de liaison
+      if (filters.linkedTo) {
+        switch (filters.linkedTo) {
+          case 'prospect':
+            queryBuilder.andWhere('activity.leadId IS NOT NULL');
+            break;
+          case 'opportunity':
+            queryBuilder.andWhere('activity.opportunityId IS NOT NULL');
+            break;
+          case 'client':
+            queryBuilder.andWhere('activity.clientId IS NOT NULL');
+            break;
+          case 'quote':
+            queryBuilder.andWhere('activity.quoteId IS NOT NULL');
+            break;
+        }
+      }
+
       // Filtres de personnel
       if (filters.assignedTo) {
         queryBuilder.andWhere('activity.assignedTo = :assignedTo', {

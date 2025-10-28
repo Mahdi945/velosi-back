@@ -260,6 +260,15 @@ export class OpportunityQueryDto {
   expectedCloseDateTo?: string;
 
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  isArchived?: boolean;
+
+  @IsOptional()
   @IsInt()
   @Transform(({ value }) => parseInt(value) || 1)
   page?: number = 1;

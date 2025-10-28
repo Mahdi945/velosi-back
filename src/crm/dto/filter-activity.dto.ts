@@ -47,6 +47,10 @@ export class FilterActivityDto {
   clientId?: number;
 
   @IsOptional()
+  @IsString()
+  linkedTo?: 'prospect' | 'opportunity' | 'client' | 'quote'; // ✅ NOUVEAU: Filtre par type de liaison
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   assignedTo?: number;

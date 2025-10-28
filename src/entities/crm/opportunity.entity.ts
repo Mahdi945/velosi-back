@@ -12,6 +12,7 @@ import {
 import { Lead } from './lead.entity';
 import { Personnel } from '../personnel.entity';
 import { Client } from '../client.entity';
+import { BaseEntityWithSoftDelete } from '../../common/entities/base-soft-delete.entity';
 
 export enum OpportunityStage {
   PROSPECTING = 'prospecting',
@@ -52,7 +53,7 @@ export enum Priority {
 }
 
 @Entity('crm_opportunities')
-export class Opportunity {
+export class Opportunity extends BaseEntityWithSoftDelete {
   @PrimaryGeneratedColumn()
   id: number;
 

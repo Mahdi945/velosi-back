@@ -81,8 +81,15 @@ export class OpportunityService {
   async findAll(query: OpportunityQueryDto): Promise<{ data: Opportunity[]; total: number; totalPages: number }> {
     console.log('🔍 Service findAll - Query:', query);
 
-    const queryBuilder = this.opportunityRepository
-      .createQueryBuilder('opportunity')
+    let queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity');
+    
+    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
+    if (query.isArchived === true) {
+      queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity').withDeleted();
+      console.log('🔍 OPPORTUNITY: Mode archivé activé - withDeleted() appliqué');
+    }
+    
+    queryBuilder
       .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
       .leftJoinAndSelect('opportunity.lead', 'lead')
       .leftJoinAndSelect('opportunity.client', 'client')
@@ -427,5 +434,70 @@ export class OpportunityService {
     if (query.expectedCloseDateTo) {
       queryBuilder.andWhere('opportunity.expectedCloseDate <= :to', { to: query.expectedCloseDateTo });
     }
+
+    // Filtre par archivage (par défaut, ne montrer que les non archivés)
+    if (query.isArchived !== undefined) {
+      console.log('🔍 Filtre isArchived appliqué:', query.isArchived, 'type:', typeof query.isArchived);
+      queryBuilder.andWhere('opportunity.is_archived = :isArchived', { isArchived: query.isArchived });
+    } else {
+      // Par défaut, ne montrer que les éléments non archivés
+      console.log('🔍 Filtre isArchived par défaut: false');
+      queryBuilder.andWhere('opportunity.is_archived = :isArchived', { isArchived: false });
+    }
+  }
+
+  /**
+   * 🗄️ Archiver une opportunité
+   */
+  async archiveOpportunity(id: number, reason: string, userId: number): Promise<Opportunity> {
+    const opportunity = await this.opportunityRepository.findOne({
+      where: { id },
+    });
+
+    if (!opportunity) {
+      throw new NotFoundException(`Opportunité #${id} introuvable`);
+    }
+
+    if (opportunity.isArchived) {
+      throw new BadRequestException('Cette opportunité est déjà archivée');
+    }
+
+    // Archiver avec soft delete
+    await this.opportunityRepository.update(id, {
+      deletedAt: new Date(),
+      isArchived: true,
+      archivedReason: reason,
+      archivedBy: userId,
+    });
+
+    return this.findOne(id);
+  }
+
+  /**
+   * ♻️ Restaurer une opportunité archivée
+   */
+  async restoreOpportunity(id: number): Promise<Opportunity> {
+    const opportunity = await this.opportunityRepository.findOne({
+      where: { id },
+      withDeleted: true,
+    });
+
+    if (!opportunity) {
+      throw new NotFoundException(`Opportunité #${id} introuvable`);
+    }
+
+    if (!opportunity.deletedAt && !opportunity.isArchived) {
+      throw new BadRequestException('Cette opportunité n\'est pas archivée');
+    }
+
+    // Restaurer
+    await this.opportunityRepository.update(id, {
+      deletedAt: null,
+      isArchived: false,
+      archivedReason: null,
+      archivedBy: null,
+    });
+
+    return this.findOne(id);
   }
 }

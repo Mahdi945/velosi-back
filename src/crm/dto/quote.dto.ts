@@ -11,7 +11,7 @@ import {
   Max,
   IsBoolean,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 // Enums
 export enum QuoteStatus {
@@ -533,6 +533,33 @@ export class QuoteFilterDto {
   @Type(() => Date)
   @IsDate()
   endDate?: Date;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  isArchived?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  minTotal?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  maxTotal?: number;
+
+  @IsOptional()
+  @IsString()
+  importExport?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMethod?: string;
 
   @IsOptional()
   @Type(() => Number)

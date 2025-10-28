@@ -2,6 +2,8 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LeadController } from '../../controllers/crm/lead.controller';
 import { LeadService } from '../../services/crm/lead.service';
+import { LeadsController } from '../../crm/controllers/leads.controller';
+import { LeadsService } from '../../crm/services/leads.service';
 import { Lead } from '../../entities/crm/lead.entity';
 import { Personnel } from '../../entities/personnel.entity';
 import { OpportunityService } from '../../services/crm/opportunity.service';
@@ -12,11 +14,12 @@ import { Client } from '../../entities/client.entity';
   imports: [
     TypeOrmModule.forFeature([Lead, Personnel, Opportunity, Client]),
   ],
-  controllers: [LeadController],
+  controllers: [LeadController, LeadsController],
   providers: [
     LeadService,
+    LeadsService, // Service avec soft delete
     OpportunityService,
   ],
-  exports: [LeadService],
+  exports: [LeadService, LeadsService],
 })
 export class LeadModule {}
