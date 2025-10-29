@@ -8,6 +8,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CrmModule } from './modules/crm.module';
 import { EnginModule } from './modules/engin.module';
+import { ArmateursModule } from './modules/armateurs.module';
+import { FournisseursModule } from './modules/fournisseurs.module';
 import { GestionRessourcesModule } from './gestion-ressources/gestion-ressources.module';
 import { FilesModule } from './files/files.module';
 import { DiagnosticController } from './controllers/diagnostic.controller';
@@ -49,6 +51,8 @@ import { ClientTVAModule } from './modules/client-tva.module';
     UsersModule,
     CrmModule,
   EnginModule,
+  ArmateursModule,
+  FournisseursModule,
   GestionRessourcesModule,
     FilesModule,
     LocationModule, // Module de géolocalisation

@@ -39,7 +39,19 @@ export class QuotesController {
   }
 
   @Get()
-  async findAll(@Query() filters: QuoteFilterDto) {
+  async findAll(@Query() filters: QuoteFilterDto, @Req() req: any) {
+    const userId = req.user?.userId || req.user?.id;
+    const userRoles = req.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses cotations
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId && !filters.commercialId) {
+      console.log(`🔐 [Quotes] Filtrage par commercial créateur: ${userId}`);
+      // Ajouter le filtre commercialId si pas déjà présent
+      filters.commercialId = userId;
+    }
+    
     return this.quotesService.findAll(filters);
   }
 
@@ -48,12 +60,24 @@ export class QuotesController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('commercialId') commercialId?: number,
+    @Req() req?: any,
   ) {
+    const userId = req?.user?.userId || req?.user?.id;
+    const userRoles = req?.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses cotations
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
     const filters = {
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
-      commercialId,
+      commercialId: (isCommercialOnly && userId && !commercialId) ? userId : commercialId,
     };
+    
+    if (isCommercialOnly && userId) {
+      console.log(`🔐 [Quotes Statistics] Filtrage par commercial: ${userId}`);
+    }
+    
     return this.quotesService.getStatistics(filters);
   }
 

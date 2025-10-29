@@ -21,17 +21,42 @@ export class LeadsController {
 
   /**
    * 📋 Récupérer tous les leads actifs
+   * Si l'utilisateur est commercial, filtre par assignedToId automatiquement
    */
   @Get()
-  async findAll(): Promise<Lead[]> {
+  async findAll(@Req() req: any): Promise<Lead[]> {
+    const userId = req.user?.userId || req.user?.id;
+    const userRoles = req.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses leads
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId) {
+      console.log(`🔐 [Leads] Filtrage par commercial assigné: ${userId}`);
+      return this.leadsService.findByAssignedTo(userId);
+    }
+    
+    // Sinon, retourner tous les leads (admin/manager)
     return this.leadsService.findAll();
   }
 
   /**
    * 📊 Statistiques des leads
+   * Si l'utilisateur est commercial, filtre par assignedToId automatiquement
    */
   @Get('statistics')
-  async getStatistics() {
+  async getStatistics(@Req() req: any) {
+    const userId = req.user?.userId || req.user?.id;
+    const userRoles = req.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses leads
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId) {
+      console.log(`🔐 [Leads Statistics] Filtrage par commercial assigné: ${userId}`);
+      return this.leadsService.getStatisticsByCommercial(userId);
+    }
+    
     return this.leadsService.getStatistics();
   }
 

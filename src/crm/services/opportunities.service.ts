@@ -26,6 +26,20 @@ export class OpportunitiesService {
   }
 
   /**
+   * 🔍 Récupérer les opportunités assignées à un commercial spécifique
+   */
+  async findByAssignedTo(userId: number): Promise<Opportunity[]> {
+    return this.opportunityRepository.find({
+      where: { 
+        assignedToId: userId,
+        deletedAt: IsNull()
+      },
+      relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
    * 🔍 Récupérer une opportunité par ID
    */
   async findOne(id: number): Promise<Opportunity> {
@@ -137,6 +151,42 @@ export class OpportunitiesService {
   async getStatistics() {
     const allOpportunities = await this.opportunityRepository.find({
       where: { deletedAt: IsNull() },
+    });
+
+    const totalValue = allOpportunities.reduce((sum, opp) => sum + Number(opp.value), 0);
+    const wonOpportunities = allOpportunities.filter((opp) => opp.stage === 'closed_won');
+    const lostOpportunities = allOpportunities.filter((opp) => opp.stage === 'closed_lost');
+
+    return {
+      total: allOpportunities.length,
+      byStage: {
+        prospecting: allOpportunities.filter((o) => o.stage === 'prospecting').length,
+        qualification: allOpportunities.filter((o) => o.stage === 'qualification').length,
+        needs_analysis: allOpportunities.filter((o) => o.stage === 'needs_analysis').length,
+        proposal: allOpportunities.filter((o) => o.stage === 'proposal').length,
+        negotiation: allOpportunities.filter((o) => o.stage === 'negotiation').length,
+        closed_won: wonOpportunities.length,
+        closed_lost: lostOpportunities.length,
+      },
+      totalValue,
+      wonValue: wonOpportunities.reduce((sum, opp) => sum + Number(opp.value), 0),
+      lostValue: lostOpportunities.reduce((sum, opp) => sum + Number(opp.value), 0),
+      averageValue: allOpportunities.length > 0 ? totalValue / allOpportunities.length : 0,
+      winRate: allOpportunities.length > 0
+        ? (wonOpportunities.length / allOpportunities.length) * 100
+        : 0,
+    };
+  }
+
+  /**
+   * 📊 Statistiques des opportunités pour un commercial spécifique
+   */
+  async getStatisticsByCommercial(userId: number) {
+    const allOpportunities = await this.opportunityRepository.find({
+      where: { 
+        assignedToId: userId,
+        deletedAt: IsNull()
+      },
     });
 
     const totalValue = allOpportunities.reduce((sum, opp) => sum + Number(opp.value), 0);

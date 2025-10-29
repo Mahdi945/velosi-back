@@ -18,6 +18,8 @@ import { Quote } from '../crm/entities/quote.entity';
 import { QuoteItem } from '../crm/entities/quote-item.entity';
 import { Industry } from '../crm/entities/industry.entity';
 import { Engin } from '../entities/engin.entity';
+import { Armateur } from '../entities/armateur.entity';
+import { Fournisseur } from '../entities/fournisseur.entity';
 
 export const typeOrmConfig = (
   configService: ConfigService,
@@ -46,7 +48,9 @@ export const typeOrmConfig = (
     Industry,
     AutorisationTVA, 
     BCsusTVA, 
-    Engin
+    Engin,
+    Armateur,
+    Fournisseur
   ],
   synchronize: false, // Ne pas modifier automatiquement la structure de la DB
   logging: process.env.NODE_ENV === 'development',

@@ -21,17 +21,42 @@ export class OpportunitiesController {
 
   /**
    * 📋 Récupérer toutes les opportunités actives
+   * Si l'utilisateur est commercial, filtre par assignedToId automatiquement
    */
   @Get()
-  async findAll(): Promise<Opportunity[]> {
+  async findAll(@Req() req: any): Promise<Opportunity[]> {
+    const userId = req.user?.userId || req.user?.id;
+    const userRoles = req.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses opportunités
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId) {
+      console.log(`🔐 [Opportunities] Filtrage par commercial assigné: ${userId}`);
+      return this.opportunitiesService.findByAssignedTo(userId);
+    }
+    
+    // Sinon, retourner toutes les opportunités (admin/manager)
     return this.opportunitiesService.findAll();
   }
 
   /**
    * 📊 Statistiques des opportunités
+   * Si l'utilisateur est commercial, filtre par assignedToId automatiquement
    */
   @Get('statistics')
-  async getStatistics() {
+  async getStatistics(@Req() req: any) {
+    const userId = req.user?.userId || req.user?.id;
+    const userRoles = req.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses opportunités
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId) {
+      console.log(`🔐 [Opportunities Statistics] Filtrage par commercial assigné: ${userId}`);
+      return this.opportunitiesService.getStatisticsByCommercial(userId);
+    }
+    
     return this.opportunitiesService.getStatistics();
   }
 

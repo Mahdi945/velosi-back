@@ -26,6 +26,20 @@ export class LeadsService {
   }
 
   /**
+   * 🔍 Récupérer les leads assignés à un commercial spécifique
+   */
+  async findByAssignedTo(userId: number): Promise<Lead[]> {
+    return this.leadRepository.find({
+      where: { 
+        assignedToId: userId,
+        deletedAt: IsNull()
+      },
+      relations: ['assignedTo', 'createdBy', 'updatedBy'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
    * 🔍 Récupérer un lead par ID
    */
   async findOne(id: number): Promise<Lead> {
@@ -137,6 +151,38 @@ export class LeadsService {
   async getStatistics() {
     const allLeads = await this.leadRepository.find({
       where: { deletedAt: IsNull() },
+    });
+
+    return {
+      total: allLeads.length,
+      byStatus: {
+        new: allLeads.filter((l) => l.status === 'new').length,
+        contacted: allLeads.filter((l) => l.status === 'contacted').length,
+        qualified: allLeads.filter((l) => l.status === 'qualified').length,
+        unqualified: allLeads.filter((l) => l.status === 'unqualified').length,
+        nurturing: allLeads.filter((l) => l.status === 'nurturing').length,
+        converted: allLeads.filter((l) => l.status === 'converted').length,
+        client: allLeads.filter((l) => l.status === 'client').length,
+        lost: allLeads.filter((l) => l.status === 'lost').length,
+      },
+      byPriority: {
+        low: allLeads.filter((l) => l.priority === 'low').length,
+        medium: allLeads.filter((l) => l.priority === 'medium').length,
+        high: allLeads.filter((l) => l.priority === 'high').length,
+        urgent: allLeads.filter((l) => l.priority === 'urgent').length,
+      },
+    };
+  }
+
+  /**
+   * 📊 Statistiques des leads pour un commercial spécifique
+   */
+  async getStatisticsByCommercial(userId: number) {
+    const allLeads = await this.leadRepository.find({
+      where: { 
+        assignedToId: userId,
+        deletedAt: IsNull()
+      },
     });
 
     return {

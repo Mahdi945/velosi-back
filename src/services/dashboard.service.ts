@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In } from 'typeorm';
+import { Repository, Between, In, IsNull } from 'typeorm';
 import { Personnel } from '../entities/personnel.entity';
 import { Client } from '../entities/client.entity';
 import { Lead, LeadStatus } from '../entities/crm/lead.entity';
@@ -995,94 +995,124 @@ export class DashboardService {
     const firstDayOfWeek = new Date(today);
     firstDayOfWeek.setDate(today.getDate() - today.getDay() + 1); // Lundi
 
-    // Compter mes prospects
+    console.log('📊 [getCommercialStats] userId:', userId);
+
+    // Compter TOUS mes prospects NON ARCHIVÉS (tous les statuts)
     const myProspectsCount = await this.leadRepository.count({
-      where: { assignedToId: userId }
+      where: { 
+        assignedToId: userId,
+        deletedAt: IsNull()
+      }
     });
 
-    // Compter mes opportunités actives
-    const activeStages = [
+    console.log('✅ [getCommercialStats] myProspectsCount:', myProspectsCount);
+
+    // Compter TOUTES mes opportunités NON ARCHIVÉES (tous les stages actifs + closed_won)
+    const allActiveStages = [
       OpportunityStage.PROSPECTING,
       OpportunityStage.QUALIFICATION,
       OpportunityStage.NEEDS_ANALYSIS,
       OpportunityStage.PROPOSAL,
-      OpportunityStage.NEGOTIATION
+      OpportunityStage.NEGOTIATION,
+      OpportunityStage.CLOSED_WON // ✅ INCLURE les opportunités gagnées dans le comptage
     ];
     
     const myOpportunitiesCount = await this.opportunityRepository.count({
       where: { 
         assignedToId: userId,
-        stage: In(activeStages)
+        stage: In(allActiveStages),
+        deletedAt: IsNull()
       }
     });
 
-    // Valeur totale de mes opportunités actives
+    console.log('✅ [getCommercialStats] myOpportunitiesCount:', myOpportunitiesCount);
+
+    // Compter les opportunités gagnées (pour taux de conversion)
+    const myWonOpportunitiesCount = await this.opportunityRepository.count({
+      where: { 
+        assignedToId: userId,
+        stage: OpportunityStage.CLOSED_WON,
+        deletedAt: IsNull()
+      }
+    });
+
+    console.log('✅ [getCommercialStats] myWonOpportunitiesCount:', myWonOpportunitiesCount);
+
+    // Valeur totale de mes opportunités actives NON ARCHIVÉES
     const myActiveOpportunities = await this.opportunityRepository
       .createQueryBuilder('opp')
       .select('COALESCE(SUM(opp.value), 0)', 'totalValue')
       .where('opp.assignedToId = :userId', { userId })
-      .andWhere('opp.stage IN (:...stages)', { stages: activeStages })
+      .andWhere('opp.stage IN (:...stages)', { stages: allActiveStages })
+      .andWhere('opp.deletedAt IS NULL')
       .getRawOne();
 
     const myActiveOpportunitiesValue = parseFloat(myActiveOpportunities?.totalValue || 0);
 
-    // Compter mes cotations
+    // Compter TOUTES mes cotations NON ARCHIVÉES (tous les statuts)
     const myQuotesCount = await this.quoteRepository
       .createQueryBuilder('quote')
-      .where('quote.createdById = :userId', { userId })
+      .where('quote.createdBy = :userId', { userId })
+      .andWhere('quote.deletedAt IS NULL')
       .getCount();
 
-    // CA accepté (mes cotations acceptées)
+    console.log('✅ [getCommercialStats] myQuotesCount:', myQuotesCount);
+
+    // Compter cotations acceptées
+    const myAcceptedQuotesCount = await this.quoteRepository
+      .createQueryBuilder('quote')
+      .where('quote.createdBy = :userId', { userId })
+      .andWhere('quote.status = :status', { status: 'accepted' })
+      .andWhere('quote.deletedAt IS NULL')
+      .getCount();
+
+    console.log('✅ [getCommercialStats] myAcceptedQuotesCount:', myAcceptedQuotesCount);
+
+    // CA accepté (mes cotations acceptées NON ARCHIVÉES)
     const myAcceptedQuotes = await this.quoteRepository
       .createQueryBuilder('quote')
       .select('COALESCE(SUM(quote.total), 0)', 'totalAccepted')
       .addSelect('COALESCE(SUM(quote.totalMargin), 0)', 'totalMargin')
-      .where('quote.createdById = :userId', { userId })
+      .where('quote.createdBy = :userId', { userId })
       .andWhere('quote.status = :status', { status: 'accepted' })
+      .andWhere('quote.deletedAt IS NULL')
       .getRawOne();
 
     const myAcceptedQuotesValue = parseFloat(myAcceptedQuotes?.totalAccepted || 0);
     const myTotalMargin = parseFloat(myAcceptedQuotes?.totalMargin || 0);
 
-    // Taux de conversion (leads convertis / total leads)
-    const myConvertedLeads = await this.leadRepository.count({
-      where: { 
-        assignedToId: userId,
-        status: LeadStatus.CONVERTED
-      }
-    });
-
+    // Taux de conversion basé sur opportunités gagnées / prospects
     const myConversionRate = myProspectsCount > 0 
-      ? (myConvertedLeads / myProspectsCount) * 100 
+      ? (myWonOpportunitiesCount / myProspectsCount) * 100 
       : 0;
 
-    // Activités cette semaine
+    console.log('✅ [getCommercialStats] myConversionRate:', myConversionRate, '%');
+
+    // Activités cette semaine (opportunités créées) - NON ARCHIVÉES
     const myActivitiesThisWeek = await this.opportunityRepository
       .createQueryBuilder('opp')
       .where('opp.assignedToId = :userId', { userId })
       .andWhere('opp.createdAt >= :weekStart', { weekStart: firstDayOfWeek })
+      .andWhere('opp.deletedAt IS NULL')
       .getCount();
 
-    // Cotations ce mois
+    // Cotations ce mois - NON ARCHIVÉES
     const myQuotesThisMonth = await this.quoteRepository
       .createQueryBuilder('quote')
-      .where('quote.createdById = :userId', { userId })
+      .where('quote.createdBy = :userId', { userId })
       .andWhere('quote.createdAt >= :monthStart', { monthStart: firstDayOfMonth })
+      .andWhere('quote.deletedAt IS NULL')
       .getCount();
 
-    // Valeur moyenne des cotations acceptées
-    const acceptedCount = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .where('quote.createdById = :userId', { userId })
-      .andWhere('quote.status = :status', { status: 'accepted' })
-      .getCount();
+    // Valeur moyenne des cotations acceptées - NON ARCHIVÉES
+    const avgQuoteValue = myAcceptedQuotesCount > 0 ? myAcceptedQuotesValue / myAcceptedQuotesCount : 0;
 
-    const avgQuoteValue = acceptedCount > 0 ? myAcceptedQuotesValue / acceptedCount : 0;
-
-    return {
+    const result = {
       myProspectsCount,
       myOpportunitiesCount,
+      myWonOpportunitiesCount, // ✅ NOUVEAU: Opportunités gagnées
       myQuotesCount,
+      myAcceptedQuotesCount, // ✅ NOUVEAU: Cotations acceptées
       myActiveOpportunitiesValue,
       myAcceptedQuotesValue,
       myConversionRate,
@@ -1095,6 +1125,10 @@ export class DashboardService {
       teamPerformance: 70, // TODO: Calculer la moyenne de l'équipe
       growth: 0 // Sera calculé dans la performance mensuelle
     };
+
+    console.log('📊 [getCommercialStats] Result:', result);
+
+    return result;
   }
 
   /**
@@ -1171,6 +1205,99 @@ export class DashboardService {
       monthly,
       growth,
       byTransportType
+    };
+  }
+
+  /**
+   * Obtenir les statistiques Import/Export basées sur les cotations
+   */
+  async getImportExportStats(filters?: DashboardFilters): Promise<any> {
+    console.log('📊 [getImportExportStats] Récupération des statistiques Import/Export');
+    console.log('📊 [getImportExportStats] Filtres reçus:', filters);
+    
+    // Compter d'abord toutes les cotations pour debug
+    const totalQuotes = await this.quoteRepository.count({
+      where: { deletedAt: IsNull() }
+    });
+    console.log('📊 [getImportExportStats] Total cotations non archivées:', totalQuotes);
+    
+    // Construire la requête de base - utiliser le nom SQL de la colonne: import_export
+    let query = this.quoteRepository
+      .createQueryBuilder('quote')
+      .select('quote.import_export', 'type')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('COALESCE(SUM(quote.total), 0)', 'totalValue')
+      .addSelect('COALESCE(SUM(quote.total_margin), 0)', 'totalMargin')
+      .where('quote.deletedAt IS NULL')
+      .andWhere('quote.import_export IS NOT NULL')
+      .andWhere("quote.import_export != ''");
+    
+    // Appliquer les filtres de date si fournis
+    if (filters?.startDate && filters?.endDate) {
+      query = query.andWhere('quote.createdAt BETWEEN :start AND :end', {
+        start: filters.startDate,
+        end: filters.endDate
+      });
+    }
+    
+    // Grouper par type Import/Export
+    const stats = await query.groupBy('quote.import_export').getRawMany();
+    
+    console.log('✅ [getImportExportStats] Stats brutes:', stats);
+    console.log('✅ [getImportExportStats] Nombre de lignes:', stats.length);
+    
+    // Si aucune donnée, retourner des valeurs par défaut
+    if (!stats || stats.length === 0) {
+      console.warn('⚠️ [getImportExportStats] Aucune cotation avec import_export trouvée');
+      return {
+        stats: [
+          { type: 'Import', count: 0, totalValue: 0, totalMargin: 0, percentage: '0' },
+          { type: 'Export', count: 0, totalValue: 0, totalMargin: 0, percentage: '0' }
+        ],
+        totals: {
+          count: 0,
+          value: 0,
+          margin: 0
+        }
+      };
+    }
+    
+    // Calculer le total pour les pourcentages
+    const totalValue = stats.reduce((sum, item) => sum + parseFloat(item.totalValue || 0), 0);
+    const totalCount = stats.reduce((sum, item) => sum + parseInt(item.count || 0), 0);
+    
+    console.log('📊 [getImportExportStats] Total Value:', totalValue);
+    console.log('📊 [getImportExportStats] Total Count:', totalCount);
+    
+    // Normaliser les types (Import/Imp -> Import, Export/Exp -> Export)
+    const formattedStats = stats.map(item => {
+      let normalizedType = item.type || 'Non défini';
+      
+      // Normaliser les variations
+      if (normalizedType.toLowerCase().includes('imp')) {
+        normalizedType = 'Import';
+      } else if (normalizedType.toLowerCase().includes('exp')) {
+        normalizedType = 'Export';
+      }
+      
+      return {
+        type: normalizedType,
+        count: parseInt(item.count || 0),
+        totalValue: parseFloat(item.totalValue || 0),
+        totalMargin: parseFloat(item.totalMargin || 0),
+        percentage: totalValue > 0 ? parseFloat(((parseFloat(item.totalValue || 0) / totalValue) * 100).toFixed(1)) : 0
+      };
+    });
+    
+    console.log('✅ [getImportExportStats] Stats formatées:', formattedStats);
+    
+    return {
+      stats: formattedStats,
+      totals: {
+        count: totalCount,
+        value: totalValue,
+        margin: stats.reduce((sum, item) => sum + parseFloat(item.totalMargin || 0), 0)
+      }
     };
   }
 }

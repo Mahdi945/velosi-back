@@ -198,14 +198,61 @@ export class DashboardController {
   }
 
   /**
+   * Obtenir les statistiques Import/Export basées sur les cotations
+   * Accès: Administratif uniquement
+   */
+  @Get('import-export-stats')
+  @Roles('administratif')
+  async getImportExportStats(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    try {
+      const filters: any = {};
+      if (startDate) filters.startDate = new Date(startDate);
+      if (endDate) filters.endDate = new Date(endDate);
+      
+      const stats = await this.dashboardService.getImportExportStats(
+        Object.keys(filters).length > 0 ? filters : undefined
+      );
+      return {
+        success: true,
+        data: stats,
+        message: 'Statistiques Import/Export récupérées avec succès'
+      };
+    } catch (error) {
+      console.error('Erreur lors de la récupération des statistiques Import/Export:', error);
+      return {
+        success: false,
+        data: null,
+        message: 'Erreur lors de la récupération des statistiques Import/Export'
+      };
+    }
+  }
+
+  /**
    * Obtenir les statistiques personnalisées du commercial connecté
    * Accès: Commercial uniquement
    */
   @Get('commercial/stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('commercial')
   async getCommercialStats(@Req() req: Request) {
     try {
-      const userId = (req as any).user.id;
+      console.log('📊 [commercial/stats] Requête reçue');
+      console.log('👤 [commercial/stats] User:', (req as any).user);
+      
+      const userId = (req as any).user?.id || (req as any).user?.userId;
+      if (!userId) {
+        console.error('❌ [commercial/stats] Aucun userId trouvé');
+        return {
+          success: false,
+          data: null,
+          message: 'Utilisateur non identifié'
+        };
+      }
+      
+      console.log('✅ [commercial/stats] userId:', userId);
       const stats = await this.dashboardService.getCommercialStats(userId);
       return {
         success: true,
@@ -227,6 +274,7 @@ export class DashboardController {
    * Accès: Commercial uniquement
    */
   @Get('commercial/performance')
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('commercial')
   async getCommercialPerformance(
     @Req() req: Request,
@@ -234,7 +282,20 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
   ) {
     try {
-      const userId = (req as any).user.id;
+      console.log('📊 [commercial/performance] Requête reçue');
+      console.log('👤 [commercial/performance] User:', (req as any).user);
+      
+      const userId = (req as any).user?.id || (req as any).user?.userId;
+      if (!userId) {
+        console.error('❌ [commercial/performance] Aucun userId trouvé');
+        return {
+          success: false,
+          data: null,
+          message: 'Utilisateur non identifié'
+        };
+      }
+      
+      console.log('✅ [commercial/performance] userId:', userId);
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
