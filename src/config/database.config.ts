@@ -20,6 +20,9 @@ import { Industry } from '../crm/entities/industry.entity';
 import { Engin } from '../entities/engin.entity';
 import { Armateur } from '../entities/armateur.entity';
 import { Fournisseur } from '../entities/fournisseur.entity';
+import { Correspondant } from '../correspondants/entities/correspondant.entity';
+import { Port } from '../entities/port.entity';
+import { Aeroport } from '../entities/aeroport.entity';
 
 export const typeOrmConfig = (
   configService: ConfigService,
@@ -50,7 +53,10 @@ export const typeOrmConfig = (
     BCsusTVA, 
     Engin,
     Armateur,
-    Fournisseur
+    Fournisseur,
+    Correspondant,
+    Port,
+    Aeroport
   ],
   synchronize: false, // Ne pas modifier automatiquement la structure de la DB
   logging: process.env.NODE_ENV === 'development',

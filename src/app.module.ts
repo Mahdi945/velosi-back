@@ -10,6 +10,9 @@ import { CrmModule } from './modules/crm.module';
 import { EnginModule } from './modules/engin.module';
 import { ArmateursModule } from './modules/armateurs.module';
 import { FournisseursModule } from './modules/fournisseurs.module';
+import { CorrespondantsModule } from './correspondants/correspondants.module';
+import { PortsModule } from './modules/ports.module';
+import { AeroportsModule } from './modules/aeroports.module';
 import { GestionRessourcesModule } from './gestion-ressources/gestion-ressources.module';
 import { FilesModule } from './files/files.module';
 import { DiagnosticController } from './controllers/diagnostic.controller';
@@ -33,6 +36,7 @@ import { ContactController } from './contact/contact.controller';
 import { LocationModule } from './modules/location.module';
 import { VechatModule } from './vechat/vechat.module';
 import { ClientTVAModule } from './modules/client-tva.module';
+import { ImportDataModule } from './modules/import-data.module';
 
 @Module({
   imports: [
@@ -53,11 +57,15 @@ import { ClientTVAModule } from './modules/client-tva.module';
   EnginModule,
   ArmateursModule,
   FournisseursModule,
+  CorrespondantsModule,
+  PortsModule,
+  AeroportsModule,
   GestionRessourcesModule,
     FilesModule,
     LocationModule, // Module de géolocalisation
     VechatModule, // Module VelosiChat
     ClientTVAModule, // Module de gestion des clients et autorisations TVA
+    ImportDataModule, // Module d'importation de données (ports et aéroports)
     TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom]), // Pour le SchedulerService, StatsController et DashboardService
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],

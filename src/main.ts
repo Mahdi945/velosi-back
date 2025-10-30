@@ -60,6 +60,11 @@ async function bootstrap() {
     prefix: '/uploads/logos_fournisseurs/',
   });
 
+  // Configuration pour les logos des correspondants
+  app.useStaticAssets(join(process.cwd(), 'uploads', 'correspondants-logo'), {
+    prefix: '/uploads/correspondants-logo/',
+  });
+
   // Ajout d'un log pour déboguer le chemin des uploads
   console.log('📁 Chemin uploads:', join(process.cwd(), 'uploads'));
   console.log('📁 Chemin assets:', join(process.cwd(), 'assets'));
@@ -68,6 +73,7 @@ async function bootstrap() {
   console.log('📁 Chemin activites:', join(process.cwd(), 'uploads', 'activites'));
   console.log('📁 Chemin logos_armateurs:', join(process.cwd(), 'uploads', 'logos_armateurs'));
   console.log('📁 Chemin logos_fournisseurs:', join(process.cwd(), 'uploads', 'logos_fournisseurs'));
+  console.log('📁 Chemin correspondants-logo:', join(process.cwd(), 'uploads', 'correspondants-logo'));
 
   // Middleware pour les cookies
   app.use(cookieParser());
@@ -91,7 +97,7 @@ async function bootstrap() {
   // Préfixe global pour toutes les routes API (APRÈS les fichiers statiques)
   // Exclure les routes statiques du préfixe global
   app.setGlobalPrefix('api', {
-    exclude: ['/uploads/(.*)', '/uploads/autorisations/(.*)', '/uploads/bons-de-commande/(.*)', '/uploads/activites/(.*)', '/uploads/logos_armateurs/(.*)', '/uploads/logos_fournisseurs/(.*)', '/assets/(.*)']
+    exclude: ['/uploads/(.*)', '/uploads/autorisations/(.*)', '/uploads/bons-de-commande/(.*)', '/uploads/activites/(.*)', '/uploads/logos_armateurs/(.*)', '/uploads/logos_fournisseurs/(.*)', '/uploads/correspondants-logo/(.*)', '/assets/(.*)']
   });
 
   const port = process.env.PORT || 3000;
