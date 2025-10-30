@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import { Lead } from '../../entities/crm/lead.entity';
 
 @Injectable()
@@ -134,15 +134,18 @@ export class LeadsService {
   }
 
   /**
-   * 📋 Récupérer tous les leads archivés
+   * ✅ CORRECTION: Récupérer TOUS les prospects (archivés + non-archivés)
+   * Le filtrage se fera côté FRONTEND
    */
   async findAllArchived(): Promise<Lead[]> {
-    return this.leadRepository.find({
-      where: { deletedAt: IsNull() },
+    console.log('🔍 Backend: Récupération de TOUS les prospects (archivés + non-archivés)');
+    const allLeads = await this.leadRepository.find({
       relations: ['assignedTo', 'createdBy', 'updatedBy'],
-      order: { deletedAt: 'DESC' },
-      withDeleted: true,
+      order: { createdAt: 'DESC' },
+      withDeleted: true, // ✅ Inclure les soft-deleted
     });
+    console.log(`✅ ${allLeads.length} prospects retournés (filtrage côté frontend)`);
+    return allLeads;
   }
 
   /**

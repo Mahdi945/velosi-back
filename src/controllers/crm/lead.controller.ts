@@ -73,14 +73,15 @@ export class LeadController {
   }
 
   /**
-   * Obtenir tous les prospects avec filtres
+   * Obtenir tous les prospects NON-ARCHIVÉS avec filtres
    * GET /api/crm/leads
+   * ✅ CORRECTION: Retourne uniquement les NON-archivés
    */
   @Get()
   // @Roles('commercial', 'admin', 'client') // Temporairement désactivé pour debug
   async findAll(@Query() query: LeadQueryDto) {
     try {
-      console.log('Récupération des prospects avec query:', query);
+      console.log('Récupération des prospects NON-ARCHIVÉS avec query:', query);
       const result = await this.leadService.findAll(query);
       console.log('Résultat du service:', { total: result.total, leadsCount: result.leads.length });
       
@@ -97,6 +98,41 @@ export class LeadController {
       };
     } catch (error) {
       console.error('Erreur lors de la récupération des prospects:', error);
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+        data: [], // Retourner un tableau vide en cas d'erreur
+      };
+    }
+  }
+
+  /**
+   * 📋 Obtenir tous les prospects ARCHIVÉS avec filtres
+   * GET /api/crm/leads/archived
+   * ✅ NOUVELLE ROUTE: Retourne uniquement les archivés
+   */
+  @Get('archived')
+  // @Roles('commercial', 'admin', 'client') // Temporairement désactivé pour debug
+  async findAllArchived(@Query() query: LeadQueryDto) {
+    try {
+      console.log('Récupération des prospects ARCHIVÉS avec query:', query);
+      const result = await this.leadService.findAllArchived(query);
+      console.log('Résultat du service (archivés):', { total: result.total, leadsCount: result.leads.length });
+      
+      return {
+        success: true,
+        message: 'Prospects archivés récupérés avec succès',
+        data: result.leads,
+        pagination: {
+          total: result.total,
+          pages: result.pages,
+          current: query.page || 1,
+          limit: query.limit || 25,
+        },
+      };
+    } catch (error) {
+      console.error('Erreur lors de la récupération des prospects archivés:', error);
       return {
         success: false,
         message: error.message,

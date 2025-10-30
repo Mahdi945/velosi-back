@@ -231,6 +231,8 @@ export class QuotesService {
 
   /**
    * Récupérer tous les devis avec filtres
+   * ✅ CORRECTION: Retourne UNIQUEMENT les cotations NON-ARCHIVÉES par défaut
+   * Pour les archivées, utiliser findAllArchived()
    */
   async findAll(filters: QuoteFilterDto): Promise<{ data: Quote[]; total: number }> {
     const {
@@ -242,7 +244,6 @@ export class QuotesService {
       search,
       startDate,
       endDate,
-      isArchived,
       minTotal,
       maxTotal,
       importExport,
@@ -253,22 +254,9 @@ export class QuotesService {
       sortOrder = 'DESC',
     } = filters;
 
-    const where: FindOptionsWhere<Quote> = {};
-
-    if (status) where.status = status;
-    if (opportunityId) where.opportunityId = opportunityId;
-    if (leadId) where.leadId = leadId;
-    if (clientId) where.clientId = clientId;
-    if (commercialId) where.commercialId = commercialId;
-
-    // Recherche améliorée - Utiliser QueryBuilder pour rechercher dans plusieurs champs
+    // ✅ CORRECTION: Ne PAS utiliser .withDeleted() = retourne uniquement les NON-archivés
+    console.log('🔍 Backend: Récupération des cotations NON-ARCHIVÉES uniquement');
     let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
-    
-    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
-    if (isArchived === true) {
-      queryBuilder = this.quoteRepository.createQueryBuilder('quote').withDeleted();
-      console.log('🔍 Mode archivé activé - withDeleted() appliqué');
-    }
     
     // Joindre les relations nécessaires
     queryBuilder
@@ -280,7 +268,7 @@ export class QuotesService {
       .leftJoinAndSelect('quote.client', 'client')
       .leftJoinAndSelect('quote.approver', 'approver');
 
-    // Appliquer les filtres simples
+    // Appliquer les filtres
     if (status) queryBuilder.andWhere('quote.status = :status', { status });
     if (opportunityId) queryBuilder.andWhere('quote.opportunityId = :opportunityId', { opportunityId });
     if (leadId) queryBuilder.andWhere('quote.leadId = :leadId', { leadId });
@@ -305,16 +293,6 @@ export class QuotesService {
         startDate,
         endDate,
       });
-    }
-
-    // Filtre par archivage (par défaut, ne montrer que les non archivés)
-    if (isArchived !== undefined) {
-      console.log('🔍 Filtre isArchived appliqué:', isArchived, 'type:', typeof isArchived);
-      queryBuilder.andWhere('quote.is_archived = :isArchived', { isArchived });
-    } else {
-      // Par défaut, ne montrer que les éléments non archivés
-      console.log('🔍 Filtre isArchived par défaut: false');
-      queryBuilder.andWhere('quote.is_archived = :isArchived', { isArchived: false });
     }
 
     // Filtre par montant total TTC
@@ -343,6 +321,75 @@ export class QuotesService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
 
+    console.log(`✅ Backend retourne ${data.length} cotations NON-ARCHIVÉES (total: ${total})`);
+    return { data, total };
+  }
+
+  /**
+   * 📋 Récupérer UNIQUEMENT les cotations archivées avec filtres
+   * ✅ NOUVELLE MÉTHODE pour séparer les archivées des non-archivées
+   */
+  async findAllArchived(filters?: QuoteFilterDto) {
+    const {
+      status,
+      commercialId,
+      search,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 25,
+      sortBy = 'deletedAt',
+      sortOrder = 'DESC',
+    } = filters || {};
+
+    console.log('🗄️ Backend: Récupération des cotations ARCHIVÉES uniquement');
+
+    const query = this.quoteRepository
+      .createQueryBuilder('quote')
+      .leftJoinAndSelect('quote.lead', 'lead')
+      .leftJoinAndSelect('quote.opportunity', 'opportunity')
+      .leftJoinAndSelect('quote.client', 'client')
+      .leftJoinAndSelect('quote.creator', 'creator')
+      .leftJoinAndSelect('quote.commercial', 'commercial')
+      .leftJoinAndSelect('quote.items', 'items')
+      .withDeleted() // ✅ Inclure les soft-deleted
+      .where('quote.deleted_at IS NOT NULL'); // ✅ Filtrer uniquement les archivées
+
+    // Appliquer les filtres optionnels
+    if (commercialId) {
+      query.andWhere('quote.commercialId = :commercialId', { commercialId });
+    }
+
+    if (status) {
+      query.andWhere('quote.status = :status', { status });
+    }
+
+    if (search) {
+      query.andWhere(
+        '(quote.quoteNumber LIKE :search OR ' +
+        'LOWER(quote.clientName) LIKE LOWER(:search) OR ' +
+        'LOWER(quote.clientCompany) LIKE LOWER(:search) OR ' +
+        'LOWER(quote.title) LIKE LOWER(:search))',
+        { search: `%${search}%` }
+      );
+    }
+
+    if (startDate && endDate) {
+      query.andWhere('quote.deletedAt BETWEEN :startDate AND :endDate', {
+        startDate,
+        endDate,
+      });
+    }
+
+    // Pagination et tri
+    query
+      .orderBy(`quote.${sortBy}`, sortOrder as 'ASC' | 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const [data, total] = await query.getManyAndCount();
+
+    console.log(`✅ Backend retourne ${data.length} cotations ARCHIVÉES (total: ${total})`);
     return { data, total };
   }
 
@@ -1415,35 +1462,5 @@ export class QuotesService {
     });
 
     return this.findOne(id);
-  }
-
-  /**
-   * 📋 Récupérer toutes les cotations archivées
-   */
-  async findAllArchived(filters?: QuoteFilterDto) {
-    const query = this.quoteRepository
-      .createQueryBuilder('quote')
-      .leftJoinAndSelect('quote.lead', 'lead')
-      .leftJoinAndSelect('quote.opportunity', 'opportunity')
-      .leftJoinAndSelect('quote.client', 'client')
-      .leftJoinAndSelect('quote.creator', 'creator')
-      .leftJoinAndSelect('quote.commercial', 'commercial')
-      .leftJoinAndSelect('quote.items', 'items')
-      .withDeleted() // Inclure les soft-deleted
-      .where('quote.deleted_at IS NOT NULL');
-
-    if (filters?.commercialId) {
-      query.andWhere('quote.commercialId = :commercialId', {
-        commercialId: filters.commercialId,
-      });
-    }
-
-    if (filters?.status) {
-      query.andWhere('quote.status = :status', { status: filters.status });
-    }
-
-    const quotes = await query.orderBy('quote.deletedAt', 'DESC').getMany();
-
-    return quotes;
   }
 }

@@ -100,8 +100,37 @@ export class OpportunityController {
   }
 
   /**
-   * Obtenir toutes les opportunités avec filtres
+   * 📋 Obtenir toutes les opportunités ARCHIVÉES avec filtres
+   * GET /api/crm/opportunities/archived
+   * ✅ NOUVELLE ROUTE: Retourne uniquement les archivées
+   * ⚠️ IMPORTANT: Doit être AVANT @Get(':id') pour éviter la confusion avec les paramètres de route
+   */
+  @Get('archived')
+  async findAllArchived(@Query() query: OpportunityQueryDto) {
+    try {
+      const result = await this.opportunityService.findAllArchived(query);
+      return {
+        success: true,
+        message: 'Opportunités archivées récupérées avec succès',
+        data: result.data,
+        total: result.total,
+        totalPages: result.totalPages,
+        currentPage: query.page || 1,
+        pageSize: query.limit || 25,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * Obtenir toutes les opportunités NON-ARCHIVÉES avec filtres
    * GET /api/crm/opportunities
+   * ✅ CORRECTION: Retourne uniquement les NON-archivées
    */
   @Get()
   async findAll(@Query() query: OpportunityQueryDto) {

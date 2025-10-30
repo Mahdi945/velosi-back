@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
 
 @Injectable()
@@ -134,15 +134,18 @@ export class OpportunitiesService {
   }
 
   /**
-   * 📋 Récupérer toutes les opportunités archivées
+   * ✅ CORRECTION: Récupérer TOUTES les opportunités (archivées + non-archivées)
+   * Le filtrage se fera côté FRONTEND
    */
   async findAllArchived(): Promise<Opportunity[]> {
-    return this.opportunityRepository.find({
-      where: { deletedAt: IsNull() },
+    console.log('🔍 Backend: Récupération de TOUTES les opportunités (archivées + non-archivées)');
+    const allOpportunities = await this.opportunityRepository.find({
       relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
-      order: { deletedAt: 'DESC' },
-      withDeleted: true,
+      order: { createdAt: 'DESC' },
+      withDeleted: true, // ✅ Inclure les soft-deleted
     });
+    console.log(`✅ ${allOpportunities.length} opportunités retournées (filtrage côté frontend)`);
+    return allOpportunities;
   }
 
   /**

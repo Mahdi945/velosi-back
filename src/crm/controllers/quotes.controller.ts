@@ -174,9 +174,21 @@ export class QuotesController {
 
   /**
    * 📋 Récupérer les cotations archivées
+   * ✅ CORRECTION: Utilise maintenant findAllArchived() avec pagination
    */
   @Get('archived/all')
-  async findAllArchived(@Query() filters: QuoteFilterDto) {
+  async findAllArchived(@Query() filters: QuoteFilterDto, @Req() req: any) {
+    const userId = req?.user?.userId || req?.user?.id;
+    const userRoles = req?.user?.roles || [];
+    
+    // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses cotations
+    const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+    
+    if (isCommercialOnly && userId && !filters.commercialId) {
+      console.log(`🔐 [Quotes Archived] Filtrage par commercial: ${userId}`);
+      filters.commercialId = userId;
+    }
+    
     return this.quotesService.findAllArchived(filters);
   }
 }

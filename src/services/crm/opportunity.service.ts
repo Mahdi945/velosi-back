@@ -76,18 +76,14 @@ export class OpportunityService {
   }
 
   /**
-   * Obtenir toutes les opportunités avec filtres et pagination
+   * Obtenir toutes les opportunités NON-ARCHIVÉES avec filtres et pagination
+   * ✅ CORRECTION: Retourne uniquement les NON-archivées (sans .withDeleted())
    */
   async findAll(query: OpportunityQueryDto): Promise<{ data: Opportunity[]; total: number; totalPages: number }> {
-    console.log('🔍 Service findAll - Query:', query);
+    console.log('🔍 Service findAll - Query (NON-ARCHIVÉES):', query);
 
-    let queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity');
-    
-    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
-    if (query.isArchived === true) {
-      queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity').withDeleted();
-      console.log('🔍 OPPORTUNITY: Mode archivé activé - withDeleted() appliqué');
-    }
+    // ✅ Ne PAS utiliser .withDeleted() = retourne uniquement les NON-archivées
+    const queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity');
     
     queryBuilder
       .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
@@ -114,7 +110,52 @@ export class OpportunityService {
     const [opportunities, total] = await queryBuilder.getManyAndCount();
     const totalPages = Math.ceil(total / limit);
 
-    console.log('✅ Service findAll - Résultats:', opportunities.length, 'total:', total);
+    console.log('✅ Service findAll NON-ARCHIVÉES - Résultats:', opportunities.length, 'total:', total);
+
+    return {
+      data: opportunities,
+      total,
+      totalPages,
+    };
+  }
+
+  /**
+   * 📋 Obtenir toutes les opportunités ARCHIVÉES avec filtres et pagination
+   * ✅ NOUVELLE MÉTHODE: Retourne uniquement les archivées
+   */
+  async findAllArchived(query: OpportunityQueryDto): Promise<{ data: Opportunity[]; total: number; totalPages: number }> {
+    console.log('🗄️ Service findAllArchived - Query (ARCHIVÉES):', query);
+
+    // ✅ Utiliser .withDeleted() pour inclure les soft-deleted
+    const queryBuilder = this.opportunityRepository.createQueryBuilder('opportunity')
+      .withDeleted()
+      .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
+      .leftJoinAndSelect('opportunity.lead', 'lead')
+      .leftJoinAndSelect('opportunity.client', 'client')
+      .leftJoinAndSelect('client.contacts', 'contacts')
+      .leftJoinAndSelect('opportunity.createdBy', 'createdBy')
+      .where('opportunity.deleted_at IS NOT NULL'); // ✅ Filtrer uniquement les archivées
+
+    // ✅ Forcer isArchived: true pour éviter le conflit avec le filtre par défaut
+    const queryWithArchived = { ...query, isArchived: true };
+    this.applyFilters(queryBuilder, queryWithArchived);
+
+    // Pagination
+    const page = query.page || 1;
+    const limit = Math.min(query.limit || 25, 100);
+    const skip = (page - 1) * limit;
+
+    queryBuilder.skip(skip).take(limit);
+
+    // Tri par date d'archivage
+    const sortBy = query.sortBy || 'deletedAt';
+    const sortOrder = query.sortOrder || 'DESC';
+    queryBuilder.orderBy(`opportunity.${sortBy}`, sortOrder as 'ASC' | 'DESC');
+
+    const [opportunities, total] = await queryBuilder.getManyAndCount();
+    const totalPages = Math.ceil(total / limit);
+
+    console.log('✅ Service findAllArchived ARCHIVÉES - Résultats:', opportunities.length, 'total:', total);
 
     return {
       data: opportunities,

@@ -71,7 +71,8 @@ export class LeadService {
   }
 
   /**
-   * Obtenir tous les prospects avec filtres
+   * Obtenir tous les prospects NON-ARCHIVÉS avec filtres
+   * ✅ CORRECTION: Retourne uniquement les NON-archivés (sans .withDeleted())
    */
   async findAll(query: LeadQueryDto): Promise<{ leads: Lead[]; total: number; pages: number }> {
     const {
@@ -82,22 +83,16 @@ export class LeadService {
       assignedToId,
       industry,
       isLocal,
-      isArchived,
       page,
       limit,
       sortBy,
       sortOrder,
     } = query;
 
-    let queryBuilder = this.leadRepository.createQueryBuilder('lead');
-    
-    // ✅ CORRECTION: Si on cherche les archivés, inclure les soft-deleted
-    if (isArchived === true) {
-      queryBuilder = this.leadRepository.createQueryBuilder('lead').withDeleted();
-      console.log('🔍 LEAD: Mode archivé activé - withDeleted() appliqué');
-    }
-    
-    queryBuilder
+    console.log('🔍 LEAD Service findAll (NON-ARCHIVÉS) - Query:', query);
+
+    // ✅ Ne PAS utiliser .withDeleted() = retourne uniquement les NON-archivés
+    const queryBuilder = this.leadRepository.createQueryBuilder('lead')
       .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
       .leftJoinAndSelect('lead.createdBy', 'createdBy')
       .leftJoinAndSelect('lead.updatedBy', 'updatedBy');
@@ -134,17 +129,6 @@ export class LeadService {
       queryBuilder.andWhere('lead.isLocal = :isLocal', { isLocal });
     }
 
-    // Filtre par archivage (par défaut, ne montrer que les non archivés)
-    if (isArchived !== undefined) {
-      console.log('🔍 Filtre isArchived appliqué:', isArchived, 'type:', typeof isArchived);
-      // Utiliser le nom de la colonne SQL directement pour éviter les problèmes de mapping
-      queryBuilder.andWhere('lead.is_archived = :isArchived', { isArchived });
-    } else {
-      // Par défaut, ne montrer que les éléments non archivés
-      console.log('🔍 Filtre isArchived par défaut: false');
-      queryBuilder.andWhere('lead.is_archived = :isArchived', { isArchived: false });
-    }
-
     // Tri
     queryBuilder.orderBy(`lead.${sortBy || 'createdAt'}`, sortOrder || 'DESC');
 
@@ -155,7 +139,87 @@ export class LeadService {
       .take(limit || 25)
       .getMany();
 
-    console.log(`Service findAll: ${leads.length} prospects trouvés sur ${total} total`);
+    console.log(`✅ LEAD Service findAll NON-ARCHIVÉS: ${leads.length} prospects trouvés sur ${total} total`);
+
+    return {
+      leads: leads || [],
+      total: total || 0,
+      pages: Math.ceil((total || 0) / (limit || 25)),
+    };
+  }
+
+  /**
+   * 📋 Obtenir tous les prospects ARCHIVÉS avec filtres
+   * ✅ NOUVELLE MÉTHODE: Retourne uniquement les archivés
+   */
+  async findAllArchived(query: LeadQueryDto): Promise<{ leads: Lead[]; total: number; pages: number }> {
+    const {
+      search,
+      status,
+      source,
+      priority,
+      assignedToId,
+      industry,
+      isLocal,
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+    } = query;
+
+    console.log('�️ LEAD Service findAllArchived (ARCHIVÉS) - Query:', query);
+
+    // ✅ Utiliser .withDeleted() pour inclure les soft-deleted
+    const queryBuilder = this.leadRepository.createQueryBuilder('lead')
+      .withDeleted()
+      .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
+      .leftJoinAndSelect('lead.createdBy', 'createdBy')
+      .leftJoinAndSelect('lead.updatedBy', 'updatedBy')
+      .where('lead.deleted_at IS NOT NULL'); // ✅ Filtrer uniquement les archivés
+
+    // Filtres de recherche
+    if (search) {
+      queryBuilder.andWhere(
+        '(lead.fullName ILIKE :search OR lead.email ILIKE :search OR lead.company ILIKE :search OR lead.phone ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+
+    if (status) {
+      queryBuilder.andWhere('lead.status = :status', { status });
+    }
+
+    if (source) {
+      queryBuilder.andWhere('lead.source = :source', { source });
+    }
+
+    if (priority) {
+      queryBuilder.andWhere('lead.priority = :priority', { priority });
+    }
+
+    if (assignedToId) {
+      queryBuilder.andWhere('lead.assignedToId = :assignedToId', { assignedToId });
+    }
+
+    if (industry) {
+      queryBuilder.andWhere('lead.industry ILIKE :industry', { industry: `%${industry}%` });
+    }
+
+    if (isLocal !== undefined) {
+      queryBuilder.andWhere('lead.isLocal = :isLocal', { isLocal });
+    }
+
+    // Tri par date d'archivage
+    queryBuilder.orderBy(`lead.${sortBy || 'deletedAt'}`, sortOrder || 'DESC');
+
+    // Pagination
+    const total = await queryBuilder.getCount();
+    const leads = await queryBuilder
+      .skip(((page || 1) - 1) * (limit || 25))
+      .take(limit || 25)
+      .getMany();
+
+    console.log(`✅ LEAD Service findAllArchived ARCHIVÉS: ${leads.length} prospects trouvés sur ${total} total`);
 
     return {
       leads: leads || [],

@@ -72,8 +72,13 @@ export class OpportunitiesController {
    * 🔍 Récupérer une opportunité par ID
    */
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<Opportunity> {
-    return this.opportunitiesService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const opportunity = await this.opportunitiesService.findOne(id);
+    return {
+      success: true,
+      data: opportunity,
+      message: 'Opportunité récupérée avec succès'
+    };
   }
 
   /**
