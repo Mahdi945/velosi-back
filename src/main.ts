@@ -10,6 +10,13 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 async function bootstrap() {
+  console.log('🚀 Démarrage de l\'application Velosi ERP...');
+  console.log('📊 Variables d\'environnement :');
+  console.log('  - NODE_ENV:', process.env.NODE_ENV);
+  console.log('  - PORT:', process.env.PORT || 3000);
+  console.log('  - DB_ADDR:', process.env.DB_ADDR || 'non défini');
+  console.log('  - DB_DATABASE:', process.env.DB_DATABASE || 'non défini');
+  
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Configuration CORS pour permettre les requêtes depuis le frontend (AVANT les autres middleware)
@@ -106,10 +113,12 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+  
+  // Important: écouter sur 0.0.0.0 pour Render (pas localhost)
+  await app.listen(port, '0.0.0.0');
 
   console.log(`🚀 Serveur Velosi ERP démarré sur le port ${port}`);
-  console.log(`📖 API disponible sur: http://localhost:${port}/api`);
-  console.log(`🔐 Authentification: http://localhost:${port}/api/auth`);
+  console.log(`📖 API disponible sur: http://0.0.0.0:${port}/api`);
+  console.log(`🔐 Authentification: http://0.0.0.0:${port}/api/auth`);
 }
 bootstrap();
