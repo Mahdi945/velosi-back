@@ -14,7 +14,12 @@ async function bootstrap() {
 
   // Configuration CORS pour permettre les requêtes depuis le frontend (AVANT les autres middleware)
   app.enableCors({
-    origin: ['http://localhost:4200', 'http://localhost:3000'],
+    origin: [
+      'http://localhost:4200',  // Frontend Angular LOCAL
+      'http://localhost:3000',  // Tests LOCAL
+      'https://velosi-front.vercel.app',  // Frontend Angular PRODUCTION sur Vercel
+      'https://*.vercel.app'  // Tous les domaines Vercel (pour les previews)
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
