@@ -4,8 +4,8 @@ services:
     env: node
     region: frankfurt
     plan: free
-    buildCommand: npm install --legacy-peer-deps --include=dev && npm run build
-    startCommand: npm run start:prod
+    buildCommand: npm ci --legacy-peer-deps --include=dev && npm run build && npm prune --production
+    startCommand: node --max-old-space-size=200 dist/main.js
     healthCheckPath: /api
     envVars:
       - key: NODE_ENV
