@@ -49,7 +49,7 @@ interface ResetPasswordDto {
 }
 
 // Interface pour l'utilisateur authentifié dans les requêtes
-interface AuthenticatedUser {
+export interface AuthenticatedUser {
   id: string;
   username: string;
   email: string;
