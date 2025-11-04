@@ -22,14 +22,6 @@ FROM quay.io/keycloak/keycloak:26.0.7
 # Copier l'installation optimisée depuis le builder
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
 
-# Créer un utilisateur non-root pour la sécurité (requis par Railway)
-RUN useradd -r -u 1000 -g 0 keycloak && \
-    chown -R 1000:0 /opt/keycloak && \
-    chmod -R g=u /opt/keycloak
-
-# Passer à l'utilisateur non-root
-USER 1000
-
 # Exposer le port 8080 (Railway redirigera automatiquement vers HTTPS)
 EXPOSE 8080
 
