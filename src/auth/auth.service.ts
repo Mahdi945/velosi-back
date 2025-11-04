@@ -1180,21 +1180,31 @@ export class AuthService {
           throw new UnauthorizedException('Personnel non trouvé');
         }
 
+        // ✅ Construire le profil avec TOUS les champs attendus par le frontend
+        const role = personnel.role || 'personnel';
         return {
           id: personnel.id,
           nom: personnel.nom,
           prenom: personnel.prenom,
+          // Alias pour compatibilité frontend
+          firstName: personnel.prenom,
+          lastName: personnel.nom,
           nom_utilisateur: personnel.nom_utilisateur,
           email: personnel.email,
           telephone: personnel.telephone,
           genre: personnel.genre,
           statut: personnel.statut,
-          photo: personnel.photo || 'uploads/profiles/default-avatar.png',
-          role: personnel.role || 'personnel',
+          photo: personnel.photo || null,
+          role: role,
+          roles: [role], // ✅ IMPORTANT: Array de rôles pour les permissions
           userType: 'personnel',
           fullName: `${personnel.prenom} ${personnel.nom}`,
           username: personnel.nom_utilisateur,
           isActive: personnel.isActive,
+          // ✅ IMPORTANT: Flags pour les permissions dans la sidebar
+          isPersonnel: true,
+          isClient: false,
+          isAdmin: role === 'admin',
           created_at: personnel.created_at
         };
       } else {
@@ -1217,9 +1227,13 @@ export class AuthService {
           this.logger.warn(`Erreur récupération email pour client ${client.nom}:`, error.message);
         }
 
+        // ✅ Construire le profil avec TOUS les champs attendus par le frontend
         return {
           id: client.id,
           nom: client.nom,
+          // Alias pour compatibilité frontend
+          firstName: client.interlocuteur || client.nom,
+          lastName: '',
           interlocuteur: client.interlocuteur,
           categorie: client.categorie,
           type_client: client.type_client,
@@ -1229,11 +1243,16 @@ export class AuthService {
           pays: client.pays,
           id_fiscal: client.id_fiscal,
           nature: client.nature,
-          photo: client.photo || 'uploads/profiles/default-avatar.png',
+          photo: client.photo || null,
           role: 'client',
+          roles: ['client'], // ✅ IMPORTANT: Array de rôles pour les permissions
           userType: 'client',
           username: client.nom,
           email: email,
+          // ✅ IMPORTANT: Flags pour les permissions dans la sidebar
+          isPersonnel: false,
+          isClient: true,
+          isAdmin: false,
           created_at: client.created_at,
           blocage: client.blocage,
           devise: client.devise,
