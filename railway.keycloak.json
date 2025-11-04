@@ -5,7 +5,7 @@
     "dockerfilePath": "Dockerfile.keycloak"
   },
   "deploy": {
-    "startCommand": "start --optimized --http-enabled=true --hostname-strict=false --proxy=edge",
+    "startCommand": "/opt/keycloak/bin/kc.sh start --optimized --http-enabled=true --hostname-strict=false --proxy=edge",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/health/ready",

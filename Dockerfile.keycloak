@@ -30,8 +30,5 @@ ENV KC_HTTP_ENABLED=true
 ENV KC_HOSTNAME_STRICT=false
 ENV KC_PROXY=edge
 
-# Point d'entrée
+# Point d'entrée - Railway utilisera le startCommand du railway.keycloak.json
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
-
-# Commande par défaut optimisée pour Railway
-CMD ["start", "--optimized", "--http-enabled=true", "--hostname-strict=false", "--proxy=edge"]
