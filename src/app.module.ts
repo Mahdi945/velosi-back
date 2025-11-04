@@ -32,6 +32,7 @@ import { Quote } from './crm/entities/quote.entity';
 import { ObjectifCom } from './entities/objectif-com.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
+import { PersonnelService } from './services/personnel.service';
 import { ContactController } from './contact/contact.controller';
 import { LocationModule } from './modules/location.module';
 import { VechatModule } from './vechat/vechat.module';
@@ -42,7 +43,10 @@ import { ImportDataModule } from './modules/import-data.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      // Charger automatiquement le bon fichier selon NODE_ENV
+      envFilePath: process.env.NODE_ENV === 'production' ? '.env.production' : '.env',
+      // Fallback sur .env si .env.production n'existe pas
+      ignoreEnvFile: false,
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -69,6 +73,6 @@ import { ImportDataModule } from './modules/import-data.module';
     TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom]), // Pour le SchedulerService, StatsController et DashboardService
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],
-  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService],
+  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService],
 })
 export class AppModule {}

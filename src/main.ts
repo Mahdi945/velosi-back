@@ -10,20 +10,53 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
 
 async function bootstrap() {
-  console.log('🚀 Démarrage de l\'application Velosi ERP...');
-  console.log('📊 Variables d\'environnement :');
-  console.log('  - NODE_ENV:', process.env.NODE_ENV);
-  console.log('  - PORT:', process.env.PORT || 3000);
-  console.log('  - DB_ADDR:', process.env.DB_ADDR || 'non défini');
-  console.log('  - DB_DATABASE:', process.env.DB_DATABASE || 'non défini');
+  console.log('========================================');
+  console.log('🚀 Démarrage de l\'application Velosi ERP');
+  console.log('========================================');
+  console.log('');
+  
+  // Afficher quel fichier d'environnement est utilisé
+  const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env';
+  const mode = process.env.NODE_ENV === 'production' ? '☁️ PRODUCTION' : '🏠 DÉVELOPPEMENT';
+  
+  console.log('📋 Configuration :');
+  console.log(`  - Mode          : ${mode}`);
+  console.log(`  - NODE_ENV      : ${process.env.NODE_ENV || 'development'}`);
+  console.log(`  - Fichier .env  : ${envFile}`);
+  console.log('');
+  
+  console.log('🔐 Keycloak :');
+  console.log(`  - URL           : ${process.env.KEYCLOAK_URL || 'non défini'}`);
+  console.log(`  - Realm         : ${process.env.KEYCLOAK_REALM || 'non défini'}`);
+  console.log(`  - Client ID     : ${process.env.KEYCLOAK_CLIENT_ID || 'non défini'}`);
+  console.log('');
+  
+  console.log('🗄️ Base de données :');
+  console.log(`  - Host          : ${process.env.DB_ADDR || 'non défini'}`);
+  console.log(`  - Port          : ${process.env.DB_PORT || 'non défini'}`);
+  console.log(`  - Database      : ${process.env.DB_DATABASE || 'non défini'}`);
+  console.log('');
+  
+  console.log('🌐 Frontend :');
+  console.log(`  - URL           : ${process.env.FRONTEND_URL || 'http://localhost:4200'}`);
+  console.log('');
+  
+  console.log('⚙️ Serveur :');
+  console.log(`  - Port          : ${process.env.PORT || 3000}`);
+  console.log('');
   
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Configuration CORS pour permettre les requêtes depuis le frontend (AVANT les autres middleware)
+  const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : ['http://localhost:4200', 'http://localhost:3000'];
+  
   app.enableCors({
     origin: [
-      'http://localhost:4200',  // Frontend Angular LOCAL
-      'http://localhost:3000',  // Tests LOCAL
+      ...allowedOrigins,
+      'http://localhost:4200',  // Frontend Angular LOCAL (toujours autorisé)
+      'http://localhost:3000',  // Tests LOCAL (toujours autorisé)
       'https://velosi-front.vercel.app',  // Frontend Angular PRODUCTION sur Vercel
       'https://*.vercel.app'  // Tous les domaines Vercel (pour les previews)
     ],

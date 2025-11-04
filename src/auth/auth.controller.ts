@@ -1492,4 +1492,106 @@ export class AuthController {
       throw new BadRequestException(`Erreur lors de la migration: ${error.message}`);
     }
   }
+
+  /**
+   * Récupérer les sessions actives d'un personnel
+   */
+  @Get('personnel/:id/sessions')
+  @UseGuards(JwtAuthGuard)
+  async getPersonnelSessions(
+    @Param('id') personnelId: string,
+    @Request() req
+  ) {
+    try {
+      const sessions = await this.authService.getPersonnelSessions(parseInt(personnelId));
+      return {
+        success: true,
+        sessions,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur récupération sessions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Récupérer l'activité d'un personnel
+   */
+  @Get('personnel/:id/activity')
+  @UseGuards(JwtAuthGuard)
+  async getPersonnelActivity(
+    @Param('id') personnelId: string,
+    @Request() req
+  ) {
+    try {
+      const activity = await this.authService.getPersonnelActivity(parseInt(personnelId));
+      return {
+        success: true,
+        activity,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur récupération activité: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fermer toutes les sessions d'un personnel
+   */
+  @Delete('personnel/:id/sessions')
+  @UseGuards(JwtAuthGuard)
+  async closePersonnelSessions(
+    @Param('id') personnelId: string,
+    @Request() req
+  ) {
+    try {
+      const result = await this.authService.closePersonnelSessions(parseInt(personnelId));
+      return {
+        success: true,
+        message: 'Sessions fermées avec succès',
+        ...result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur fermeture sessions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Récupérer les sessions actives d'un client
+   */
+  @Get('client/:id/sessions')
+  @UseGuards(JwtAuthGuard)
+  async getClientSessions(
+    @Param('id') clientId: string,
+    @Request() req
+  ) {
+    try {
+      const sessions = await this.authService.getClientSessions(parseInt(clientId));
+      return {
+        success: true,
+        sessions,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur récupération sessions: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fermer toutes les sessions d'un client
+   */
+  @Delete('client/:id/sessions')
+  @UseGuards(JwtAuthGuard)
+  async closeClientSessions(
+    @Param('id') clientId: string,
+    @Request() req
+  ) {
+    try {
+      const result = await this.authService.closeClientSessions(parseInt(clientId));
+      return {
+        success: true,
+        message: 'Sessions fermées avec succès',
+        ...result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur fermeture sessions: ${error.message}`);
+    }
+  }
 }

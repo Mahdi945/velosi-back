@@ -39,8 +39,12 @@ lerna-debug.log*
 .env
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 .env.local
+
+# Keycloak secrets (IMPORTANT)
+.env.production.keycloak
 
 # temp directory
 .temp

@@ -97,3 +97,47 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+---
+
+## 🔐 Keycloak Authentication on Railway
+
+This project uses Keycloak for authentication, deployed on Railway.
+
+### 📚 Complete Documentation
+
+All documentation for deploying and configuring Keycloak on Railway is available:
+
+**👉 Start here: [`INDEX_KEYCLOAK_RAILWAY.md`](./INDEX_KEYCLOAK_RAILWAY.md)**
+
+### 🚀 Quick Links
+
+- **Deployment Guide**: [`DEPLOIEMENT_KEYCLOAK_RAILWAY_MANUEL.md`](./DEPLOIEMENT_KEYCLOAK_RAILWAY_MANUEL.md)
+- **Quick Start**: [`README_KEYCLOAK_RAILWAY.md`](./README_KEYCLOAK_RAILWAY.md)
+- **Commands Reference**: [`COMMANDES_KEYCLOAK_RAILWAY.md`](./COMMANDES_KEYCLOAK_RAILWAY.md)
+- **Architecture**: [`ARCHITECTURE_KEYCLOAK_RAILWAY.md`](./ARCHITECTURE_KEYCLOAK_RAILWAY.md)
+
+### 🔨 Scripts
+
+```powershell
+# Verify Keycloak deployment
+.\verify-keycloak-railway.ps1 -KeycloakUrl "https://keycloak-xxx.up.railway.app"
+
+# Configure backend after deployment
+.\configure-backend-railway.ps1 -KeycloakUrl "..." -ClientSecret "..."
+
+# Test locally with Docker
+.\test-keycloak-local.ps1
+```
+
+### 📦 Project Structure
+
+```
+velosi-back/
+├── 📚 Keycloak Documentation (INDEX_KEYCLOAK_RAILWAY.md)
+├── 🐳 Docker (Dockerfile.keycloak, docker-compose.keycloak.yml)
+├── 🔨 Scripts (*.ps1)
+└── 🔧 Configuration (.env.production.keycloak.template)
+```
+
+For complete navigation, see [`INDEX_KEYCLOAK_RAILWAY.md`](./INDEX_KEYCLOAK_RAILWAY.md)

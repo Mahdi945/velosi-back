@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   Logger,
   ConflictException,
+  NotFoundException,
   Optional,
   Inject,
   forwardRef,
@@ -500,10 +501,13 @@ export class AuthService {
         
         const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
         if (keycloakUserId) {
+          // ✅ Assigner le rôle dans Keycloak
+          await this.keycloakService.assignRoleToUser(keycloakUserId, savedPersonnel.role);
+          
           // Sauvegarder l'ID Keycloak dans la base
           savedPersonnel.keycloak_id = keycloakUserId;
           await this.personnelRepository.save(savedPersonnel);
-          this.logger.log(`Personnel ${savedPersonnel.nom_utilisateur} synchronisé avec Keycloak: ${keycloakUserId}`);
+          this.logger.log(`✅ Personnel ${savedPersonnel.nom_utilisateur} synchronisé avec Keycloak (ID: ${keycloakUserId}, Rôle: ${savedPersonnel.role})`);
         }
       }
     } catch (keycloakError) {
@@ -638,10 +642,13 @@ export class AuthService {
           
           const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
           if (keycloakUserId) {
+            // ✅ Assigner le rôle "client" dans Keycloak
+            await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
+            
             // Sauvegarder l'ID Keycloak dans la base
             savedClient.keycloak_id = keycloakUserId;
             await this.clientRepository.save(savedClient);
-            this.logger.log(`✅ Client permanent ${savedClient.nom} synchronisé avec Keycloak: ${keycloakUserId}`);
+            this.logger.log(`✅ Client permanent ${savedClient.nom} synchronisé avec Keycloak (ID: ${keycloakUserId}, Rôle: client)`);
           }
         }
       } catch (keycloakError) {
@@ -1774,6 +1781,194 @@ export class AuthService {
     } catch (error) {
       this.logger.warn(`Erreur recherche client par email: ${error.message}`);
       return null;
+    }
+  }
+
+  /**
+   * Récupère les sessions actives d'un personnel
+   */
+  async getPersonnelSessions(personnelId: number): Promise<any> {
+    try {
+      // Récupérer le personnel depuis la base de données
+      const personnel = await this.personnelRepository.findOne({
+        where: { id: personnelId }
+      });
+
+      if (!personnel) {
+        throw new NotFoundException(`Personnel avec ID ${personnelId} introuvable`);
+      }
+
+      if (!personnel.keycloak_id) {
+        throw new NotFoundException(`Personnel ${personnelId} n'est pas synchronisé avec Keycloak`);
+      }
+
+      // Récupérer les sessions depuis Keycloak
+      const sessions = await this.keycloakService.getUserSessions(personnel.keycloak_id);
+      
+      this.logger.log(`Sessions récupérées pour personnel ${personnelId}: ${sessions.length} session(s) active(s)`);
+      return {
+        personnelId: personnel.id,
+        nom: personnel.nom,
+        prenom: personnel.prenom,
+        email: personnel.email,
+        keycloakId: personnel.keycloak_id,
+        sessions: sessions,
+        totalSessions: sessions.length
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur récupération sessions personnel ${personnelId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère l'activité d'un personnel depuis Keycloak
+   */
+  async getPersonnelActivity(personnelId: number): Promise<any> {
+    try {
+      // Récupérer le personnel depuis la base de données
+      const personnel = await this.personnelRepository.findOne({
+        where: { id: personnelId }
+      });
+
+      if (!personnel) {
+        throw new NotFoundException(`Personnel avec ID ${personnelId} introuvable`);
+      }
+
+      if (!personnel.keycloak_id) {
+        throw new NotFoundException(`Personnel ${personnelId} n'est pas synchronisé avec Keycloak`);
+      }
+
+      // Récupérer l'activité depuis Keycloak
+      const activity = await this.keycloakService.getUserActivity(personnel.keycloak_id);
+      
+      this.logger.log(`Activité récupérée pour personnel ${personnelId}`);
+      return {
+        personnelId: personnel.id,
+        nom: personnel.nom,
+        prenom: personnel.prenom,
+        email: personnel.email,
+        keycloakId: personnel.keycloak_id,
+        activity: activity
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur récupération activité personnel ${personnelId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Ferme toutes les sessions actives d'un personnel
+   */
+  async closePersonnelSessions(personnelId: number): Promise<any> {
+    try {
+      // Récupérer le personnel depuis la base de données
+      const personnel = await this.personnelRepository.findOne({
+        where: { id: personnelId }
+      });
+
+      if (!personnel) {
+        throw new NotFoundException(`Personnel avec ID ${personnelId} introuvable`);
+      }
+
+      if (!personnel.keycloak_id) {
+        throw new NotFoundException(`Personnel ${personnelId} n'est pas synchronisé avec Keycloak`);
+      }
+
+      // Fermer toutes les sessions dans Keycloak
+      await this.keycloakService.logoutAllUserSessions(personnel.keycloak_id);
+      
+      this.logger.log(`Toutes les sessions fermées pour personnel ${personnelId}`);
+      return {
+        success: true,
+        message: `Toutes les sessions du personnel ${personnel.prenom} ${personnel.nom} ont été fermées`,
+        personnelId: personnel.id,
+        keycloakId: personnel.keycloak_id
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur fermeture sessions personnel ${personnelId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère les sessions actives d'un client
+   */
+  async getClientSessions(clientId: number): Promise<any> {
+    try {
+      // Récupérer le client depuis la base de données
+      const client = await this.clientRepository.findOne({
+        where: { id: clientId }
+      });
+
+      if (!client) {
+        throw new NotFoundException(`Client avec ID ${clientId} introuvable`);
+      }
+
+      if (!client.keycloak_id) {
+        throw new NotFoundException(`Client ${clientId} n'est pas synchronisé avec Keycloak (probablement un client temporaire)`);
+      }
+
+      // Récupérer le contact du client pour l'email
+      const contact = await this.contactClientRepository.findOne({
+        where: { client: { id: clientId } }
+      });
+
+      // Récupérer les sessions depuis Keycloak
+      const sessions = await this.keycloakService.getUserSessions(client.keycloak_id);
+      
+      this.logger.log(`Sessions récupérées pour client ${clientId}: ${sessions.length} session(s) active(s)`);
+      return {
+        clientId: client.id,
+        nom: client.nom,
+        email: contact?.mail1 || 'N/A',
+        isPermanent: client.is_permanent,
+        keycloakId: client.keycloak_id,
+        sessions: sessions,
+        totalSessions: sessions.length
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur récupération sessions client ${clientId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Ferme toutes les sessions actives d'un client
+   */
+  async closeClientSessions(clientId: number): Promise<any> {
+    try {
+      // Récupérer le client depuis la base de données
+      const client = await this.clientRepository.findOne({
+        where: { id: clientId }
+      });
+
+      if (!client) {
+        throw new NotFoundException(`Client avec ID ${clientId} introuvable`);
+      }
+
+      if (!client.keycloak_id) {
+        throw new NotFoundException(`Client ${clientId} n'est pas synchronisé avec Keycloak (probablement un client temporaire)`);
+      }
+
+      // Fermer toutes les sessions dans Keycloak
+      await this.keycloakService.logoutAllUserSessions(client.keycloak_id);
+      
+      this.logger.log(`Toutes les sessions fermées pour client ${clientId}`);
+      return {
+        success: true,
+        message: `Toutes les sessions du client ${client.nom} ont été fermées`,
+        clientId: client.id,
+        keycloakId: client.keycloak_id
+      };
+
+    } catch (error) {
+      this.logger.error(`Erreur fermeture sessions client ${clientId}: ${error.message}`);
+      throw error;
     }
   }
 }

@@ -467,6 +467,94 @@ export class ClientService {
       await this.validateClientTVACoherence(id);
     }
 
+    // ✅ SYNCHRONISER AVEC KEYCLOAK si keycloak_id existe
+    if (updatedClient.keycloak_id && this.keycloakService) {
+      try {
+        // Récupérer l'email du contact
+        let clientEmail = '';
+        if (updatedClient.contacts && updatedClient.contacts.length > 0) {
+          const primaryContact = updatedClient.contacts.find(c => c.mail1) || updatedClient.contacts[0];
+          clientEmail = primaryContact.mail1 || '';
+        }
+
+        // Mise à jour des informations dans Keycloak
+        await this.keycloakService.updateUser(updatedClient.keycloak_id, {
+          username: updatedClient.nom,
+          email: clientEmail || '',
+          firstName: updatedClient.interlocuteur || updatedClient.nom,
+          lastName: '',
+          enabled: updatedClient.statut === 'actif' && !updatedClient.blocage,
+        });
+
+        // Gestion du statut
+        if (updateClientDto.statut) {
+          if (updateClientDto.statut === 'actif' && !updatedClient.blocage) {
+            await this.keycloakService.enableUser(updatedClient.keycloak_id);
+            console.log(`✅ Client #${id} activé dans Keycloak`);
+          } else {
+            await this.keycloakService.disableUser(updatedClient.keycloak_id);
+            // Fermer toutes les sessions si désactivé
+            await this.keycloakService.logoutAllUserSessions(updatedClient.keycloak_id);
+            console.log(`✅ Client #${id} désactivé dans Keycloak et sessions fermées`);
+          }
+        }
+
+        // Gestion du blocage
+        if (updateClientDto.blocage !== undefined) {
+          if (updateClientDto.blocage) {
+            await this.keycloakService.disableUser(updatedClient.keycloak_id);
+            await this.keycloakService.logoutAllUserSessions(updatedClient.keycloak_id);
+            console.log(`✅ Client #${id} bloqué dans Keycloak et sessions fermées`);
+          } else if (updatedClient.statut === 'actif') {
+            await this.keycloakService.enableUser(updatedClient.keycloak_id);
+            console.log(`✅ Client #${id} débloqué dans Keycloak`);
+          }
+        }
+
+        console.log(`✅ Client #${id} synchronisé avec Keycloak`);
+      } catch (keycloakError) {
+        console.warn(`⚠️ Erreur synchronisation Keycloak client #${id}:`, keycloakError.message);
+      }
+    }
+
+    // ✅ CRÉER DANS KEYCLOAK si devient permanent et n'a pas encore de keycloak_id
+    if (updateClientDto.is_permanent === true && !updatedClient.keycloak_id && this.keycloakService) {
+      try {
+        // Récupérer l'email du contact
+        let clientEmail = '';
+        if (updatedClient.contacts && updatedClient.contacts.length > 0) {
+          const primaryContact = updatedClient.contacts.find(c => c.mail1) || updatedClient.contacts[0];
+          clientEmail = primaryContact.mail1 || '';
+        }
+
+        if (!clientEmail) {
+          console.warn(`⚠️ Client #${id} devient permanent mais aucun email trouvé - Pas de création Keycloak`);
+          return updatedClient;
+        }
+
+        const keycloakUserId = await this.keycloakService.createUser({
+          username: updatedClient.nom,
+          email: clientEmail,
+          firstName: updatedClient.interlocuteur || updatedClient.nom,
+          lastName: '',
+          enabled: updatedClient.statut === 'actif' && !updatedClient.blocage,
+        });
+
+        if (keycloakUserId) {
+          // Assigner le rôle client
+          await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
+          
+          // Mettre à jour le keycloak_id dans la base
+          await this.clientRepository.update(id, { keycloak_id: keycloakUserId });
+          updatedClient.keycloak_id = keycloakUserId;
+          
+          console.log(`✅ Client #${id} devenu permanent - Créé dans Keycloak: ${keycloakUserId}`);
+        }
+      } catch (keycloakError) {
+        console.warn(`⚠️ Erreur création Keycloak pour client #${id}:`, keycloakError.message);
+      }
+    }
+
     return updatedClient;
   }
 

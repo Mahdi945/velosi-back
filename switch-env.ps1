@@ -25,7 +25,7 @@ if ($Environment -eq "local") {
 
 if (Test-Path $sourceFile) {
     Copy-Item -Path $sourceFile -Destination $targetFile -Force
-    Write-Host "✅ Fichier .env mis à jour depuis $sourceFile" -ForegroundColor Green
+    Write-Host "✅ Fichier .env mis a jour depuis $sourceFile" -ForegroundColor Green
     Write-Host ""
     
     # Afficher les variables importantes
@@ -39,10 +39,10 @@ if (Test-Path $sourceFile) {
     $content | Select-String "^KEYCLOAK_URL" | ForEach-Object { Write-Host $_ -ForegroundColor White }
     
     Write-Host ""
-    Write-Host "✨ Prêt à démarrer avec : npm run start:dev" -ForegroundColor Green
+    Write-Host "✨ Pret a demarrer avec : npm run start:dev" -ForegroundColor Green
     Write-Host ""
 } else {
     Write-Host "❌ ERREUR : Le fichier $sourceFile n'existe pas !" -ForegroundColor Red
-    Write-Host "Veuillez créer ce fichier avant de continuer." -ForegroundColor Red
+    Write-Host "Veuillez creer ce fichier avant de continuer." -ForegroundColor Red
     exit 1
 }

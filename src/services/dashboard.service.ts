@@ -146,22 +146,29 @@ export class DashboardService {
    * Obtenir les statistiques globales du dashboard avec filtres
    */
   async getDashboardStats(filters?: DashboardFilters): Promise<DashboardStatsResponse> {
+    console.log('📊 [getDashboardStats] Début avec filtres:', filters);
+    
     const periodStart = filters?.startDate || new Date(new Date().getFullYear(), 0, 1);
     const periodEnd = filters?.endDate || new Date();
+    
+    console.log('📅 [getDashboardStats] Période:', { periodStart, periodEnd });
     
     // Compter le personnel actif (pas affecté par les filtres de période)
     const totalPersonnel = await this.personnelRepository.count({
       where: { statut: 'actif' }
     });
+    console.log('👥 [getDashboardStats] Personnel actif:', totalPersonnel);
 
     // Compter les clients actifs (pas affecté par les filtres de période)
     const totalClients = await this.clientRepository.count({
       where: { statut: 'actif' }
     });
+    console.log('🏢 [getDashboardStats] Clients actifs:', totalClients);
 
     // Leads avec filtres
     const leadWhere = this.buildWhereClause(filters);
     const totalLeads = await this.leadRepository.count({ where: leadWhere });
+    console.log('👤 [getDashboardStats] Total Leads:', totalLeads, 'WHERE:', leadWhere);
 
     // Opportunités avec filtres
     const oppWhere = this.buildWhereClause(filters);
@@ -179,6 +186,7 @@ export class DashboardService {
         stage: In(activeStages)
       }
     });
+    console.log('💼 [getDashboardStats] Total Opportunités:', totalOpportunities);
 
     // Personnel par rôle
     const personnelByRole = await this.personnelRepository
@@ -243,6 +251,11 @@ export class DashboardService {
       }
     });
     const conversionRate = totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0;
+    console.log('📈 [getDashboardStats] Taux de conversion:', {
+      convertedLeads,
+      totalLeads,
+      conversionRate: `${conversionRate.toFixed(2)}%`
+    });
 
     // Valeur moyenne des opportunités (avec filtres)
     let avgQuery = this.opportunityRepository.createQueryBuilder('opp');
@@ -260,6 +273,7 @@ export class DashboardService {
     
     const avgResult = await avgQuery.select('AVG(opp.value)', 'avg').getRawOne();
     const avgOpportunityValue = parseFloat(avgResult?.avg || '0');
+    console.log('💰 [getDashboardStats] Valeur moyenne opportunité:', avgOpportunityValue);
 
     // Valeur totale du pipeline (avec filtres)
     let pipelineQuery = this.opportunityRepository
@@ -282,6 +296,7 @@ export class DashboardService {
     
     const pipelineResult = await pipelineQuery.getRawOne();
     const totalPipelineValue = parseFloat(pipelineResult?.total || '0');
+    console.log('🔢 [getDashboardStats] Valeur pipeline:', totalPipelineValue);
 
     // CA basé sur le montant total TTC des cotations acceptées (même logique que les rapports)
     let wonQuery = this.quoteRepository
@@ -298,6 +313,27 @@ export class DashboardService {
     
     const wonResult = await wonQuery.getRawOne();
     const wonOpportunitiesValue = parseFloat(wonResult?.total || '0');
+    
+    // Debug: Afficher les cotations acceptées
+    console.log('💵 [getDashboardStats] CA Réalisé (cotations acceptées):', wonOpportunitiesValue);
+    if (filters?.startDate && filters?.endDate) {
+      const debugQuotes = await this.quoteRepository
+        .createQueryBuilder('quote')
+        .where('quote.status = :status', { status: 'accepted' })
+        .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
+          start: filters.startDate,
+          end: filters.endDate
+        })
+        .getMany();
+      console.log('  → Nombre de cotations acceptées:', debugQuotes.length);
+      if (debugQuotes.length > 0) {
+        console.log('  → Exemples:', debugQuotes.slice(0, 3).map(q => ({
+          number: q.quoteNumber,
+          total: q.total,
+          acceptedAt: q.acceptedAt
+        })));
+      }
+    }
 
     // Croissance mensuelle
     const now = new Date();
@@ -336,7 +372,7 @@ export class DashboardService {
       ? ((currentMonthOpps - lastMonthOpps) / lastMonthOpps) * 100 
       : 0;
 
-    return {
+    const response = {
       totalPersonnel,
       totalClients,
       totalLeads,
@@ -353,6 +389,17 @@ export class DashboardService {
       periodStart,
       periodEnd
     };
+    
+    console.log('✅ [getDashboardStats] Réponse finale:', {
+      totalPersonnel: response.totalPersonnel,
+      totalClients: response.totalClients,
+      totalLeads: response.totalLeads,
+      totalOpportunities: response.totalOpportunities,
+      conversionRate: response.conversionRate,
+      wonOpportunitiesValue: response.wonOpportunitiesValue
+    });
+    
+    return response;
   }
 
   /**
@@ -924,6 +971,8 @@ export class DashboardService {
     byTrafficType: { type: string; count: number; value: number }[];
     totalValue: number;
   }> {
+    console.log('🚛 [getTransportDistribution] Début avec filtres:', filters);
+    
     // Répartition par type de transport (avec filtres)
     let transportQuery = this.opportunityRepository
       .createQueryBuilder('opp')
@@ -941,8 +990,10 @@ export class DashboardService {
     }
     
     const transportStats = await transportQuery.groupBy('opp.transportType').getRawMany();
+    console.log('📊 [getTransportDistribution] Stats brutes:', transportStats);
 
     const totalValue = transportStats.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
+    console.log('💰 [getTransportDistribution] Valeur totale:', totalValue);
 
     const byTransportType = transportStats.map(item => ({
       type: item.type,
@@ -950,6 +1001,8 @@ export class DashboardService {
       value: parseFloat(item.value || 0),
       percentage: totalValue > 0 ? (parseFloat(item.value || 0) / totalValue) * 100 : 0
     }));
+
+    console.log('✅ [getTransportDistribution] Par type transport:', byTransportType);
 
     // Répartition par type de trafic (Import/Export) avec filtres
     let trafficQuery = this.opportunityRepository
