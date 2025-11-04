@@ -31,6 +31,7 @@ import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import * as fs from 'fs';
+import { createProfileImageStorage, imageFileFilter, getFilePath } from '../config/storage.config';
 
 // DTOs pour la récupération de mot de passe
 interface ForgotPasswordDto {
@@ -645,33 +646,16 @@ export class AuthController {
 
   /**
    * Upload d'une image de profil pour l'utilisateur connecté
+   * ✅ Solution Hybride:
+   * - Localhost: Stockage dans uploads/profiles/ (diskStorage)
+   * - Production/Railway: Stockage sur Cloudinary (cloud)
    */
   @UseGuards(JwtAuthGuard)
   @Post('upload-profile-image')
   @UseInterceptors(
     FileInterceptor('profile', {
-      storage: diskStorage({
-        destination: './uploads/profiles',
-        filename: (req, file, cb) => {
-          // Générer un nom unique avec timestamp
-          const timestamp = Date.now();
-          const userId = (req.user as AuthenticatedUser)?.id || 'unknown';
-          const ext = extname(file.originalname);
-          cb(null, `profile_${userId}_${timestamp}${ext}`);
-        },
-      }),
-      fileFilter: (req, file, cb) => {
-        // Vérifier le type de fichier
-        const allowedTypes = /jpeg|jpg|png|webp/;
-        const extname = allowedTypes.test(file.originalname.toLowerCase());
-        const mimetype = allowedTypes.test(file.mimetype);
-        
-        if (mimetype && extname) {
-          return cb(null, true);
-        } else {
-          cb(new BadRequestException('Seuls les fichiers JPG, PNG et WebP sont autorisés'), false);
-        }
-      },
+      storage: createProfileImageStorage(new ConfigService()), // ✅ Storage hybride intelligent
+      fileFilter: imageFileFilter, // ✅ Validation des images
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB
       },
@@ -689,29 +673,49 @@ export class AuthController {
     @Request() req,
   ) {
     try {
+      console.log('📤 [Upload] Début upload image de profil');
+      console.log('📤 [Upload] Fichier reçu:', {
+        filename: file.filename,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        path: file.path
+      });
+
+      // Obtenir le chemin du fichier (local ou Cloudinary URL)
+      const filePath = getFilePath(file, this.configService);
+      console.log('📤 [Upload] Chemin final:', filePath);
+
       // Mettre à jour le profil utilisateur avec la nouvelle image
       const user = req.user as AuthenticatedUser;
       const result = await this.authService.updateUserProfileImage(
         user.id,
         user.userType,
-        `uploads/profiles/${file.filename}`,
+        filePath, // ✅ Utilise le chemin adapté (local ou cloud)
       );
+
+      console.log('✅ [Upload] Image de profil mise à jour avec succès');
 
       return {
         success: true,
         message: 'Image de profil mise à jour avec succès',
-        filePath: `uploads/profiles/${file.filename}`,
-        fileName: file.filename,
+        filePath: filePath,
+        fileName: file.filename || file.originalname,
+        isCloudinary: filePath.includes('cloudinary.com'), // Indique si c'est sur Cloudinary
       };
     } catch (error) {
-      // Supprimer le fichier en cas d'erreur
-      if (file && file.path) {
+      console.error('❌ [Upload] Erreur:', error);
+      
+      // Supprimer le fichier en cas d'erreur (seulement pour diskStorage)
+      if (file && file.path && !file.path.includes('cloudinary.com')) {
         try {
           fs.unlinkSync(file.path);
+          console.log('🗑️ [Upload] Fichier temporaire supprimé après erreur');
         } catch (unlinkError) {
-          console.error('Erreur lors de la suppression du fichier:', unlinkError);
+          console.error('⚠️ [Upload] Erreur lors de la suppression du fichier:', unlinkError);
         }
       }
+      
       throw new BadRequestException(`Erreur lors de l'upload: ${error.message}`);
     }
   }
