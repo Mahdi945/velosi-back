@@ -80,14 +80,19 @@ export class UsersController {
   @Roles('administratif', 'admin', 'commercial', 'client')
   async getAllClients(@Request() req) {
     try {
+      console.log('🔍 [GET /users/clients] Requête reçue');
+      console.log('👤 [GET /users/clients] Utilisateur:', req.user?.username);
+      console.log('📥 [GET /users/clients] Headers:', Object.keys(req.headers));
+      console.log('🔐 [GET /users/clients] Authorization header:', req.headers.authorization ? 'Présent' : 'Absent');
       const clients = await this.usersService.getAllClients(req.user);
+      console.log('✅ [GET /users/clients] Clients récupérés:', clients.length);
       return {
         success: true,
         message: 'Liste des clients récupérée avec succès',
         data: clients,
       };
     } catch (error) {
-      console.error('Erreur lors de la récupération des clients:', error);
+      console.error('❌ [GET /users/clients] Erreur lors de la récupération des clients:', error);
       return {
         success: false,
         message: 'Erreur lors de la récupération des clients',
@@ -102,13 +107,16 @@ export class UsersController {
   @Roles('administratif', 'admin', 'commercial', 'client')
   async getAllPersonnel() {
     try {
+      console.log('🔍 [GET /users/personnel] Requête reçue');
       const personnel = await this.usersService.getAllPersonnel();
+      console.log('✅ [GET /users/personnel] Personnel récupéré:', personnel.length);
       return {
         success: true,
         message: 'Liste du personnel récupérée avec succès',
         data: personnel,
       };
     } catch (error) {
+      console.error('❌ [GET /users/personnel] Erreur lors de la récupération du personnel:', error);
       return {
         success: false,
         message: 'Erreur lors de la récupération du personnel',
