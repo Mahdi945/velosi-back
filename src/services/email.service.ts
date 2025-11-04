@@ -667,7 +667,9 @@ export class EmailService {
    */
   private getOtpEmailTemplateWithUrl(otpCode: string, userName?: string): string {
     const displayName = userName || 'Utilisateur';
-    const logoUrl = 'http://localhost:3000/assets/logo_societee.png'; // URL publique
+    // Utiliser l'URL de production si FRONTEND_URL est définie, sinon localhost
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    const logoUrl = frontendUrl.replace('4200', '3000') + '/assets/logo_societee.png'; // URL publique
     
     return `
     <!DOCTYPE html>

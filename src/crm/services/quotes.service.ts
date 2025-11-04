@@ -42,6 +42,7 @@ export class QuotesService {
   /**
    * 🎯 Générer un QR code pour la cotation
    * Contient les informations essentielles : numéro, montant, date, validité, lien de visualisation
+   * Supporte localhost (dev) et production (Vercel: https://velosi-front.vercel.app)
    */
   private async generateQRCode(quote: Quote): Promise<string> {
     const QRCode = require('qrcode');
@@ -560,6 +561,7 @@ export class QuotesService {
     };
 
     // Générer le lien de visualisation avec tracking
+    // Supporte localhost (dev) et production (Vercel: https://velosi-front.vercel.app)
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
     const viewLink = `${frontendUrl}/public/quote-view/${quote.id}`;
 
