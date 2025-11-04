@@ -31,7 +31,8 @@ import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import * as fs from 'fs';
-import { createProfileImageStorage, imageFileFilter, getFilePath } from '../config/storage.config';
+import { imageFileFilter } from '../config/storage.config';
+import { v2 as cloudinary } from 'cloudinary';
 
 // DTOs pour la récupération de mot de passe
 interface ForgotPasswordDto {
@@ -220,10 +221,8 @@ export class AuthController {
   @Get('profile')
   async getProfile(@Request() req) {
     const fullUserProfile = await this.authService.getFullUserProfile(req.user.id, req.user.userType);
-    // ✅ CORRECTION: Wrapper dans un objet user pour correspondre au frontend
-    return {
-      user: fullUserProfile
-    };
+    // Retourner directement le profil sans wrapper
+    return fullUserProfile;
   }
 
   @UseGuards(JwtAuthGuard)
@@ -654,8 +653,24 @@ export class AuthController {
   @Post('upload-profile-image')
   @UseInterceptors(
     FileInterceptor('profile', {
-      storage: createProfileImageStorage(new ConfigService()), // ✅ Storage hybride intelligent
-      fileFilter: imageFileFilter, // ✅ Validation des images
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const uploadPath = './uploads/profiles';
+          // Créer le dossier s'il n'existe pas
+          if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+            console.log('📁 [Upload] Dossier créé:', uploadPath);
+          }
+          cb(null, uploadPath);
+        },
+        filename: (req: any, file, cb) => {
+          const userId = (req as any).user?.id || 'unknown';
+          const timestamp = Date.now();
+          const extension = file.originalname.split('.').pop();
+          cb(null, `user-${userId}-${timestamp}.${extension}`);
+        },
+      }),
+      fileFilter: imageFileFilter,
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB
       },
@@ -669,9 +684,12 @@ export class AuthController {
         ],
       }),
     )
-    file: any, // Utiliser any au lieu de Express.Multer.File pour éviter les erreurs de type
+    file: any,
     @Request() req,
   ) {
+    let uploadedToCloudinary = false;
+    let cloudinaryUrl: string | null = null;
+
     try {
       console.log('📤 [Upload] Début upload image de profil');
       console.log('📤 [Upload] Fichier reçu:', {
@@ -682,16 +700,66 @@ export class AuthController {
         path: file.path
       });
 
-      // Obtenir le chemin du fichier (local ou Cloudinary URL)
-      const filePath = getFilePath(file, this.configService);
-      console.log('📤 [Upload] Chemin final:', filePath);
-
-      // Mettre à jour le profil utilisateur avec la nouvelle image
       const user = req.user as AuthenticatedUser;
-      const result = await this.authService.updateUserProfileImage(
+      let finalPath: string;
+
+      // Vérifier si Cloudinary est configuré
+      const hasCloudinary = 
+        this.configService.get('CLOUDINARY_CLOUD_NAME') && 
+        this.configService.get('CLOUDINARY_API_KEY') && 
+        this.configService.get('CLOUDINARY_API_SECRET');
+
+      console.log('🔍 [Upload] Vérification Cloudinary:', {
+        hasCloudName: !!this.configService.get('CLOUDINARY_CLOUD_NAME'),
+        hasApiKey: !!this.configService.get('CLOUDINARY_API_KEY'),
+        hasApiSecret: !!this.configService.get('CLOUDINARY_API_SECRET'),
+        configured: hasCloudinary
+      });
+
+      if (hasCloudinary) {
+        console.log('☁️ [Upload] Upload vers Cloudinary...');
+        
+        // Configurer Cloudinary
+        cloudinary.config({
+          cloud_name: this.configService.get('CLOUDINARY_CLOUD_NAME'),
+          api_key: this.configService.get('CLOUDINARY_API_KEY'),
+          api_secret: this.configService.get('CLOUDINARY_API_SECRET'),
+          secure: true,
+        });
+
+        // Upload vers Cloudinary
+        const uploadResult = await cloudinary.uploader.upload(file.path, {
+          folder: 'velosi/profiles',
+          public_id: `user-${user.id}-${Date.now()}`,
+          transformation: [
+            { width: 800, height: 800, crop: 'limit', quality: 'auto', fetch_format: 'auto' }
+          ],
+        });
+
+        cloudinaryUrl = uploadResult.secure_url;
+        finalPath = cloudinaryUrl;
+        uploadedToCloudinary = true;
+
+        console.log('✅ [Upload] Image uploadée sur Cloudinary:', cloudinaryUrl);
+
+        // Supprimer le fichier local temporaire après upload sur Cloudinary
+        try {
+          fs.unlinkSync(file.path);
+          console.log('🗑️ [Upload] Fichier local temporaire supprimé');
+        } catch (unlinkError) {
+          console.warn('⚠️ [Upload] Impossible de supprimer le fichier temporaire:', unlinkError);
+        }
+      } else {
+        // Utiliser le stockage local
+        finalPath = `uploads/profiles/${file.filename}`;
+        console.log('💾 [Upload] Utilisation du stockage local:', finalPath);
+      }
+
+      // Mettre à jour le profil utilisateur
+      await this.authService.updateUserProfileImage(
         user.id,
         user.userType,
-        filePath, // ✅ Utilise le chemin adapté (local ou cloud)
+        finalPath,
       );
 
       console.log('✅ [Upload] Image de profil mise à jour avec succès');
@@ -699,20 +767,31 @@ export class AuthController {
       return {
         success: true,
         message: 'Image de profil mise à jour avec succès',
-        filePath: filePath,
+        filePath: finalPath,
         fileName: file.filename || file.originalname,
-        isCloudinary: filePath.includes('cloudinary.com'), // Indique si c'est sur Cloudinary
+        isCloudinary: uploadedToCloudinary,
       };
     } catch (error) {
       console.error('❌ [Upload] Erreur:', error);
       
-      // Supprimer le fichier en cas d'erreur (seulement pour diskStorage)
-      if (file && file.path && !file.path.includes('cloudinary.com')) {
+      // Supprimer le fichier local en cas d'erreur
+      if (file && file.path && fs.existsSync(file.path)) {
         try {
           fs.unlinkSync(file.path);
-          console.log('🗑️ [Upload] Fichier temporaire supprimé après erreur');
+          console.log('🗑️ [Upload] Fichier local supprimé après erreur');
         } catch (unlinkError) {
           console.error('⚠️ [Upload] Erreur lors de la suppression du fichier:', unlinkError);
+        }
+      }
+
+      // Si l'upload Cloudinary a réussi mais une erreur s'est produite après, supprimer de Cloudinary
+      if (uploadedToCloudinary && cloudinaryUrl) {
+        try {
+          const publicId = cloudinaryUrl.split('/').slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          await cloudinary.uploader.destroy(publicId);
+          console.log('🗑️ [Upload] Image supprimée de Cloudinary après erreur');
+        } catch (cloudinaryError) {
+          console.error('⚠️ [Upload] Erreur suppression Cloudinary:', cloudinaryError);
         }
       }
       
