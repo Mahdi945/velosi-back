@@ -14,15 +14,23 @@ export class TokenAuthGuard implements CanActivate {
     
     try {
       console.log('🔐 TokenAuthGuard - Vérification token...');
+      console.log('📍 Headers reçus:', Object.keys(request.headers));
       
       // Chercher le token dans différents endroits
       let token: string | null = null;
       
-      // 1. Header Authorization
-      const authHeader = request.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
-        console.log('✅ Token trouvé dans Authorization header');
+      // 1. Header Authorization (PRIORITÉ 1 - Standard REST API)
+      const authHeader = request.headers.authorization || request.headers.Authorization;
+      if (authHeader) {
+        console.log('📥 Authorization header présent:', authHeader.substring(0, 20) + '...');
+        if (authHeader.startsWith('Bearer ') || authHeader.startsWith('bearer ')) {
+          token = authHeader.substring(7);
+          console.log('✅ Token trouvé dans Authorization header');
+        } else {
+          console.warn('⚠️ Authorization header présent mais format incorrect:', authHeader.substring(0, 30));
+        }
+      } else {
+        console.log('❌ Aucun Authorization header présent');
       }
       
       // 2. Body (pour les requêtes POST/PUT)
@@ -44,9 +52,16 @@ export class TokenAuthGuard implements CanActivate {
       }
       
       if (!token) {
-        console.log('❌ Aucun token trouvé');
+        console.log('❌ Aucun token trouvé dans aucune source');
+        console.log('📊 Debug info:');
+        console.log('  - Authorization header:', authHeader ? 'Présent' : 'Absent');
+        console.log('  - Body token:', request.body?.token ? 'Présent' : 'Absent');
+        console.log('  - Query token:', request.query?.token ? 'Présent' : 'Absent');
+        console.log('  - Cookie token:', request.cookies?.access_token ? 'Présent' : 'Absent');
         throw new UnauthorizedException('Token d\'authentification requis');
       }
+
+      console.log('🔑 Token reçu (20 premiers car):', token.substring(0, 20) + '...');
 
       // Valider le token JWT
       const jwt = require('jsonwebtoken');
