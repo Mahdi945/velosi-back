@@ -78,6 +78,11 @@ export class Opportunity extends BaseEntityWithSoftDelete {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   value: number;
 
+  // 💱 Multi-devises - Le montant 'value' est stocké en TND
+  // La devise sélectionnée (EUR, USD, etc.) est conservée pour référence
+  @Column({ type: 'varchar', length: 3, nullable: true })
+  currency: string;
+
   @Column({ 
     type: 'integer', 
     default: 0,

@@ -413,6 +413,7 @@ export class LeadService {
         description: convertDto.opportunityDescription,
         leadId: lead.id,
         value: convertDto.opportunityValue || 0,
+        currency: convertDto.currency, // 💱 Transmettre la devise du prospect
         probability: convertDto.probability || 20,
         stage: OpportunityStage.PROSPECTING,
         expectedCloseDate: convertDto.expectedCloseDate,

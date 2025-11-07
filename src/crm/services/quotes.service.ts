@@ -714,6 +714,87 @@ export class QuotesService {
               </div>
             ` : ''}
 
+            <!-- Informations Cotation -->
+            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; text-align: left;">
+              <h3 style="color: #2196f3; margin: 0 0 15px 0; font-size: 18px; border-bottom: 2px solid #2196f3; padding-bottom: 8px;">
+                📋 Informations Cotation
+              </h3>
+              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 14px;">
+                ${(quote as any).country ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Pays:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).country}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).importExport ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Type:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).importExport}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).terms ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Incoterm:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).terms}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).paymentMethod ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Mode paiement:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).paymentMethod}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).paymentConditions ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Cond. paiement:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).paymentConditions}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).pickupLocation ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Enlèvement:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).pickupLocation}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).deliveryLocation ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Livraison:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).deliveryLocation}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).transitTime ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Transit-Time:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).transitTime}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).departureFrequency ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Fréquence départ:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).departureFrequency}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).attentionTo ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">À l'attention de:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).attentionTo}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).tiers ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Tiers:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).tiers}</span>
+                  </div>
+                ` : ''}
+                ${(quote as any).requester ? `
+                  <div style="padding: 8px; background: white; border-radius: 5px;">
+                    <strong style="color: #2196f3;">Demandeur:</strong>
+                    <span style="color: #555; margin-left: 8px;">${(quote as any).requester}</span>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+
             <div class="amount-box">
               <div class="amount-label">Montant Total TTC</div>
               <div class="amount-value">${formatAmount(total)} TND</div>

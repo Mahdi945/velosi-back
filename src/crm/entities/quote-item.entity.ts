@@ -124,6 +124,14 @@ export class QuoteItem {
   @Column({ name: 'service_type', length: 50, nullable: true })
   serviceType: string;
 
+  // 💱 Devise de la ligne (uniquement pour FRET, les FRAIS ANNEXES sont toujours en TND)
+  @Column({ name: 'currency', length: 3, nullable: true })
+  currency: string;
+
+  // 📊 Taux de conversion pour transformation en devis (ex: 0.95 = 95%, 5% de remise)
+  @Column({ name: 'conversion_rate', type: 'decimal', precision: 10, scale: 4, nullable: true })
+  conversionRate: number;
+
   // Prix et quantités
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 1 })
   quantity: number;

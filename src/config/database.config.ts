@@ -16,6 +16,7 @@ import { Activity } from '../crm/entities/activity.entity';
 import { ActivityParticipant } from '../crm/entities/activity-participant.entity';
 import { Quote } from '../crm/entities/quote.entity';
 import { QuoteItem } from '../crm/entities/quote-item.entity';
+import { TypeFraisAnnexe } from '../crm/entities/type-frais-annexe.entity';
 import { Industry } from '../crm/entities/industry.entity';
 import { Engin } from '../entities/engin.entity';
 import { Armateur } from '../entities/armateur.entity';
@@ -48,6 +49,7 @@ export const typeOrmConfig = (
     ActivityParticipant, 
     Quote,
     QuoteItem,
+    TypeFraisAnnexe,
     Industry,
     AutorisationTVA, 
     BCsusTVA, 

@@ -33,7 +33,10 @@ export class CreateLeadDto {
 
   @IsOptional()
   @IsNumber()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => {
+    if (value === null || value === undefined || value === '') return undefined;
+    return parseInt(value);
+  })
   employeeCount?: number;
 
   @IsEnum(LeadSource)
@@ -115,6 +118,10 @@ export class CreateLeadDto {
   @IsOptional()
   @IsEnum(TrafficType)
   traffic?: TrafficType;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }
 
 export class UpdateLeadDto {
@@ -148,7 +155,10 @@ export class UpdateLeadDto {
 
   @IsOptional()
   @IsNumber()
-  @Transform(({ value }) => parseInt(value))
+  @Transform(({ value }) => {
+    if (value === null || value === undefined || value === '') return undefined;
+    return parseInt(value);
+  })
   employeeCount?: number;
 
   @IsOptional()
@@ -231,6 +241,10 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsEnum(TrafficType)
   traffic?: TrafficType;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }
 
 export class LeadQueryDto {
@@ -304,6 +318,10 @@ export class ConvertLeadDto {
   @IsNumber()
   @Transform(({ value }) => parseFloat(value))
   opportunityValue?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string; // 💱 Code ISO de la devise (EUR, USD, TND, etc.)
 
   @IsOptional()
   @IsDateString()

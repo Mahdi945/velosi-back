@@ -138,6 +138,18 @@ export class CreateQuoteItemDto {
   @IsString()
   serviceType?: string;
 
+  // 💱 Devise de la ligne (fret peut avoir différentes devises, frais annexes toujours TND)
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  // Taux de conversion pour transformation en devis (nullable)
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  conversionRate?: number;
+
   @IsNumber()
   @Min(0)
   quantity: number;

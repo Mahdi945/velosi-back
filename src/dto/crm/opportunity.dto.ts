@@ -112,6 +112,10 @@ export class CreateOpportunityDto {
   @IsOptional()
   @IsString()
   lostToCompetitor?: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 }
 
 export class UpdateOpportunityDto {
@@ -127,6 +131,10 @@ export class UpdateOpportunityDto {
   @IsNumber()
   @Transform(({ value }) => parseFloat(value))
   value?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
 
   @IsOptional()
   @IsNumber()

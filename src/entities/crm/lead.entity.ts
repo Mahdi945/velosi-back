@@ -156,6 +156,11 @@ export class Lead extends BaseEntityWithSoftDelete {
   @Column({ name: 'estimated_value', type: 'decimal', precision: 12, scale: 2, nullable: true })
   estimatedValue: number;
 
+  // 💱 Multi-devises - estimatedValue et annualVolume sont stockés en TND
+  // La devise sélectionnée (EUR, USD, etc.) est conservée pour référence
+  @Column({ type: 'varchar', length: 3, nullable: true })
+  currency: string;
+
   @Column({ type: 'text', array: true, nullable: true })
   tags: string[];
 
