@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { CrmModule } from './modules/crm.module';
 import { EnginModule } from './modules/engin.module';
 import { ArmateursModule } from './modules/armateurs.module';
+import { NaviresModule } from './modules/navires.module';
 import { FournisseursModule } from './modules/fournisseurs.module';
 import { CorrespondantsModule } from './correspondants/correspondants.module';
 import { PortsModule } from './modules/ports.module';
@@ -30,6 +31,7 @@ import { Lead } from './entities/crm/lead.entity';
 import { Opportunity } from './entities/crm/opportunity.entity';
 import { Quote } from './crm/entities/quote.entity';
 import { ObjectifCom } from './entities/objectif-com.entity';
+import { Navire } from './entities/navire.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { PersonnelService } from './services/personnel.service';
@@ -60,6 +62,7 @@ import { ImportDataModule } from './modules/import-data.module';
     CrmModule,
   EnginModule,
   ArmateursModule,
+  NaviresModule,
   FournisseursModule,
   CorrespondantsModule,
   PortsModule,
@@ -70,7 +73,7 @@ import { ImportDataModule } from './modules/import-data.module';
     VechatModule, // Module VelosiChat
     ClientTVAModule, // Module de gestion des clients et autorisations TVA
     ImportDataModule, // Module d'importation de données (ports et aéroports)
-    TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom]), // Pour le SchedulerService, StatsController et DashboardService
+  TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],
   providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService],

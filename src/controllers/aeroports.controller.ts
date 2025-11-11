@@ -65,6 +65,13 @@ export class AeroportsController {
     return await this.aeroportsService.findAllActive();
   }
 
+  @Get('all')
+  @ApiOperation({ summary: 'Récupérer tous les aéroports (actifs et inactifs)' })
+  @ApiResponse({ status: 200, description: 'Liste de tous les aéroports', type: [Aeroport] })
+  async findAllAeroports(): Promise<Aeroport[]> {
+    return await this.aeroportsService.findAllAeroports();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Récupérer un aéroport par ID' })
   @ApiResponse({ status: 200, description: 'Aéroport trouvé', type: Aeroport })

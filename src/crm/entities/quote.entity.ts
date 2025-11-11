@@ -221,6 +221,37 @@ export class Quote extends BaseEntityWithSoftDelete {
   @Column({ name: 'qr_code_data', type: 'text', nullable: true })
   qrCodeData: string;
 
+  // 🆕 Champs pour fiche dossier (transport)
+  @Column({ length: 50, nullable: true, default: 'cotation' })
+  type: string; // 'cotation' | 'fiche_dossier'
+
+  @Column({ name: 'armateur_id', nullable: true })
+  armateurId: number;
+
+  @Column({ name: 'navire_id', nullable: true })
+  navireId: number;
+
+  @Column({ name: 'port_enlevement_id', nullable: true })
+  portEnlevementId: number;
+
+  @Column({ name: 'port_livraison_id', nullable: true })
+  portLivraisonId: number;
+
+  @Column({ name: 'aeroport_enlevement_id', nullable: true })
+  aeroportEnlevementId: number;
+
+  @Column({ name: 'aeroport_livraison_id', nullable: true })
+  aeroportLivraisonId: number;
+
+  @Column({ length: 100, nullable: true })
+  hbl: string;
+
+  @Column({ length: 100, nullable: true })
+  mbl: string;
+
+  @Column({ type: 'text', nullable: true })
+  condition: string;
+
   // Gestion commerciale
   @Column({ name: 'created_by' })
   createdBy: number;

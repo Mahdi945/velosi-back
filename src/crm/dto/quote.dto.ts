@@ -143,11 +143,12 @@ export class CreateQuoteItemDto {
   @IsString()
   currency?: string;
 
-  // Taux de conversion pour transformation en devis (nullable)
+  // Taux de conversion pour transformation en TND (nullable)
+  // Exemple: 1 USD = 3.15 TND, donc conversionRate = 3.15
+  // Exemple: 1 EUR = 3.35 TND, donc conversionRate = 3.35
   @IsOptional()
   @IsNumber()
   @Min(0)
-  @Max(1)
   conversionRate?: number;
 
   @IsNumber()
@@ -499,6 +500,43 @@ export class AcceptQuoteDto {
   @IsOptional()
   @IsBoolean()
   convertToClient?: boolean;
+
+  // Champs pour fiche dossier
+  @IsOptional()
+  @IsNumber()
+  armateurId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  navireId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portLivraisonId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  aeroportEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  aeroportLivraisonId?: number;
+
+  @IsOptional()
+  @IsString()
+  hbl?: string;
+
+  @IsOptional()
+  @IsString()
+  mbl?: string;
+
+  @IsOptional()
+  @IsString()
+  condition?: string;
 }
 
 export class RejectQuoteDto {
@@ -535,6 +573,10 @@ export class QuoteFilterDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  type?: 'cotation' | 'fiche_dossier'; // 🆕 Filtre par type
 
   @IsOptional()
   @Type(() => Date)

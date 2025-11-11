@@ -163,6 +163,15 @@ export class PortsService {
   }
 
   /**
+   * Récupérer tous les ports (actifs et inactifs) pour les listes déroulantes complètes
+   */
+  async findAllPorts(): Promise<Port[]> {
+    return await this.portRepository.find({
+      order: { libelle: 'ASC' },
+    });
+  }
+
+  /**
    * Recherche rapide par abréviation
    */
   async findByAbbreviation(abbreviation: string): Promise<Port | null> {

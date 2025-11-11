@@ -111,6 +111,7 @@ export class QuotesService {
 
   /**
    * Calcule les totaux d'un devis
+   * ✅ CORRECTION: Prend en compte le taux de conversion pour calculer en TND
    */
   private calculateTotals(quote: Quote): void {
     if (!quote.items || quote.items.length === 0) {
@@ -128,49 +129,66 @@ export class QuotesService {
       return;
     }
 
-    // Calculer le total de chaque ligne
+    // Calculer le total de chaque ligne EN TND (avec conversion)
     quote.items.forEach((item) => {
-      // totalPrice devrait utiliser le prix de vente (sellingPrice)
-      item.totalPrice = item.quantity * (item.sellingPrice || item.unitPrice);
-      item.margin = (item.sellingPrice || item.unitPrice) - (item.purchasePrice || 0);
+      const conversionRate = (item as any).conversionRate || 1;
+      
+      // totalPrice en TND (converti)
+      item.totalPrice = item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate;
+      
+      // Marge en TND (converti)
+      item.margin = ((item.sellingPrice || item.unitPrice) - (item.purchasePrice || 0)) * conversionRate;
+      
+      // Stocker aussi le total en TND pour usage dans le frontend
+      (item as any).totalPriceTnd = item.totalPrice;
     });
 
     // Séparer fret et frais annexes
     const freightItems = quote.items.filter((item) => item.itemType === 'freight');
     const additionalItems = quote.items.filter((item) => item.itemType === 'additional_cost');
 
-    // Calculer les totaux fret
-    quote.freightPurchased = freightItems.reduce(
-      (sum, item) => sum + item.quantity * (item.purchasePrice || 0),
-      0,
-    );
-    quote.freightOffered = freightItems.reduce(
-      (sum, item) => sum + item.quantity * (item.sellingPrice || item.unitPrice),
-      0,
-    );
+    // Calculer les totaux fret EN TND (avec conversion)
+    quote.freightPurchased = freightItems.reduce((sum, item) => {
+      const conversionRate = (item as any).conversionRate || 1;
+      return sum + (item.quantity * (item.purchasePrice || 0) * conversionRate);
+    }, 0);
+    
+    quote.freightOffered = freightItems.reduce((sum, item) => {
+      const conversionRate = (item as any).conversionRate || 1;
+      return sum + (item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate);
+    }, 0);
+    
     quote.freightMargin = quote.freightOffered - quote.freightPurchased;
 
-    // Calculer les totaux frais annexes
-    quote.additionalCostsPurchased = additionalItems.reduce(
-      (sum, item) => sum + item.quantity * (item.purchasePrice || 0),
-      0,
-    );
-    quote.additionalCostsOffered = additionalItems.reduce(
-      (sum, item) => sum + item.quantity * (item.sellingPrice || item.unitPrice),
-      0,
-    );
+    // Calculer les totaux frais annexes EN TND (avec conversion)
+    quote.additionalCostsPurchased = additionalItems.reduce((sum, item) => {
+      const conversionRate = (item as any).conversionRate || 1;
+      return sum + (item.quantity * (item.purchasePrice || 0) * conversionRate);
+    }, 0);
+    
+    quote.additionalCostsOffered = additionalItems.reduce((sum, item) => {
+      const conversionRate = (item as any).conversionRate || 1;
+      return sum + (item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate);
+    }, 0);
 
-    // Totaux généraux
+    // Totaux généraux EN TND
     quote.totalPurchases = quote.freightPurchased + quote.additionalCostsPurchased;
     quote.totalOffers = quote.freightOffered + quote.additionalCostsOffered;
     quote.totalMargin = quote.totalOffers - quote.totalPurchases;
 
-    // Sous-total HT (basé sur les prix de vente = totalOffers)
+    // Sous-total HT (basé sur les prix de vente convertis en TND)
     quote.subtotal = quote.totalOffers;
     
-    // TVA et Total TTC
+    // TVA et Total TTC (en TND)
     quote.taxAmount = (quote.subtotal * (quote.taxRate || 19)) / 100;
     quote.total = quote.subtotal + quote.taxAmount;
+    
+    console.log('💰 [Backend] Totaux calculés en TND:', {
+      quoteNumber: quote.quoteNumber,
+      totalOffers: quote.totalOffers,
+      taxAmount: quote.taxAmount,
+      total: quote.total
+    });
   }
 
   /**
@@ -187,6 +205,7 @@ export class QuotesService {
         quoteNumber,
         createdBy: userId,
         status: QuoteStatus.DRAFT,
+        type: 'cotation', // ✅ Type par défaut: cotation
         taxRate: createQuoteDto.taxRate || 19.0,
       });
 
@@ -249,6 +268,7 @@ export class QuotesService {
       maxTotal,
       importExport,
       paymentMethod,
+      type,
       page = 1,
       limit = 10,
       sortBy = 'createdAt',
@@ -314,6 +334,11 @@ export class QuotesService {
       queryBuilder.andWhere('quote.payment_method = :paymentMethod', { paymentMethod });
     }
 
+    // Filtre par type (cotation / fiche_dossier)
+    if (type) {
+      queryBuilder.andWhere('quote.type = :type', { type });
+    }
+
     // Tri et pagination
     queryBuilder
       .orderBy(`quote.${sortBy}`, sortOrder as 'ASC' | 'DESC')
@@ -337,6 +362,7 @@ export class QuotesService {
       search,
       startDate,
       endDate,
+      type,
       page = 1,
       limit = 25,
       sortBy = 'deletedAt',
@@ -380,6 +406,11 @@ export class QuotesService {
         startDate,
         endDate,
       });
+    }
+
+    // Filtre par type (cotation / fiche_dossier)
+    if (type) {
+      query.andWhere('quote.type = :type', { type });
     }
 
     // Pagination et tri
@@ -517,6 +548,23 @@ export class QuotesService {
       throw new BadRequestException('Ce devis a déjà été accepté');
     }
 
+    // ✅ Recalculer les totaux avec conversion en TND avant d'envoyer l'email
+    this.calculateTotals(quote);
+
+    console.log('📧 [Email] Envoi cotation avec totaux en TND:', {
+      quoteNumber: quote.quoteNumber,
+      totalOffers: quote.totalOffers,
+      taxAmount: quote.taxAmount,
+      total: quote.total,
+      itemsWithRates: quote.items?.map(item => ({
+        desc: item.description,
+        currency: (item as any).currency,
+        conversionRate: (item as any).conversionRate,
+        sellingPrice: item.sellingPrice,
+        quantity: item.quantity
+      }))
+    });
+
     // Préparer le contenu HTML de l'email
     const emailHtml = this.generateQuoteEmailHtml(quote, sendQuoteDto);
 
@@ -546,7 +594,7 @@ export class QuotesService {
    * Générer le HTML pour l'email de la cotation
    */
   private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto): string {
-    // Calcul du total
+    // ✅ Le total est déjà calculé EN TND avec conversion dans calculateTotals()
     const total = quote.total || 0;
 
     const formatAmount = (amount: number) => {
@@ -714,94 +762,17 @@ export class QuotesService {
               </div>
             ` : ''}
 
-            <!-- Informations Cotation -->
-            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; text-align: left;">
-              <h3 style="color: #2196f3; margin: 0 0 15px 0; font-size: 18px; border-bottom: 2px solid #2196f3; padding-bottom: 8px;">
-                📋 Informations Cotation
-              </h3>
-              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; font-size: 14px;">
-                ${(quote as any).country ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Pays:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).country}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).importExport ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Type:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).importExport}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).terms ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Incoterm:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).terms}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).paymentMethod ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Mode paiement:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).paymentMethod}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).paymentConditions ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Cond. paiement:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).paymentConditions}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).pickupLocation ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Enlèvement:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).pickupLocation}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).deliveryLocation ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Livraison:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).deliveryLocation}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).transitTime ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Transit-Time:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).transitTime}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).departureFrequency ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Fréquence départ:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).departureFrequency}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).attentionTo ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">À l'attention de:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).attentionTo}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).tiers ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Tiers:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).tiers}</span>
-                  </div>
-                ` : ''}
-                ${(quote as any).requester ? `
-                  <div style="padding: 8px; background: white; border-radius: 5px;">
-                    <strong style="color: #2196f3;">Demandeur:</strong>
-                    <span style="color: #555; margin-left: 8px;">${(quote as any).requester}</span>
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-
             <div class="amount-box">
               <div class="amount-label">Montant Total TTC</div>
               <div class="amount-value">${formatAmount(total)} TND</div>
             </div>
 
+            <p style="font-size: 13px; color: #888; margin: 10px 0 25px 0; text-align: center; font-style: italic;">
+              Toutes les devises sont converties en TND
+            </p>
+
             <p style="font-size: 16px; color: #555; margin: 25px 0;">
-              Pour savoir les détails et imprimer la cotation, cliquer sur ce bouton :
+              Pour consulter les détails et imprimer la cotation, cliquez sur ce bouton :
             </p>
 
             <a href="${viewLink}" class="view-button" target="_blank">
@@ -835,16 +806,36 @@ export class QuotesService {
 
   /**
    * Marquer un devis comme vu
+   * ✅ CORRECTION: Marque comme vu même si viewedAt existe déjà
    */
   async markAsViewed(id: number): Promise<Quote> {
     const quote = await this.findOne(id);
 
-    if (quote.status === QuoteStatus.SENT && !quote.viewedAt) {
+    console.log('👁️ [Mark As Viewed] Tentative de marquage:', {
+      quoteId: id,
+      quoteNumber: quote.quoteNumber,
+      currentStatus: quote.status,
+      viewedAt: quote.viewedAt,
+      sentAt: quote.sentAt
+    });
+
+    // Marquer comme vu si le statut est SENT (même si déjà viewedAt existe)
+    if (quote.status === QuoteStatus.SENT) {
       quote.status = QuoteStatus.VIEWED;
       quote.viewedAt = new Date();
-      return this.quoteRepository.save(quote);
+      
+      const savedQuote = await this.quoteRepository.save(quote);
+      
+      console.log('✅ [Mark As Viewed] Cotation marquée comme vue:', {
+        quoteNumber: savedQuote.quoteNumber,
+        newStatus: savedQuote.status,
+        viewedAt: savedQuote.viewedAt
+      });
+      
+      return savedQuote;
     }
 
+    console.log('ℹ️ [Mark As Viewed] Pas de changement de statut (statut actuel:', quote.status + ')');
     return quote;
   }
 
@@ -868,6 +859,28 @@ export class QuotesService {
     console.log(`✅ Statut valide - Passage à ACCEPTED`);
     quote.status = QuoteStatus.ACCEPTED;
     quote.acceptedAt = new Date();
+
+    // ✅ Mettre à jour les champs de transport (fiche dossier)
+    if (acceptQuoteDto.armateurId !== undefined) quote.armateurId = acceptQuoteDto.armateurId;
+    if (acceptQuoteDto.navireId !== undefined) quote.navireId = acceptQuoteDto.navireId;
+    if (acceptQuoteDto.portEnlevementId !== undefined) quote.portEnlevementId = acceptQuoteDto.portEnlevementId;
+    if (acceptQuoteDto.portLivraisonId !== undefined) quote.portLivraisonId = acceptQuoteDto.portLivraisonId;
+    if (acceptQuoteDto.aeroportEnlevementId !== undefined) quote.aeroportEnlevementId = acceptQuoteDto.aeroportEnlevementId;
+    if (acceptQuoteDto.aeroportLivraisonId !== undefined) quote.aeroportLivraisonId = acceptQuoteDto.aeroportLivraisonId;
+    if (acceptQuoteDto.hbl !== undefined) quote.hbl = acceptQuoteDto.hbl;
+    if (acceptQuoteDto.mbl !== undefined) quote.mbl = acceptQuoteDto.mbl;
+    if (acceptQuoteDto.condition !== undefined) quote.condition = acceptQuoteDto.condition;
+
+    // ✅ Déterminer automatiquement le type: si au moins un champ de transport est renseigné → fiche_dossier
+    const hasTransportInfo = !!(
+      acceptQuoteDto.armateurId || acceptQuoteDto.navireId || 
+      acceptQuoteDto.portEnlevementId || acceptQuoteDto.portLivraisonId ||
+      acceptQuoteDto.aeroportEnlevementId || acceptQuoteDto.aeroportLivraisonId ||
+      acceptQuoteDto.hbl || acceptQuoteDto.mbl || acceptQuoteDto.condition
+    );
+    
+    quote.type = hasTransportInfo ? 'fiche_dossier' : 'cotation';
+    console.log(`📋 Type déterminé: ${quote.type} (infos transport: ${hasTransportInfo})`);
 
     if (acceptQuoteDto.notes) {
       quote.notes = quote.notes

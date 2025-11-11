@@ -20,6 +20,7 @@ import { TypeFraisAnnexe } from '../crm/entities/type-frais-annexe.entity';
 import { Industry } from '../crm/entities/industry.entity';
 import { Engin } from '../entities/engin.entity';
 import { Armateur } from '../entities/armateur.entity';
+import { Navire } from '../entities/navire.entity';
 import { Fournisseur } from '../entities/fournisseur.entity';
 import { Correspondant } from '../correspondants/entities/correspondant.entity';
 import { Port } from '../entities/port.entity';
@@ -55,6 +56,7 @@ export const typeOrmConfig = (
     BCsusTVA, 
     Engin,
     Armateur,
+    Navire,
     Fournisseur,
     Correspondant,
     Port,

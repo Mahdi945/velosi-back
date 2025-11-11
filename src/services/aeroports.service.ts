@@ -162,6 +162,15 @@ export class AeroportsService {
   }
 
   /**
+   * Récupérer tous les aéroports (actifs et inactifs) pour les listes déroulantes complètes
+   */
+  async findAllAeroports(): Promise<Aeroport[]> {
+    return await this.aeroportRepository.find({
+      order: { libelle: 'ASC' },
+    });
+  }
+
+  /**
    * Recherche rapide par code IATA/ICAO
    */
   async findByAbbreviation(abbreviation: string): Promise<Aeroport | null> {

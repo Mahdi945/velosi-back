@@ -65,6 +65,13 @@ export class PortsController {
     return await this.portsService.findAllActive();
   }
 
+  @Get('all')
+  @ApiOperation({ summary: 'Récupérer tous les ports (actifs et inactifs)' })
+  @ApiResponse({ status: 200, description: 'Liste de tous les ports', type: [Port] })
+  async findAllPorts(): Promise<Port[]> {
+    return await this.portsService.findAllPorts();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Récupérer un port par ID' })
   @ApiResponse({ status: 200, description: 'Port trouvé', type: Port })
