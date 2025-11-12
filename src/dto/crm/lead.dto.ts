@@ -97,6 +97,17 @@ export class CreateLeadDto {
   @Transform(({ value }) => parseInt(value))
   assignedToId?: number;
 
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
+
   @IsOptional()
   @IsNumber()
   @Transform(({ value }) => parseFloat(value))
@@ -219,6 +230,17 @@ export class UpdateLeadDto {
   @IsNumber()
   @Transform(({ value }) => parseInt(value))
   assignedToId?: number;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
 
   @IsOptional()
   @IsNumber()

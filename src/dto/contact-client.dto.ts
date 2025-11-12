@@ -1,8 +1,16 @@
-import { IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean } from 'class-validator';
 
 export class CreateContactClientDto {
   @IsNumber()
   clientId: number;
+
+  @IsOptional()
+  @IsString()
+  nom?: string;
+
+  @IsOptional()
+  @IsString()
+  prenom?: string;
 
   @IsOptional()
   @IsString()
@@ -31,6 +39,10 @@ export class CreateContactClientDto {
   @IsOptional()
   @IsString()
   fonction?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_principal?: boolean;
 }
 
 export class UpdateContactClientDto {
@@ -40,6 +52,14 @@ export class UpdateContactClientDto {
 
   @IsOptional()
   @IsString()
+  nom?: string;
+
+  @IsOptional()
+  @IsString()
+  prenom?: string;
+
+  @IsOptional()
+  @IsString()
   tel1?: string;
 
   @IsOptional()
@@ -65,4 +85,8 @@ export class UpdateContactClientDto {
   @IsOptional()
   @IsString()
   fonction?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_principal?: boolean;
 }

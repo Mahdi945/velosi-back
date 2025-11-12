@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository, SelectQueryBuilder, In } from 'typeorm';
 import { Opportunity, OpportunityStage } from '../../entities/crm/opportunity.entity';
 import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
 import { Personnel } from '../../entities/personnel.entity';
@@ -31,13 +31,23 @@ export class OpportunityService {
   async create(createOpportunityDto: CreateOpportunityDto, userId: number): Promise<Opportunity> {
     console.log('📝 Service create - Données:', createOpportunityDto);
 
-    // Vérifier que le commercial assigné existe
+    // Vérifier que le commercial assigné existe (ancien système)
     if (createOpportunityDto.assignedToId) {
       const personnel = await this.personnelRepository.findOne({
         where: { id: createOpportunityDto.assignedToId },
       });
       if (!personnel) {
         throw new NotFoundException('Personnel assigné introuvable');
+      }
+    }
+
+    // ✅ Vérifier que les commerciaux assignés existent (nouveau système)
+    if (createOpportunityDto.assignedToIds && createOpportunityDto.assignedToIds.length > 0) {
+      const commerciaux = await this.personnelRepository.findBy({
+        id: In(createOpportunityDto.assignedToIds),
+      });
+      if (commerciaux.length !== createOpportunityDto.assignedToIds.length) {
+        throw new NotFoundException('Un ou plusieurs commerciaux assignés sont introuvables');
       }
     }
 
@@ -73,6 +83,20 @@ export class OpportunityService {
     console.log('💾 APRÈS SAUVEGARDE - Opportunité créée:', JSON.stringify(savedOpportunity, null, 2));
 
     return this.findOne(savedOpportunity.id);
+  }
+
+  /**
+   * 🔧 Méthode utilitaire pour charger les commerciaux assignés
+   */
+  private async loadAssignedCommercials(opportunity: Opportunity): Promise<Opportunity> {
+    if (opportunity.assignedToIds && opportunity.assignedToIds.length > 0) {
+      opportunity.assignedCommercials = await this.personnelRepository.findBy({
+        id: In(opportunity.assignedToIds),
+      });
+    } else {
+      opportunity.assignedCommercials = [];
+    }
+    return opportunity;
   }
 
   /**
@@ -112,8 +136,13 @@ export class OpportunityService {
 
     console.log('✅ Service findAll NON-ARCHIVÉES - Résultats:', opportunities.length, 'total:', total);
 
+    // ✅ Charger les commerciaux assignés pour chaque opportunité
+    const opportunitiesWithCommercials = await Promise.all(
+      opportunities.map(opportunity => this.loadAssignedCommercials(opportunity))
+    );
+
     return {
-      data: opportunities,
+      data: opportunitiesWithCommercials,
       total,
       totalPages,
     };
@@ -157,8 +186,13 @@ export class OpportunityService {
 
     console.log('✅ Service findAllArchived ARCHIVÉES - Résultats:', opportunities.length, 'total:', total);
 
+    // ✅ Charger les commerciaux assignés pour chaque opportunité archivée
+    const opportunitiesWithCommercials = await Promise.all(
+      opportunities.map(opportunity => this.loadAssignedCommercials(opportunity))
+    );
+
     return {
-      data: opportunities,
+      data: opportunitiesWithCommercials,
       total,
       totalPages,
     };
@@ -177,7 +211,8 @@ export class OpportunityService {
       throw new NotFoundException(`Opportunité avec l'ID ${id} introuvable`);
     }
 
-    return opportunity;
+    // ✅ Charger les commerciaux assignés
+    return await this.loadAssignedCommercials(opportunity);
   }
 
   /**
@@ -191,7 +226,7 @@ export class OpportunityService {
     const opportunity = await this.findOne(id);
     console.log('✅ Opportunité trouvée:', opportunity.id);
 
-    // Vérifier si le commercial assigné existe
+    // Vérifier si le commercial assigné existe (ancien système)
     if (updateOpportunityDto.assignedToId) {
       console.log('🔍 [OPPORTUNITY SERVICE UPDATE] Vérification du personnel ID:', updateOpportunityDto.assignedToId);
       const personnel = await this.personnelRepository.findOne({
@@ -202,6 +237,16 @@ export class OpportunityService {
         throw new NotFoundException('Personnel assigné introuvable');
       }
       console.log('✅ [OPPORTUNITY SERVICE UPDATE] Personnel trouvé:', { id: personnel.id, nom: personnel.nom, prenom: personnel.prenom });
+    }
+
+    // ✅ Vérifier que les commerciaux assignés existent (nouveau système)
+    if (updateOpportunityDto.assignedToIds && updateOpportunityDto.assignedToIds.length > 0) {
+      const commerciaux = await this.personnelRepository.findBy({
+        id: In(updateOpportunityDto.assignedToIds),
+      });
+      if (commerciaux.length !== updateOpportunityDto.assignedToIds.length) {
+        throw new NotFoundException('Un ou plusieurs commerciaux assignés sont introuvables');
+      }
     }
 
     // Gestion des changements de stage
@@ -235,6 +280,7 @@ export class OpportunityService {
     if (updatedData.stage !== undefined) updateFields.stage = updatedData.stage;
     if (updatedData.expectedCloseDate !== undefined) updateFields.expectedCloseDate = updatedData.expectedCloseDate;
     if (updatedData.assignedToId !== undefined) updateFields.assignedToId = updatedData.assignedToId; // IMPORTANT
+    if (updatedData.assignedToIds !== undefined) updateFields.assignedToIds = updatedData.assignedToIds; // ✅ NOUVEAU SYSTÈME
     if (updatedData.source !== undefined) updateFields.source = updatedData.source;
     if (updatedData.priority !== undefined) updateFields.priority = updatedData.priority;
     if (updatedData.tags !== undefined) updateFields.tags = updatedData.tags;
@@ -267,7 +313,10 @@ export class OpportunityService {
     console.log('💾 Opportunité sauvegardée:', savedOpportunity?.id);
     console.log('🔍 [OPPORTUNITY SERVICE UPDATE] AssignedToId final:', savedOpportunity?.assignedToId);
 
-    return savedOpportunity || opportunity;
+    // ✅ Charger les commerciaux assignés avant de retourner
+    const opportunityWithCommercials = savedOpportunity ? await this.loadAssignedCommercials(savedOpportunity) : opportunity;
+    
+    return opportunityWithCommercials;
   }
 
   /**
@@ -308,6 +357,35 @@ export class OpportunityService {
       console.log('ℹ️ Aucun engin spécifié pour cette conversion');
     }
 
+    // ✅ Déterminer les commerciaux assignés
+    let assignedToIds: number[] = [];
+    let assignedToId: number | null = null;
+    
+    // Priorité 1 : assignedToIds du DTO de conversion
+    if (convertDto.assignedToIds && convertDto.assignedToIds.length > 0) {
+      assignedToIds = convertDto.assignedToIds;
+      assignedToId = assignedToIds[0]; // Premier commercial pour compatibilité
+      console.log('👥 Commerciaux du DTO de conversion:', assignedToIds);
+    }
+    // Priorité 2 : assignedToIds du prospect
+    else if (lead.assignedToIds && lead.assignedToIds.length > 0) {
+      assignedToIds = lead.assignedToIds;
+      assignedToId = assignedToIds[0];
+      console.log('👥 Commerciaux du prospect (assignedToIds):', assignedToIds);
+    }
+    // Priorité 3 : assignedToId du prospect (ancien système)
+    else if (lead.assignedToId) {
+      assignedToIds = [lead.assignedToId];
+      assignedToId = lead.assignedToId;
+      console.log('👥 Commercial du prospect (assignedToId):', lead.assignedToId);
+    }
+    // Fallback : utilisateur actuel
+    else {
+      assignedToIds = [userId];
+      assignedToId = userId;
+      console.log('👥 Fallback - Assignation à l\'utilisateur actuel:', userId);
+    }
+
     // Créer l'opportunité
     const opportunityData: CreateOpportunityDto = {
       title: convertDto.opportunityTitle,
@@ -324,7 +402,8 @@ export class OpportunityService {
       serviceFrequency: convertDto.serviceFrequency,
       engineType: finalEngineType,
       specialRequirements: convertDto.specialRequirements,
-      assignedToId: lead.assignedToId || null, // Utiliser seulement le commercial assigné au prospect, sinon null
+      assignedToId: assignedToId, // ✅ Premier commercial (compatibilité ancien système)
+      assignedToIds: assignedToIds, // ✅ Tous les commerciaux (nouveau système)
       source: 'lead_conversion',
       priority: convertDto.priority || lead.priority,
       tags: lead.tags || [],
@@ -333,7 +412,11 @@ export class OpportunityService {
     console.log('📋 Données de l\'opportunité à créer:', JSON.stringify(opportunityData, null, 2));
     console.log('📋 Assignation lors de la conversion:', {
       prospectAssignedTo: lead.assignedToId,
-      opportunityWillBeAssignedTo: opportunityData.assignedToId
+      prospectAssignedToIds: lead.assignedToIds,
+      convertDtoAssignedToIds: convertDto.assignedToIds,
+      finalAssignedToId: assignedToId,
+      finalAssignedToIds: assignedToIds,
+      nbCommerciaux: assignedToIds.length
     });
 
     // Créer l'opportunité avec gestion d'erreur robuste

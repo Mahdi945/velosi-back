@@ -183,7 +183,14 @@ export class ActivitiesService {
     // Tri par date de planification décroissante
     queryBuilder.orderBy('activity.scheduledAt', 'DESC');
 
-    return queryBuilder.getMany();
+    const activities = await queryBuilder.getMany();
+
+    // Charger les commerciaux assignés pour chaque activité
+    await Promise.all(
+      activities.map((activity) => this.loadAssignedCommercials(activity)),
+    );
+
+    return activities;
   }
 
   async findOne(id: number): Promise<Activity> {
@@ -205,7 +212,24 @@ export class ActivitiesService {
       throw new NotFoundException(`Activity with ID ${id} not found`);
     }
 
+    // Charger les commerciaux assignés si assignedToIds existe
+    await this.loadAssignedCommercials(activity);
+
     return activity;
+  }
+
+  /**
+   * Charge les commerciaux assignés à partir des IDs
+   */
+  private async loadAssignedCommercials(activity: Activity): Promise<void> {
+    if (activity.assignedToIds && activity.assignedToIds.length > 0) {
+      activity.assignedCommercials = await this.personnelRepository.find({
+        where: { id: In(activity.assignedToIds) },
+        select: ['id', 'prenom', 'nom', 'email', 'role'],
+      });
+    } else {
+      activity.assignedCommercials = [];
+    }
   }
 
   async update(

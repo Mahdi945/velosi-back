@@ -7,9 +7,12 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  ManyToMany,
+  JoinTable,
 } from 'typeorm';
 import { Personnel } from '../personnel.entity';
 import { BaseEntityWithSoftDelete } from '../../common/entities/base-soft-delete.entity';
+
 // TODO: Créer les entités Opportunity et Activity
 // import { Opportunity } from './opportunity.entity';
 // import { Activity } from './activity.entity';
@@ -146,12 +149,20 @@ export class Lead extends BaseEntityWithSoftDelete {
   isLocal: boolean;
 
   // Gestion commerciale
+  // 🔴 ANCIEN SYSTÈME - conservé pour compatibilité ascendante
   @Column({ name: 'assigned_to', nullable: true })
   assignedToId: number;
 
   @ManyToOne(() => Personnel, { nullable: true })
   @JoinColumn({ name: 'assigned_to' })
   assignedTo: Personnel;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux (relation 1-N)
+  @Column({ name: 'assigned_to_ids', type: 'int', array: true, default: [] })
+  assignedToIds: number[];
+
+  // Propriété virtuelle pour charger les commerciaux assignés
+  assignedCommercials?: Personnel[];
 
   @Column({ name: 'estimated_value', type: 'decimal', precision: 12, scale: 2, nullable: true })
   estimatedValue: number;

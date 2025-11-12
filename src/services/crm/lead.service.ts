@@ -41,33 +41,63 @@ export class LeadService {
       throw new NotFoundException('Utilisateur créateur introuvable');
     }
 
-    // Déterminer l'assigné
-    let assignedToId = createLeadDto.assignedToId;
+    // ✅ NOUVEAU SYSTÈME - Gérer le tableau de commerciaux
+    let assignedToIds = createLeadDto.assignedToIds || [];
+    let assignedToId = createLeadDto.assignedToId; // Ancien système (compatibilité)
 
-    // Si c'est un commercial qui crée le prospect et qu'aucun assigné n'est spécifié,
-    // l'assigner automatiquement à lui-même
-    if (currentUser.role === 'commercial' && !assignedToId) {
-      assignedToId = userId;
+    // Si c'est un commercial qui crée le prospect et qu'aucun commercial n'est assigné
+    if (currentUser.role === 'commercial' && assignedToIds.length === 0 && !assignedToId) {
+      assignedToIds = [userId];
+      assignedToId = userId; // Compatibilité
     }
 
-    // Vérifier si l'assigné existe (si spécifié)
-    if (assignedToId) {
+    // Vérifier que tous les commerciaux assignés existent
+    if (assignedToIds.length > 0) {
+      const commerciaux = await this.personnelRepository.findBy({
+        id: In(assignedToIds),
+      });
+      if (commerciaux.length !== assignedToIds.length) {
+        throw new NotFoundException('Un ou plusieurs commerciaux assignés sont introuvables');
+      }
+    }
+
+    // Si assignedToId est fourni mais pas dans assignedToIds, l'ajouter
+    if (assignedToId && !assignedToIds.includes(assignedToId)) {
       const personnel = await this.personnelRepository.findOne({
         where: { id: assignedToId },
       });
       if (!personnel) {
         throw new NotFoundException('Personnel assigné introuvable');
       }
+      assignedToIds.push(assignedToId);
     }
 
     const lead = this.leadRepository.create({
       ...createLeadDto,
-      assignedToId,
+      assignedToId, // Ancien système
+      assignedToIds, // Nouveau système
       createdById: userId,
       updatedById: userId,
     });
 
-    return await this.leadRepository.save(lead);
+    const savedLead = await this.leadRepository.save(lead);
+    
+    // Charger les commerciaux assignés
+    return await this.loadAssignedCommercials(savedLead);
+  }
+
+  /**
+   * 🔧 Méthode utilitaire pour charger les commerciaux assignés
+   */
+  private async loadAssignedCommercials(lead: Lead): Promise<Lead> {
+    if (lead.assignedToIds && lead.assignedToIds.length > 0) {
+      lead.assignedCommercials = await this.personnelRepository.findBy({
+        id: In(lead.assignedToIds),
+      });
+    } else {
+      lead.assignedCommercials = [];
+    }
+    return lead;
   }
 
   /**
@@ -141,8 +171,13 @@ export class LeadService {
 
     console.log(`✅ LEAD Service findAll NON-ARCHIVÉS: ${leads.length} prospects trouvés sur ${total} total`);
 
+    // ✅ Charger les commerciaux assignés pour chaque prospect
+    const leadsWithCommercials = await Promise.all(
+      leads.map(lead => this.loadAssignedCommercials(lead))
+    );
+
     return {
-      leads: leads || [],
+      leads: leadsWithCommercials || [],
       total: total || 0,
       pages: Math.ceil((total || 0) / (limit || 25)),
     };
@@ -221,8 +256,13 @@ export class LeadService {
 
     console.log(`✅ LEAD Service findAllArchived ARCHIVÉS: ${leads.length} prospects trouvés sur ${total} total`);
 
+    // ✅ Charger les commerciaux assignés pour chaque prospect
+    const leadsWithCommercials = await Promise.all(
+      leads.map(lead => this.loadAssignedCommercials(lead))
+    );
+
     return {
-      leads: leads || [],
+      leads: leadsWithCommercials || [],
       total: total || 0,
       pages: Math.ceil((total || 0) / (limit || 25)),
     };
@@ -241,7 +281,8 @@ export class LeadService {
       throw new NotFoundException('Prospect introuvable');
     }
 
-    return lead;
+    // ✅ Charger les commerciaux assignés
+    return await this.loadAssignedCommercials(lead);
   }
 
   /**
@@ -250,7 +291,6 @@ export class LeadService {
   async update(id: number, updateLeadDto: UpdateLeadDto, userId: number): Promise<Lead> {
     console.log('🔍 Service update - ID:', id, 'userId:', userId);
     console.log('📝 Service update - Données:', updateLeadDto);
-    console.log('🎯 [SERVICE UPDATE] AssignedToId reçu:', updateLeadDto.assignedToId, 'type:', typeof updateLeadDto.assignedToId);
     
     const lead = await this.findOne(id);
     console.log('✅ Lead trouvé:', lead);
@@ -265,17 +305,32 @@ export class LeadService {
       }
     }
 
-    // Vérifier si l'assigné existe
-    if (updateLeadDto.assignedToId) {
-      console.log('🔍 [SERVICE UPDATE] Vérification du personnel ID:', updateLeadDto.assignedToId);
+    // ✅ NOUVEAU SYSTÈME - Gérer le tableau de commerciaux
+    let assignedToIds = updateLeadDto.assignedToIds || lead.assignedToIds || [];
+    let assignedToId = updateLeadDto.assignedToId; // Ancien système (compatibilité)
+
+    // Vérifier que tous les commerciaux assignés existent
+    if (assignedToIds.length > 0) {
+      const commerciaux = await this.personnelRepository.findBy({
+        id: In(assignedToIds),
+      });
+      if (commerciaux.length !== assignedToIds.length) {
+        throw new NotFoundException('Un ou plusieurs commerciaux assignés sont introuvables');
+      }
+    }
+
+    // Si assignedToId est fourni, gérer la compatibilité
+    if (assignedToId) {
       const personnel = await this.personnelRepository.findOne({
-        where: { id: updateLeadDto.assignedToId },
+        where: { id: assignedToId },
       });
       if (!personnel) {
-        console.error('❌ [SERVICE UPDATE] Personnel introuvable pour ID:', updateLeadDto.assignedToId);
         throw new NotFoundException('Personnel assigné introuvable');
       }
-      console.log('✅ [SERVICE UPDATE] Personnel trouvé:', { id: personnel.id, nom: personnel.nom, prenom: personnel.prenom });
+      // Ajouter à assignedToIds si pas déjà présent
+      if (!assignedToIds.includes(assignedToId)) {
+        assignedToIds.push(assignedToId);
+      }
     }
 
     // Mettre à jour les dates automatiques selon le statut
@@ -290,94 +345,31 @@ export class LeadService {
 
     const updatedData = {
       ...updateLeadDto,
+      assignedToId, // Ancien système
+      assignedToIds, // Nouveau système
       updatedById: userId,
       lastContactDate: new Date(),
     };
     
     console.log('🔄 Données à appliquer:', updatedData);
-    console.log('🔍 [SERVICE UPDATE] AssignedToId AVANT mise à jour:', lead.assignedToId);
-    console.log('🔍 [SERVICE UPDATE] AssignedToId dans updatedData:', updatedData.assignedToId);
     
     Object.assign(lead, updatedData);
     
     console.log('📋 Lead après assign:', lead);
-    console.log('🔍 [SERVICE UPDATE] AssignedToId APRÈS assign:', lead.assignedToId);
 
-    // Forcer la mise à jour avec une requête UPDATE directe
-    console.log('🔧 [SERVICE UPDATE] Forcer la mise à jour avec requête directe...');
-    const updateResult = await this.leadRepository.update(
-      { id: lead.id },
-      {
-        fullName: updatedData.fullName,
-        email: updatedData.email,
-        phone: updatedData.phone,
-        company: updatedData.company,
-        position: updatedData.position,
-        website: updatedData.website,
-        industry: updatedData.industry,
-        employeeCount: updatedData.employeeCount,
-        source: updatedData.source,
-        status: updatedData.status,
-        priority: updatedData.priority,
-        street: updatedData.street,
-        city: updatedData.city,
-        postalCode: updatedData.postalCode,
-        country: updatedData.country,
-        isLocal: updatedData.isLocal,
-        assignedToId: updatedData.assignedToId, // IMPORTANT : forcer la mise à jour de assignedToId
-        estimatedValue: updatedData.estimatedValue,
-        tags: updatedData.tags,
-        notes: updatedData.notes,
-        traffic: updatedData.traffic, // AJOUT : champ traffic pour Import/Export
-        updatedById: updatedData.updatedById,
-        lastContactDate: updatedData.lastContactDate,
-      }
-    );
+    // Sauvegarder
+    const savedLead = await this.leadRepository.save(lead);
     
-    console.log('✅ [SERVICE UPDATE] Résultat de la requête UPDATE:', updateResult);
+    console.log('� Lead sauvegardé:', savedLead);
     
-    // Récupérer l'entité mise à jour
-    const savedLead = await this.leadRepository.findOne({ where: { id: lead.id } });
-    
-    console.log('💾 Lead sauvegardé avec transaction:', savedLead);
-    console.log('🔍 [SERVICE UPDATE] AssignedToId du lead sauvegardé:', savedLead.assignedToId);
-    
-    // Attendre un court délai pour s'assurer que les données sont persistées
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Recharger l'entité avec toutes ses relations pour avoir les données à jour
-    // Utiliser cache: false pour forcer une requête fraîche
+    // Recharger avec les relations et commerciaux
     const reloadedLead = await this.leadRepository.findOne({
       where: { id: savedLead.id },
       relations: ['assignedTo', 'createdBy', 'updatedBy'],
       cache: false
     });
     
-    console.log('🔄 Lead rechargé avec relations:', {
-      id: reloadedLead?.id,
-      assignedToId: reloadedLead?.assignedToId,
-      assignedToName: reloadedLead?.assignedTo ? `${reloadedLead.assignedTo.prenom} ${reloadedLead.assignedTo.nom}` : 'Aucun'
-    });
-    
-    // Si le rechargement ne donne pas le bon assignedToId, utiliser le lead sauvegardé
-    if (reloadedLead && reloadedLead.assignedToId !== savedLead.assignedToId) {
-      console.warn('⚠️ [SERVICE UPDATE] Incohérence détectée après rechargement:');
-      console.warn('   - Lead sauvegardé assignedToId:', savedLead.assignedToId);
-      console.warn('   - Lead rechargé assignedToId:', reloadedLead.assignedToId);
-      console.warn('   - Utilisation du lead sauvegardé pour corriger le problème');
-      
-      // Corriger l'assignedToId dans l'entité rechargée
-      reloadedLead.assignedToId = savedLead.assignedToId;
-      
-      // Recharger la relation assignedTo avec le bon ID
-      if (savedLead.assignedToId) {
-        reloadedLead.assignedTo = await this.personnelRepository.findOne({
-          where: { id: savedLead.assignedToId }
-        });
-      }
-    }
-    
-    return reloadedLead || savedLead;
+    return await this.loadAssignedCommercials(reloadedLead);
   }
 
   /**
@@ -423,7 +415,11 @@ export class LeadService {
         traffic: convertDto.traffic,
         serviceFrequency: convertDto.serviceFrequency as any,
         specialRequirements: convertDto.specialRequirements,
-        assignedToId: lead.assignedToId || userId,
+        // ✅ CORRECTION: Utiliser tous les commerciaux assignés au prospect
+        assignedToIds: lead.assignedToIds && lead.assignedToIds.length > 0 
+          ? lead.assignedToIds 
+          : (lead.assignedToId ? [lead.assignedToId] : [userId]),
+        assignedToId: lead.assignedToId || (lead.assignedToIds && lead.assignedToIds.length > 0 ? lead.assignedToIds[0] : userId),
         source: 'lead_conversion',
         priority: (convertDto.priority as any) || 'medium',
         tags: [],

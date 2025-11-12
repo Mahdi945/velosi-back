@@ -83,6 +83,17 @@ export class CreateOpportunityDto {
   @IsInt()
   assignedToId?: number;
 
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
+
   @IsOptional()
   @IsString()
   source?: string = 'inbound';
@@ -186,6 +197,17 @@ export class UpdateOpportunityDto {
   @IsOptional()
   @IsInt()
   assignedToId?: number;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
 
   @IsOptional()
   @IsString()
@@ -351,6 +373,15 @@ export class ConvertLeadToOpportunityDto {
   @IsOptional()
   @IsEnum(Priority)
   priority?: Priority = Priority.MEDIUM;
+
+  @IsOptional()
+  @IsString()
+  currency?: string; // 💱 Code ISO de la devise
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  assignedToIds?: number[]; // ✅ Array de commerciaux pour système 1:N
 }
 
 export class MoveOpportunityDto {

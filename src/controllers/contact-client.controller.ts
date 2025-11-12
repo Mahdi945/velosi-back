@@ -41,6 +41,11 @@ export class ContactClientController {
     return this.contactClientService.findByClient(clientId);
   }
 
+  @Get('client/:clientId/principal')
+  async findPrincipalByClient(@Param('clientId', ParseIntPipe) clientId: number) {
+    return this.contactClientService.findPrincipalByClient(clientId);
+  }
+
   @Put(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,

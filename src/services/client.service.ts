@@ -46,6 +46,11 @@ export class ClientService {
     console.log(`  - stop_envoie_solde: [${createClientDto.stop_envoie_solde}] (${typeof createClientDto.stop_envoie_solde})`);
     console.log(`  - timbre: [${createClientDto.timbre}] (${typeof createClientDto.timbre})`);
 
+    // 🆕 Gérer charge_com_ids (multi-commerciaux)
+    const charge_com_ids = createClientDto.charge_com_ids && createClientDto.charge_com_ids.length > 0
+      ? createClientDto.charge_com_ids
+      : [];
+
     const client = this.clientRepository.create({
       ...createClientDto,
       mot_de_passe: hashedPassword,
@@ -54,6 +59,8 @@ export class ClientService {
       date_fin: createClientDto.date_fin ? new Date(createClientDto.date_fin) : null,
       // S'assurer explicitement que is_permanent est bien traité
       is_permanent: Boolean(createClientDto.is_permanent || false),
+      // 🆕 Assigner les commerciaux
+      charge_com_ids: charge_com_ids,
     });
 
     // Debug: Vérifier l'objet client créé
@@ -288,62 +295,44 @@ export class ClientService {
     console.log('🔍 SERVICE findAll() - Début de la récupération des clients...');
     
     try {
-      // Étape 1: Récupérer les clients SANS les relations complexes d'abord
-      console.log('📊 Étape 1: Récupération des clients de base...');
-      const baseClients = await this.clientRepository.find({
-        order: { created_at: 'DESC' },
+      // 🏦 CORRECTION: Utiliser find() au lieu de QueryBuilder pour garantir 
+      // la récupération de TOUTES les colonnes de l'entité
+      console.log('📊 Utilisation de repository.find() avec relations...');
+      const clients = await this.clientRepository.find({
+        relations: ['contacts'],
+        order: {
+          created_at: 'DESC'
+        }
       });
       
-      console.log(`✅ ${baseClients.length} clients récupérés (sans relations)`);
+      console.log(`✅ ${clients.length} clients récupérés`);
       
-      if (baseClients.length > 0) {
-        console.log('🔍 Analyse des valeurs is_permanent DIRECTES:');
-        baseClients.slice(0, 3).forEach((client, index) => {
-          console.log(`  Client ${index + 1}: ${client.nom} (ID: ${client.id})`);
-          console.log(`    - is_permanent: [${client.is_permanent}] (${typeof client.is_permanent})`);
+      if (clients.length > 0) {
+        const firstClient = clients[0];
+        console.log('🔍 Analyse premier client:');
+        console.log(`  - ID: ${firstClient.id}, Nom: ${firstClient.nom}`);
+        console.log(`  - is_permanent: [${firstClient.is_permanent}] (${typeof firstClient.is_permanent})`);
+        console.log(`  - Infos bancaires:`, {
+          banque: firstClient.banque,
+          iban: firstClient.iban,
+          rib: firstClient.rib,
+          swift: firstClient.swift,
+          bic: firstClient.bic,
+          hasBanque: 'banque' in firstClient,
+          hasIban: 'iban' in firstClient
         });
         
         const stats = {
-          total: baseClients.length,
-          permanent: baseClients.filter(c => c.is_permanent === true).length,
-          temporary: baseClients.filter(c => c.is_permanent === false).length,
-          null: baseClients.filter(c => c.is_permanent === null).length,
-          undefined: baseClients.filter(c => c.is_permanent === undefined).length
+          total: clients.length,
+          permanent: clients.filter(c => c.is_permanent === true).length,
+          temporary: clients.filter(c => c.is_permanent === false).length,
+          withBankInfo: clients.filter(c => c.banque || c.iban || c.rib).length
         };
         
-        console.log('📊 Statistiques directes:', stats);
-        
-        // Si tous sont false, il y a un problème de données ou de schéma
-        if (stats.permanent === 0 && stats.temporary === baseClients.length) {
-          console.log('⚠️ PROBLÈME DÉTECTÉ: Tous les clients sont temporaires !');
-          console.log('🔧 Vérification avec requête SQL directe...');
-          
-          // Vérification avec requête SQL brute
-          const sqlCheck = await this.clientRepository.query(`
-            SELECT id, nom, is_permanent, 
-                   CASE WHEN is_permanent = true THEN 'TRUE'
-                        WHEN is_permanent = false THEN 'FALSE'
-                        WHEN is_permanent IS NULL THEN 'NULL'
-                        ELSE 'OTHER' END as status
-            FROM client 
-            ORDER BY id DESC 
-            LIMIT 5
-          `);
-          
-          console.log('🗄️ Vérification SQL directe:', sqlCheck);
-        }
+        console.log('📊 Statistiques:', stats);
       }
       
-      // Étape 2: Ajouter les relations si nécessaire
-      console.log('📊 Étape 2: Ajout des relations contacts...');
-      const clientsWithRelations = await this.clientRepository.find({
-        relations: ['contacts'],
-        order: { created_at: 'DESC' },
-      });
-      
-      console.log(`✅ Relations contacts ajoutées`);
-      
-      return clientsWithRelations;
+      return clients;
       
     } catch (error) {
       console.error('❌ Erreur dans findAll():', error);
@@ -352,21 +341,33 @@ export class ClientService {
   }
 
   async findOne(id: number): Promise<Client> {
-    // Essayer avec QueryBuilder pour forcer la sélection de is_permanent
+    // 🏦 CORRECTION: Utiliser findOne() au lieu de QueryBuilder pour garantir 
+    // la récupération de TOUTES les colonnes de l'entité
     try {
-      const client = await this.clientRepository
-        .createQueryBuilder('client')
-        .leftJoinAndSelect('client.contacts', 'contacts')
-        .leftJoinAndSelect('client.autorisationsTVA', 'autorisationsTVA')
-        .where('client.id = :id', { id })
-        .getOne();
+      const client = await this.clientRepository.findOne({
+        where: { id },
+        relations: ['contacts', 'autorisationsTVA']
+      });
 
       if (!client) {
         throw new NotFoundException(`Client avec l'ID ${id} non trouvé`);
       }
 
-      // Debug : vérifier le champ is_permanent
-      console.log('🔍 findOne - client.is_permanent:', client.is_permanent, 'type:', typeof client.is_permanent);
+      // Debug : vérifier les champs is_permanent et infos bancaires
+      console.log('🔍 findOne - Vérification client ID:', id);
+      console.log('  - is_permanent:', client.is_permanent, 'type:', typeof client.is_permanent);
+      console.log('  - Infos bancaires:', {
+        banque: client.banque,
+        iban: client.iban,
+        rib: client.rib,
+        swift: client.swift,
+        bic: client.bic,
+        hasBanque: 'banque' in client,
+        hasIban: 'iban' in client,
+        hasRib: 'rib' in client,
+        hasSwift: 'swift' in client,
+        hasBic: 'bic' in client
+      });
 
       return client;
     } catch (error) {
@@ -374,22 +375,8 @@ export class ClientService {
         throw error;
       }
       
-      console.error('❌ Erreur avec QueryBuilder dans findOne, fallback vers findOne():', error.message);
-      
-      // Fallback vers findOne() normal
-      const client = await this.clientRepository.findOne({
-        where: { id },
-        relations: ['contacts', 'autorisationsTVA'],
-      });
-
-      if (!client) {
-        throw new NotFoundException(`Client avec l'ID ${id} non trouvé`);
-      }
-
-      // Debug : vérifier le champ is_permanent
-      console.log('🔍 findOne fallback - client.is_permanent:', client.is_permanent, 'type:', typeof client.is_permanent);
-
-      return client;
+      console.error('❌ Erreur dans findOne:', error.message);
+      throw error;
     }
   }
 
@@ -453,10 +440,17 @@ export class ClientService {
     const oldEtatFiscal = client.etat_fiscal;
     const newEtatFiscal = updateClientDto.etat_fiscal;
 
+    // 🆕 Gérer charge_com_ids si fourni
+    const charge_com_ids = updateClientDto.charge_com_ids !== undefined
+      ? updateClientDto.charge_com_ids
+      : client.charge_com_ids;
+
     const updateData = {
       ...updateClientDto,
       date_auto: updateClientDto.date_auto ? new Date(updateClientDto.date_auto) : client.date_auto,
       date_fin: updateClientDto.date_fin ? new Date(updateClientDto.date_fin) : client.date_fin,
+      // 🆕 Mettre à jour les commerciaux assignés
+      charge_com_ids: charge_com_ids,
     };
 
     await this.clientRepository.update(id, updateData);
@@ -704,6 +698,23 @@ export class ClientService {
     });
     
     return await this.findOne(id);
+  }
+
+  /**
+   * 🆕 Récupère les clients assignés à un commercial spécifique
+   * @param commercialId ID du commercial
+   * @returns Liste des clients assignés
+   */
+  async findClientsByCommercial(commercialId: number): Promise<Client[]> {
+    // 🏦 CORRECTION: Utiliser QueryBuilder mais avec select explicite de toutes les colonnes
+    return await this.clientRepository
+      .createQueryBuilder('client')
+      .select('client') // Sélectionner TOUTES les colonnes de l'entité client
+      .leftJoinAndSelect('client.contacts', 'contacts')
+      .leftJoinAndSelect('client.autorisationsTVA', 'autorisationsTVA')
+      .where(':commercialId = ANY(client.charge_com_ids)', { commercialId })
+      .orderBy('client.created_at', 'DESC')
+      .getMany();
   }
 
   // Méthode supprimée - plus besoin de générer un code client

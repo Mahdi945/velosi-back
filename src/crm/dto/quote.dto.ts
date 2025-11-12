@@ -10,6 +10,7 @@ import {
   Min,
   Max,
   IsBoolean,
+  IsInt,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
@@ -323,7 +324,18 @@ export class CreateQuoteDto {
 
   @IsOptional()
   @IsNumber()
-  commercialId?: number;
+  commercialId?: number; // 🔴 Ancien - compatibilité
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  commercialIds?: number[];
 
   @IsArray()
   @ValidateNested({ each: true })
@@ -461,11 +473,59 @@ export class UpdateQuoteDto {
 
   @IsOptional()
   @IsNumber()
-  commercialId?: number;
+  commercialId?: number; // 🔴 Ancien - compatibilité
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  commercialIds?: number[];
 
   @IsOptional()
   @IsString()
   rejectionReason?: string;
+
+  // 🆕 Champs de transport pour fiche dossier
+  @IsOptional()
+  @IsNumber()
+  armateurId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  navireId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portLivraisonId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  aeroportEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  aeroportLivraisonId?: number;
+
+  @IsOptional()
+  @IsString()
+  hbl?: string;
+
+  @IsOptional()
+  @IsString()
+  mbl?: string;
+
+  @IsOptional()
+  @IsString()
+  condition?: string;
 
   @IsOptional()
   @IsArray()
@@ -568,7 +628,18 @@ export class QuoteFilterDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  commercialId?: number;
+  commercialId?: number; // 🔴 Ancien - pour compatibilité filtres
+
+  // ✅ NOUVEAU - Filtre par array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  commercialIds?: number[];
 
   @IsOptional()
   @IsString()
@@ -625,7 +696,7 @@ export class QuoteFilterDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(100)
+  // ✅ Pas de limite maximale pour permettre le chargement de toutes les cotations côté client
   limit?: number;
 
   @IsOptional()

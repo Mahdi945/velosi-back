@@ -135,12 +135,20 @@ export class Activity {
   meetingLink: string;
 
   // Gestion
+  // 🔴 ANCIEN SYSTÈME - conservé pour compatibilité ascendante
   @Column({ name: 'assigned_to', nullable: true })
   assignedTo: number;
 
   @ManyToOne(() => Personnel, { eager: true, nullable: true })
   @JoinColumn({ name: 'assigned_to' })
   assignedToPersonnel: Personnel;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux (relation 1-N)
+  @Column({ name: 'assigned_to_ids', type: 'int', array: true, default: [] })
+  assignedToIds: number[];
+
+  // Propriété virtuelle pour charger les commerciaux assignés
+  assignedCommercials?: Personnel[];
 
   @Column({ name: 'created_by' })
   createdBy: number;

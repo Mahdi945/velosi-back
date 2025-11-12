@@ -91,7 +91,10 @@ export class CreateClientDto {
 
   @IsOptional()
   @IsString()
-  charge_com?: string;
+  charge_com?: string; // DEPRECATED: Conservé pour compatibilité, utiliser charge_com_ids
+
+  @IsOptional()
+  charge_com_ids?: number[]; // Array des IDs des commerciaux assignés
 
   @IsOptional()
   @IsBoolean()
@@ -137,6 +140,27 @@ export class CreateClientDto {
   @IsOptional()
   @IsString()
   contact_fonction?: string;
+
+  // Informations bancaires
+  @IsOptional()
+  @IsString()
+  banque?: string;
+
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @IsOptional()
+  @IsString()
+  rib?: string;
+
+  @IsOptional()
+  @IsString()
+  swift?: string;
+
+  @IsOptional()
+  @IsString()
+  bic?: string;
 }
 
 export class UpdateClientDto {
@@ -228,7 +252,10 @@ export class UpdateClientDto {
 
   @IsOptional()
   @IsString()
-  charge_com?: string;
+  charge_com?: string; // DEPRECATED: Conservé pour compatibilité, utiliser charge_com_ids
+
+  @IsOptional()
+  charge_com_ids?: number[]; // Array des IDs des commerciaux assignés
 
   @IsOptional()
   @IsBoolean()
@@ -258,4 +285,25 @@ export class UpdateClientDto {
   @IsOptional()
   @IsBoolean()
   is_permanent?: boolean;
+
+  // Informations bancaires
+  @IsOptional()
+  @IsString()
+  banque?: string;
+
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @IsOptional()
+  @IsString()
+  rib?: string;
+
+  @IsOptional()
+  @IsString()
+  swift?: string;
+
+  @IsOptional()
+  @IsString()
+  bic?: string;
 }

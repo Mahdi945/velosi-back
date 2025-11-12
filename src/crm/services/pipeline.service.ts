@@ -43,6 +43,8 @@ export interface KanbanOpportunity {
   expectedCloseDate: Date | null;
   assignedTo: number;
   assignedToName: string;
+  assignedToIds?: number[]; // ✅ NOUVEAU: Array de commerciaux assignés
+  assignedCommercials?: Array<{id: number; prenom: string; nom: string}>; // ✅ NOUVEAU: Commerciaux assignés chargés
   client: string | null;
   priority: string;
   stage: string;
@@ -203,15 +205,25 @@ export class PipelineService {
       
       console.log(`📋 Trouvé ${leads.length} prospects (leads) actifs pour la colonne prospecting`);
 
+      // ✅ Charger les commerciaux assignés pour toutes les opportunités
+      const opportunitiesWithCommercials = await Promise.all(
+        opportunities.map(opp => this.loadAssignedCommercialsForOpportunity(opp))
+      );
+
+      // ✅ Charger les commerciaux assignés pour tous les leads
+      const leadsWithCommercials = await Promise.all(
+        leads.map(lead => this.loadAssignedCommercialsForLead(lead))
+      );
+
       // 6. Grouper les opportunités par étape et ajouter les prospects
       const stagesWithOpportunities: KanbanStage[] = stages.map(stage => {
-        let stageOpportunities = opportunities
+        let stageOpportunities = opportunitiesWithCommercials
           .filter(opp => opp.stage === stage.stageEnum)
           .map(opp => this.transformToKanbanOpportunity(opp));
 
         // 🎯 NOUVEAU: Ajouter les prospects (leads) à la colonne "prospecting"
         if (stage.stageEnum === 'prospecting') {
-          const leadOpportunities = leads.map(lead => this.transformLeadToKanbanOpportunity(lead));
+          const leadOpportunities = leadsWithCommercials.map(lead => this.transformLeadToKanbanOpportunity(lead));
           stageOpportunities = [...leadOpportunities, ...stageOpportunities];
           console.log(`✨ Ajout de ${leadOpportunities.length} prospects actifs à la colonne prospecting`);
         }
@@ -347,6 +359,9 @@ export class PipelineService {
   private transformToKanbanOpportunity(opportunity: Opportunity): KanbanOpportunity {
     const daysInStage = this.calculateDaysInStage(opportunity.updatedAt);
     
+    // ✅ Préparer les commerciaux assignés
+    const assignedCommercials = opportunity.assignedCommercials || [];
+    
     return {
       id: opportunity.id,
       title: opportunity.title,
@@ -358,6 +373,13 @@ export class PipelineService {
       assignedToName: opportunity.assignedTo 
         ? `${opportunity.assignedTo.prenom} ${opportunity.assignedTo.nom}`.trim()
         : 'Non assigné',
+      // ✅ NOUVEAU: Ajout des commerciaux assignés
+      assignedToIds: opportunity.assignedToIds || [],
+      assignedCommercials: assignedCommercials.map(c => ({
+        id: c.id,
+        prenom: c.prenom,
+        nom: c.nom
+      })),
       client: opportunity.client?.nom || null,
       priority: opportunity.priority || 'medium',
       stage: opportunity.stage,
@@ -400,6 +422,9 @@ export class PipelineService {
   private transformLeadToKanbanOpportunity(lead: Lead): KanbanOpportunity {
     const daysInStage = this.calculateDaysInStage(lead.updatedAt || lead.createdAt);
     
+    // ✅ Préparer les commerciaux assignés pour les prospects
+    const assignedCommercials = lead.assignedCommercials || [];
+    
     return {
       id: lead.id,
       title: `${lead.company} - ${lead.fullName}`, // Titre combiné entreprise + nom
@@ -411,6 +436,13 @@ export class PipelineService {
       assignedToName: lead.assignedTo 
         ? `${lead.assignedTo.prenom} ${lead.assignedTo.nom}`.trim()
         : 'Non assigné',
+      // ✅ NOUVEAU: Ajout des commerciaux assignés
+      assignedToIds: lead.assignedToIds || [],
+      assignedCommercials: assignedCommercials.map(c => ({
+        id: c.id,
+        prenom: c.prenom,
+        nom: c.nom
+      })),
       client: null, // Les prospects ne sont pas encore des clients
       priority: lead.priority || 'medium',
       stage: 'prospecting', // Toujours prospecting pour les leads
@@ -445,6 +477,36 @@ export class PipelineService {
       createdAt: lead.createdAt,
       updatedAt: lead.updatedAt || lead.createdAt
     };
+  }
+
+  /**
+   * ✅ Charger les commerciaux assignés pour une opportunité
+   */
+  private async loadAssignedCommercialsForOpportunity(opportunity: Opportunity): Promise<Opportunity> {
+    if (opportunity.assignedToIds && opportunity.assignedToIds.length > 0) {
+      opportunity.assignedCommercials = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .where('personnel.id IN (:...ids)', { ids: opportunity.assignedToIds })
+        .getMany();
+    } else {
+      opportunity.assignedCommercials = [];
+    }
+    return opportunity;
+  }
+
+  /**
+   * ✅ Charger les commerciaux assignés pour un lead (prospect)
+   */
+  private async loadAssignedCommercialsForLead(lead: Lead): Promise<Lead> {
+    if (lead.assignedToIds && lead.assignedToIds.length > 0) {
+      lead.assignedCommercials = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .where('personnel.id IN (:...ids)', { ids: lead.assignedToIds })
+        .getMany();
+    } else {
+      lead.assignedCommercials = [];
+    }
+    return lead;
   }
 
   /**

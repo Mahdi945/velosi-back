@@ -146,8 +146,16 @@ export class Opportunity extends BaseEntityWithSoftDelete {
   specialRequirements: string;
 
   // Gestion commerciale
+  // 🔴 ANCIEN SYSTÈME - conservé pour compatibilité ascendante
   @Column({ name: 'assigned_to', nullable: true })
   assignedToId: number;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux (relation 1-N)
+  @Column({ name: 'assigned_to_ids', type: 'int', array: true, default: [] })
+  assignedToIds: number[];
+
+  // Propriété virtuelle pour charger les commerciaux assignés
+  assignedCommercials?: Personnel[];
 
   @Column({ length: 50, default: 'inbound' })
   source: string;

@@ -13,6 +13,10 @@ import { Opportunity } from '../../entities/crm/opportunity.entity';
 import { Client } from '../../entities/client.entity';
 import { Personnel } from '../../entities/personnel.entity';
 import { Engin } from '../../entities/engin.entity';
+import { Armateur } from '../../entities/armateur.entity';
+import { Navire } from '../../entities/navire.entity';
+import { Port } from '../../entities/port.entity';
+import { Aeroport } from '../../entities/aeroport.entity';
 import { QuoteItem } from './quote-item.entity';
 import { Activity } from './activity.entity';
 import { BaseEntityWithSoftDelete } from '../../common/entities/base-soft-delete.entity';
@@ -228,20 +232,44 @@ export class Quote extends BaseEntityWithSoftDelete {
   @Column({ name: 'armateur_id', nullable: true })
   armateurId: number;
 
+  @ManyToOne(() => Armateur, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'armateur_id' })
+  armateur: Armateur;
+
   @Column({ name: 'navire_id', nullable: true })
   navireId: number;
+
+  @ManyToOne(() => Navire, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'navire_id' })
+  navire: Navire;
 
   @Column({ name: 'port_enlevement_id', nullable: true })
   portEnlevementId: number;
 
+  @ManyToOne(() => Port, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'port_enlevement_id' })
+  portEnlevement: Port;
+
   @Column({ name: 'port_livraison_id', nullable: true })
   portLivraisonId: number;
+
+  @ManyToOne(() => Port, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'port_livraison_id' })
+  portLivraison: Port;
 
   @Column({ name: 'aeroport_enlevement_id', nullable: true })
   aeroportEnlevementId: number;
 
+  @ManyToOne(() => Aeroport, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'aeroport_enlevement_id' })
+  aeroportEnlevement: Aeroport;
+
   @Column({ name: 'aeroport_livraison_id', nullable: true })
   aeroportLivraisonId: number;
+
+  @ManyToOne(() => Aeroport, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'aeroport_livraison_id' })
+  aeroportLivraison: Aeroport;
 
   @Column({ length: 100, nullable: true })
   hbl: string;
@@ -267,12 +295,20 @@ export class Quote extends BaseEntityWithSoftDelete {
   @JoinColumn({ name: 'approved_by' })
   approver: Personnel;
 
+  // 🔴 ANCIEN SYSTÈME - conservé pour compatibilité ascendante
   @Column({ name: 'commercial_id', nullable: true })
   commercialId: number;
 
   @ManyToOne(() => Personnel, { nullable: true })
   @JoinColumn({ name: 'commercial_id' })
   commercial: Personnel;
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux (relation 1-N)
+  @Column({ name: 'commercial_ids', type: 'int', array: true, default: [] })
+  commercialIds: number[];
+
+  // Propriété virtuelle pour charger les commerciaux assignés
+  assignedCommercials?: Personnel[];
 
   // Relations
   @OneToMany(() => QuoteItem, (item) => item.quote, { cascade: true })

@@ -33,35 +33,25 @@ export class ClientController {
   async findAll(): Promise<any> {
     const clients = await this.clientService.findAll();
     
-    // Debug: Vérifier les données avant transformation
+    // 🏦 Debug: Vérifier les données COMPLÈTES incluant infos bancaires
     if (clients.length > 0) {
-      console.log('🔍 CONTROLLER - Premier client avant transformation:', {
+      console.log('🔍 CONTROLLER - Premier client (données complètes):', {
         id: clients[0].id,
         nom: clients[0].nom,
         is_permanent: clients[0].is_permanent,
         type: typeof clients[0].is_permanent,
+        banque: clients[0].banque,
+        iban: clients[0].iban,
+        rib: clients[0].rib,
+        swift: clients[0].swift,
+        bic: clients[0].bic,
         allFields: Object.keys(clients[0])
       });
     }
     
-    // Utiliser class-transformer pour s'assurer que @Expose() est respecté
-    const transformedClients = classToPlain(clients, { 
-      excludeExtraneousValues: false,
-      enableImplicitConversion: true 
-    });
-    
-    // Debug: Vérifier les données après transformation
-    if (transformedClients.length > 0) {
-      console.log('🔍 CONTROLLER - Premier client après transformation:', {
-        id: transformedClients[0].id,
-        nom: transformedClients[0].nom,
-        is_permanent: transformedClients[0].is_permanent,
-        type: typeof transformedClients[0].is_permanent,
-        allFields: Object.keys(transformedClients[0])
-      });
-    }
-    
-    return transformedClients;
+    // ✅ CORRECTION: Retourner directement les clients SANS transformation
+    // pour garantir que TOUS les champs (y compris infos bancaires) sont présents
+    return clients;
   }
 
   @Get('stats/tva')
@@ -77,6 +67,13 @@ export class ClientController {
   @Get('expired-documents')
   async getClientsWithExpiredDocuments() {
     return await this.clientService.findClientsWithExpiredDocuments();
+  }
+
+  @Get('by-commercial/:commercialId')
+  async findByCommercial(
+    @Param('commercialId', ParseIntPipe) commercialId: number,
+  ): Promise<Client[]> {
+    return await this.clientService.findClientsByCommercial(commercialId);
   }
 
   @Get(':id')

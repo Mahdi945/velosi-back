@@ -89,11 +89,30 @@ export class Client {
   @Column({ type: 'varchar', nullable: true })
   compte_cpt: string;
 
+  // Informations bancaires
+  @Column({ type: 'varchar', nullable: true })
+  banque: string; // Nom de la banque
+
+  @Column({ type: 'varchar', nullable: true })
+  iban: string; // International Bank Account Number
+
+  @Column({ type: 'varchar', nullable: true })
+  rib: string; // Relevé d'Identité Bancaire
+
+  @Column({ type: 'varchar', nullable: true })
+  swift: string; // SWIFT/BIC code
+
+  @Column({ type: 'varchar', nullable: true })
+  bic: string; // Bank Identifier Code
+
   @Column({ type: 'varchar', nullable: true })
   sec_activite: string;
 
   @Column({ type: 'varchar', nullable: true })
-  charge_com: string;
+  charge_com: string; // DEPRECATED: Conservé pour compatibilité, utiliser charge_com_ids
+
+  @Column({ type: 'int', array: true, default: () => "'{}'", nullable: true })
+  charge_com_ids: number[]; // Array des IDs des commerciaux assignés (relation 1-N)
 
   @Column({ type: 'boolean', nullable: true })
   stop_envoie_solde: boolean;

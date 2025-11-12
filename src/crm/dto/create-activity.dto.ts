@@ -8,8 +8,9 @@ import {
   IsDateString,
   ValidateNested,
   MaxLength,
+  IsInt,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   ActivityType,
   ActivityStatus,
@@ -119,7 +120,18 @@ export class CreateActivityDto {
   // Gestion
   @IsOptional()
   @IsNumber()
-  assignedTo?: number; // Optionnel, par défaut = createdBy
+  assignedTo?: number; // 🔴 Ancien - compatibilité
+
+  // ✅ NOUVEAU SYSTÈME - Array de commerciaux
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
 
   @IsOptional()
   @IsNumber()

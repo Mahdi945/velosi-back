@@ -199,6 +199,15 @@ export class QuotesService {
       // Générer le numéro de devis
       const quoteNumber = await this.generateQuoteNumber();
 
+      // ✅ Gérer les commerciaux (nouveau système multi-commerciaux)
+      let commercialIds = [];
+      if (createQuoteDto.commercialIds && createQuoteDto.commercialIds.length > 0) {
+        commercialIds = createQuoteDto.commercialIds;
+      } else if (createQuoteDto.commercialId) {
+        // Fallback: ancien système avec commercialId unique
+        commercialIds = [createQuoteDto.commercialId];
+      }
+
       // Créer le devis
       const quote = this.quoteRepository.create({
         ...createQuoteDto,
@@ -207,6 +216,9 @@ export class QuotesService {
         status: QuoteStatus.DRAFT,
         type: 'cotation', // ✅ Type par défaut: cotation
         taxRate: createQuoteDto.taxRate || 19.0,
+        commercialIds, // ✅ Array de commerciaux
+        // Garder aussi commercialId pour compatibilité (premier commercial)
+        commercialId: commercialIds.length > 0 ? commercialIds[0] : undefined,
       });
 
       // Créer les lignes
@@ -287,7 +299,13 @@ export class QuotesService {
       .leftJoinAndSelect('quote.opportunity', 'opportunity')
       .leftJoinAndSelect('quote.lead', 'lead')
       .leftJoinAndSelect('quote.client', 'client')
-      .leftJoinAndSelect('quote.approver', 'approver');
+      .leftJoinAndSelect('quote.approver', 'approver')
+      .leftJoinAndSelect('quote.armateur', 'armateur')
+      .leftJoinAndSelect('quote.navire', 'navire')
+      .leftJoinAndSelect('quote.portEnlevement', 'portEnlevement')
+      .leftJoinAndSelect('quote.portLivraison', 'portLivraison')
+      .leftJoinAndSelect('quote.aeroportEnlevement', 'aeroportEnlevement')
+      .leftJoinAndSelect('quote.aeroportLivraison', 'aeroportLivraison');
 
     // Appliquer les filtres
     if (status) queryBuilder.andWhere('quote.status = :status', { status });
@@ -346,6 +364,18 @@ export class QuotesService {
       .take(limit);
 
     const [data, total] = await queryBuilder.getManyAndCount();
+
+    // ✅ Charger les commerciaux assignés pour toutes les cotations
+    if (data && data.length > 0) {
+      const { Personnel } = await import('../../entities/personnel.entity');
+      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
+      
+      for (const quote of data) {
+        if (quote.commercialIds && quote.commercialIds.length > 0) {
+          quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+        }
+      }
+    }
 
     console.log(`✅ Backend retourne ${data.length} cotations NON-ARCHIVÉES (total: ${total})`);
     return { data, total };
@@ -421,12 +451,25 @@ export class QuotesService {
 
     const [data, total] = await query.getManyAndCount();
 
+    // ✅ Charger les commerciaux assignés pour toutes les cotations archivées
+    if (data && data.length > 0) {
+      const { Personnel } = await import('../../entities/personnel.entity');
+      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
+      
+      for (const quote of data) {
+        if (quote.commercialIds && quote.commercialIds.length > 0) {
+          quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+        }
+      }
+    }
+
     console.log(`✅ Backend retourne ${data.length} cotations ARCHIVÉES (total: ${total})`);
     return { data, total };
   }
 
   /**
    * Récupérer un devis par ID
+   * ✅ CORRECTION: Charger les commerciaux assignés depuis commercialIds
    */
   async findOne(id: number): Promise<Quote> {
     const quote = await this.quoteRepository.findOne({
@@ -440,11 +483,30 @@ export class QuotesService {
         'client',
         'approver',
         'activities',
+        'armateur',
+        'navire',
+        'portEnlevement',
+        'portLivraison',
+        'aeroportEnlevement',
+        'aeroportLivraison',
       ],
     });
 
     if (!quote) {
       throw new NotFoundException(`Devis avec l'ID ${id} introuvable`);
+    }
+
+    // ✅ Charger les commerciaux assignés depuis commercialIds
+    if (quote.commercialIds && quote.commercialIds.length > 0) {
+      const { Repository } = await import('typeorm');
+      const { Personnel } = await import('../../entities/personnel.entity');
+      const { InjectRepository } = await import('@nestjs/typeorm');
+      
+      // Utiliser le repository pour charger les commerciaux
+      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
+      quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+      
+      console.log(`✅ ${quote.assignedCommercials.length} commerciaux chargés pour cotation ${quote.quoteNumber}`);
     }
 
     return quote;
@@ -464,6 +526,12 @@ export class QuotesService {
         'lead',
         'client',
         'approver',
+        'armateur',
+        'navire',
+        'portEnlevement',
+        'portLivraison',
+        'aeroportEnlevement',
+        'aeroportLivraison',
       ],
     });
 
@@ -476,19 +544,62 @@ export class QuotesService {
 
   /**
    * Mettre à jour un devis
+   * ✅ CORRECTION: Gérer la mise à jour des commerciaux multi-assignés
    */
   async update(id: number, updateQuoteDto: UpdateQuoteDto): Promise<Quote> {
     const quote = await this.findOne(id);
 
+    console.log('🔄 [UPDATE] Données reçues pour mise à jour:', {
+      id,
+      commercialIds: updateQuoteDto.commercialIds,
+      commercialId: updateQuoteDto.commercialId,
+      armateurId: updateQuoteDto.armateurId,
+      navireId: updateQuoteDto.navireId,
+      portEnlevementId: updateQuoteDto.portEnlevementId,
+      portLivraisonId: updateQuoteDto.portLivraisonId,
+      aeroportEnlevementId: updateQuoteDto.aeroportEnlevementId,
+      aeroportLivraisonId: updateQuoteDto.aeroportLivraisonId,
+      hbl: updateQuoteDto.hbl,
+      mbl: updateQuoteDto.mbl,
+      condition: updateQuoteDto.condition,
+    });
+
     // Vérifier que le devis peut être modifié
-    if ([QuoteStatus.ACCEPTED, QuoteStatus.EXPIRED, QuoteStatus.CANCELLED].includes(quote.status)) {
+    // ✅ EXCEPTION: Les fiches dossier (type='fiche_dossier') peuvent toujours être modifiées
+    const isFicheDossier = quote.type === 'fiche_dossier';
+    if (!isFicheDossier && [QuoteStatus.ACCEPTED, QuoteStatus.EXPIRED, QuoteStatus.CANCELLED].includes(quote.status)) {
       throw new BadRequestException(
         `Impossible de modifier un devis avec le statut ${quote.status}`,
       );
     }
 
+    // ✅ Gérer la mise à jour des commerciaux (nouveau système multi-commerciaux)
+    if (updateQuoteDto.commercialIds && updateQuoteDto.commercialIds.length > 0) {
+      quote.commercialIds = updateQuoteDto.commercialIds;
+      quote.commercialId = updateQuoteDto.commercialIds[0]; // Premier commercial pour compatibilité
+      console.log(`✅ ${updateQuoteDto.commercialIds.length} commerciaux assignés`);
+    } else if (updateQuoteDto.commercialId) {
+      // Fallback: ancien système avec commercialId unique
+      quote.commercialIds = [updateQuoteDto.commercialId];
+      quote.commercialId = updateQuoteDto.commercialId;
+      console.log(`✅ 1 commercial assigné (ancien système)`);
+    }
+
     // Mettre à jour les champs principaux
     Object.assign(quote, updateQuoteDto);
+    
+    console.log('✅ [UPDATE] Quote après Object.assign:', {
+      commercialIds: quote.commercialIds,
+      armateurId: quote.armateurId,
+      navireId: quote.navireId,
+      portEnlevementId: quote.portEnlevementId,
+      portLivraisonId: quote.portLivraisonId,
+      aeroportEnlevementId: quote.aeroportEnlevementId,
+      aeroportLivraisonId: quote.aeroportLivraisonId,
+      hbl: quote.hbl,
+      mbl: quote.mbl,
+      condition: quote.condition,
+    });
 
     // Mettre à jour les lignes si fournies
     if (updateQuoteDto.items) {
@@ -511,8 +622,35 @@ export class QuotesService {
     // Recalculer les totaux
     this.calculateTotals(quote);
 
+    console.log('💾 [UPDATE] Quote avant save:', {
+      id: quote.id,
+      commercialIds: quote.commercialIds,
+      armateurId: quote.armateurId,
+      navireId: quote.navireId,
+      portEnlevementId: quote.portEnlevementId,
+      portLivraisonId: quote.portLivraisonId,
+      aeroportEnlevementId: quote.aeroportEnlevementId,
+      aeroportLivraisonId: quote.aeroportLivraisonId,
+      hbl: quote.hbl,
+      mbl: quote.mbl,
+      condition: quote.condition,
+    });
+
     // Sauvegarder
     const updatedQuote = await this.quoteRepository.save(quote);
+
+    console.log('✨ [UPDATE] Quote après save:', {
+      id: updatedQuote.id,
+      armateurId: updatedQuote.armateurId,
+      navireId: updatedQuote.navireId,
+      portEnlevementId: updatedQuote.portEnlevementId,
+      portLivraisonId: updatedQuote.portLivraisonId,
+      aeroportEnlevementId: updatedQuote.aeroportEnlevementId,
+      aeroportLivraisonId: updatedQuote.aeroportLivraisonId,
+      hbl: updatedQuote.hbl,
+      mbl: updatedQuote.mbl,
+      condition: updatedQuote.condition,
+    });
 
     // 🎯 Régénérer le QR code après la mise à jour
     const qrCode = await this.generateQRCode(updatedQuote);

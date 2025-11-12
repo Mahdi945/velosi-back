@@ -181,6 +181,32 @@ export class UsersService {
     console.log(`📝 Client créé: ${savedClient.nom} (ID: ${savedClient.id})`);
     console.log(`🔐 Type d'accès: ${savedClient.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}`);
 
+    // 🆕 Créer automatiquement le contact principal basé sur l'interlocuteur
+    if (savedClient.id) {
+      try {
+        const principalContact = this.contactClientRepository.create({
+          id_client: savedClient.id,
+          nom: '', // Nom vide pour le contact principal
+          prenom: createClientDto.interlocuteur || 'Contact principal', // Prénom = interlocuteur
+          tel1: createClientDto.contact_tel1 || '',
+          tel2: createClientDto.contact_tel2 || '',
+          tel3: createClientDto.contact_tel3 || '',
+          fax: createClientDto.contact_fax || '',
+          mail1: createClientDto.contact_mail1 || '',
+          mail2: createClientDto.contact_mail2 || '',
+          fonction: createClientDto.contact_fonction || createClientDto.interlocuteur || 'Interlocuteur',
+          is_principal: true, // Contact principal
+          client: savedClient,
+        });
+
+        await this.contactClientRepository.save(principalContact);
+        console.log(`✅ Contact principal créé pour le client ${savedClient.id}`);
+      } catch (error) {
+        console.warn(`⚠️ Erreur lors de la création du contact principal pour le client ${savedClient.id}:`, error.message);
+        // On continue même si la création du contact échoue
+      }
+    }
+
     // Créer l'utilisateur dans Keycloak SEULEMENT pour les clients permanents
     if (createClientDto.is_permanent === true) {
       console.log(`🔑 Client permanent détecté - Tentative de création compte Keycloak...`);
@@ -395,8 +421,15 @@ export class UsersService {
           'client.compte_cpt',
           'client.sec_activite',
           'client.charge_com',
+          'client.charge_com_ids', // 🆕 Ajouter le champ multi-commerciaux
           'client.keycloak_id',
           'client.is_permanent',
+          // 🏦 Informations bancaires
+          'client.banque',
+          'client.iban',
+          'client.rib',
+          'client.swift',
+          'client.bic',
           'contact.tel1',
           'contact.tel2',
           'contact.tel3',
@@ -443,12 +476,17 @@ export class UsersService {
           mail1: contact?.mail1 || client.email || '',
           mail2: contact?.mail2 || '',
           fonction: contact?.fonction || '', // Ne pas utiliser le nom du client par défaut
-          charge_com: client.charge_com // S'assurer que charge_com est présent
+          charge_com: client.charge_com, // S'assurer que charge_com est présent (ancien champ)
+          charge_com_ids: client.charge_com_ids || [] // 🆕 Ajouter le champ multi-commerciaux
         };
         
         // Debug spécifique pour charge_com
         console.log(`   - charge_com BRUT: "${client.charge_com}"`);
         console.log(`   - charge_com MAPPÉ: "${mappedClient.charge_com}"`);
+        console.log(`   - charge_com_ids BRUT:`, client.charge_com_ids);
+        console.log(`   - charge_com_ids MAPPÉ:`, mappedClient.charge_com_ids);
+        console.log(`   - categorie BRUT: "${client.categorie}" (type: ${typeof client.categorie})`); // 🆕 Debug catégorie
+        console.log(`   - categorie MAPPÉ: "${mappedClient.categorie}"`); // 🆕 Debug catégorie
         
         console.log(`✅ [getAllClients] Client mappé: ${client.nom} (ID: ${client.id}) - Email: "${mappedClient.email}" - Tel1: "${mappedClient.tel1}"`);
         return mappedClient;
@@ -513,6 +551,7 @@ export class UsersService {
 
       console.log(`📋 [getClientWithContactData] Client trouvé: ${client.nom}`);
       console.log(`📋 [getClientWithContactData] Charge commercial: ${client.charge_com}`);
+      console.log(`📋 [getClientWithContactData] Charge commercial IDs:`, client.charge_com_ids); // 🆕
       console.log(`📋 [getClientWithContactData] Contacts: ${client.contacts?.length || 0}`);
 
       // Mapper les données comme pour getAllClients
@@ -529,10 +568,12 @@ export class UsersService {
         mail1: contact?.mail1 || '',
         mail2: contact?.mail2 || '',
         fonction: contact?.fonction || '',
-        charge_com: client.charge_com // S'assurer que charge_com est bien inclus
+        charge_com: client.charge_com, // S'assurer que charge_com est bien inclus
+        charge_com_ids: client.charge_com_ids || [] // 🆕 Ajouter le champ multi-commerciaux
       };
 
       console.log(`✅ [getClientWithContactData] Client mappé - charge_com: "${mappedClient.charge_com}"`);
+      console.log(`✅ [getClientWithContactData] Client mappé - charge_com_ids:`, mappedClient.charge_com_ids); // 🆕
       return mappedClient;
 
     } catch (error) {
@@ -1256,14 +1297,15 @@ export class UsersService {
 
     // Envoyer un email de notification (toujours activé)
     try {
-      // Priorité à mail1 de la table contact_client
+      // 🆕 Priorité au contact principal (is_principal = true)
       let emailToUse = null;
       
-      // 1. Chercher d'abord dans les contacts (priorité)
+      // 1. Chercher le contact principal
       if (client.contacts && client.contacts.length > 0) {
-        const contact = client.contacts[0]; // Prendre le premier contact
-        emailToUse = contact.mail1 || contact.mail2;
-        this.logger.log(`Email trouvé dans contact_client: ${emailToUse} pour client ${client.nom}`);
+        const principalContact = client.contacts.find(c => c.is_principal);
+        const contactToUse = principalContact || client.contacts[0]; // Fallback sur le premier contact
+        emailToUse = contactToUse.mail1 || contactToUse.mail2;
+        this.logger.log(`Email trouvé dans contact_client ${principalContact ? '(principal)' : '(premier)'}: ${emailToUse} pour client ${client.nom}`);
       }
       
       // 2. Fallback sur client.email si pas d'email dans les contacts
@@ -1326,14 +1368,15 @@ export class UsersService {
 
     // Envoyer un email de notification (toujours activé)
     try {
-      // Priorité à mail1 de la table contact_client
+      // 🆕 Priorité au contact principal (is_principal = true)
       let emailToUse = null;
       
-      // 1. Chercher d'abord dans les contacts (priorité)
+      // 1. Chercher le contact principal
       if (client.contacts && client.contacts.length > 0) {
-        const contact = client.contacts[0]; // Prendre le premier contact
-        emailToUse = contact.mail1 || contact.mail2;
-        this.logger.log(`Email trouvé dans contact_client: ${emailToUse} pour client ${client.nom}`);
+        const principalContact = client.contacts.find(c => c.is_principal);
+        const contactToUse = principalContact || client.contacts[0]; // Fallback sur le premier contact
+        emailToUse = contactToUse.mail1 || contactToUse.mail2;
+        this.logger.log(`Email trouvé dans contact_client ${principalContact ? '(principal)' : '(premier)'}: ${emailToUse} pour client ${client.nom}`);
       }
       
       // 2. Fallback sur client.email si pas d'email dans les contacts
