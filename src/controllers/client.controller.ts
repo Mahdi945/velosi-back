@@ -239,6 +239,27 @@ export class ClientController {
     }
   }
 
+  @Post(':id/convert-to-fournisseur')
+  @HttpCode(HttpStatus.OK)
+  async convertToFournisseur(
+    @Param('id', ParseIntPipe) id: number
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: { client: Client; codeFournisseur: string };
+  }> {
+    try {
+      const result = await this.clientService.convertToFournisseur(id);
+      return {
+        success: true,
+        message: `Client converti en fournisseur avec succès. Code fournisseur: ${result.codeFournisseur}`,
+        data: result
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {

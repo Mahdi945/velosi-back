@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client, EtatFiscal } from '../entities/client.entity';
 import { CreateClientDto, UpdateClientDto } from '../dto/client.dto';
+import { Fournisseur } from '../entities/fournisseur.entity';
 import { AutorisationTVAService } from './autorisation-tva.service';
 import { KeycloakService } from '../auth/keycloak.service';
 import { EmailService } from './email.service';
@@ -13,6 +14,8 @@ export class ClientService {
   constructor(
     @InjectRepository(Client)
     private readonly clientRepository: Repository<Client>,
+    @InjectRepository(Fournisseur)
+    private readonly fournisseurRepository: Repository<Fournisseur>,
     private readonly autorisationTVAService: AutorisationTVAService,
     private readonly keycloakService: KeycloakService,
     private readonly emailService: EmailService,
@@ -74,36 +77,45 @@ export class ClientService {
     console.log(`📝 Client créé: ${savedClient.nom} (ID: ${savedClient.id})`);
     console.log(`🔐 Type d'accès: ${savedClient.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}`);
 
-    // ✅ NOUVEAU: Créer automatiquement l'entrée contact_client si email ou téléphone fourni
+    // ✅ CORRECTION: Créer automatiquement le contact principal avec prenom = nom du client
     if (createClientDto.contact_mail1 || createClientDto.contact_tel1) {
       try {
         console.log(`\n🔄 INSERTION CONTACT_CLIENT pour client #${savedClient.id}`);
+        console.log(`   - Nom du client: ${savedClient.nom}`);
         console.log(`   - contact_mail1 (DTO): ${createClientDto.contact_mail1 || 'NON FOURNI'}`);
         console.log(`   - contact_tel1 (DTO): ${createClientDto.contact_tel1 || 'NON FOURNI'}`);
-        console.log(`   - contact_fonction (DTO): ${createClientDto.contact_fonction || 'NON FOURNI'}`);
+        console.log(`   - contact_fonction (DTO): ${createClientDto.contact_fonction || 'interlocuteur'}`);
         
+        // ✅ CORRECTION CRITIQUE: Insérer avec prenom = interlocuteur (nom de la personne) et is_principal = true
         const insertResult = await this.clientRepository.query(`
-          INSERT INTO contact_client (id_client, mail1, tel1, fonction)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (id_client) 
-          DO UPDATE SET 
-            mail1 = EXCLUDED.mail1,
-            tel1 = EXCLUDED.tel1,
-            fonction = EXCLUDED.fonction
-          RETURNING id_client, mail1, tel1, fonction
+          INSERT INTO contact_client (
+            id_client, 
+            prenom, 
+            mail1, 
+            tel1, 
+            fonction,
+            is_principal
+          )
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, id_client, prenom, mail1, tel1, fonction, is_principal
         `, [
           savedClient.id,
+          createClientDto.interlocuteur || savedClient.nom, // ✅ prenom = interlocuteur (nom de la personne), sinon nom de l'entreprise
           createClientDto.contact_mail1 || null,
           createClientDto.contact_tel1 || null,
-          createClientDto.contact_fonction || null
+          createClientDto.contact_fonction || 'interlocuteur', // ✅ Fallback vers "interlocuteur"
+          true // ✅ is_principal = true pour le contact principal
         ]);
         
-        console.log(`✅ CONTACT_CLIENT créé/mis à jour avec succès:`);
+        console.log(`✅ CONTACT_CLIENT créé avec succès:`);
         console.log(`   Résultat:`, JSON.stringify(insertResult, null, 2));
+        console.log(`   - id: ${insertResult[0]?.id}`);
         console.log(`   - id_client: ${insertResult[0]?.id_client}`);
+        console.log(`   - prenom (BD): ${insertResult[0]?.prenom || 'NULL'}`);
         console.log(`   - mail1 (BD): ${insertResult[0]?.mail1 || 'NULL'}`);
         console.log(`   - tel1 (BD): ${insertResult[0]?.tel1 || 'NULL'}`);
-        console.log(`   - fonction (BD): ${insertResult[0]?.fonction || 'NULL'}\n`);
+        console.log(`   - fonction (BD): ${insertResult[0]?.fonction || 'NULL'}`);
+        console.log(`   - is_principal (BD): ${insertResult[0]?.is_principal}\n`);
       } catch (contactError) {
         console.error(`\n❌ ERREUR INSERTION CONTACT_CLIENT pour client #${savedClient.id}:`);
         console.error(`   Message: ${contactError.message}`);
@@ -717,5 +729,134 @@ export class ClientService {
       .getMany();
   }
 
-  // Méthode supprimée - plus besoin de générer un code client
+  /**
+   * 🆕 Convertit un client en fournisseur
+   * @param clientId ID du client à convertir
+   * @returns Client mis à jour avec is_fournisseur = true et code_fournisseur
+   */
+  /**
+   * Convertit un client en fournisseur
+   * 1. Crée un enregistrement dans la table fournisseurs avec génération de code
+   * 2. Met à jour le client avec is_fournisseur = true et code_fournisseur
+   */
+  async convertToFournisseur(clientId: number): Promise<{client: Client, codeFournisseur: string}> {
+    const client = await this.clientRepository.findOne({
+      where: { id: clientId },
+      relations: ['contacts']
+    });
+
+    // Vérifier que le client existe
+    if (!client) {
+      throw new NotFoundException(`Client avec l'ID ${clientId} introuvable`);
+    }
+
+    // Vérifier si le client n'est pas déjà fournisseur
+    if (client.is_fournisseur) {
+      throw new ConflictException(`Le client "${client.nom}" est déjà fournisseur (Code: ${client.code_fournisseur})`);
+    }
+
+    // Récupérer le contact principal pour les informations de contact
+    const contactPrincipal = client.contacts?.find(c => c.is_principal) || client.contacts?.[0];
+
+    try {
+      // 1. Générer le code fournisseur en vérifiant tous les fournisseurs existants
+      const codeFournisseur = await this.generateCodeFournisseur();
+
+      // 2. Créer l'enregistrement dans la table fournisseurs avec les infos du contact principal
+      const fournisseur = this.fournisseurRepository.create({
+        code: codeFournisseur,
+        nom: client.nom,
+        typeFournisseur: client.categorie === 'etranger' ? 'etranger' : 'local',
+        categorie: client.type_client === 'entreprise' ? 'personne_morale' : 'personne_physique',
+        natureIdentification: 'mf', // Par défaut MF pour les entreprises
+        numeroIdentification: client.id_fiscal,
+        adresse: client.adresse,
+        ville: client.ville,
+        codePostal: client.code_postal,
+        pays: client.pays || 'Tunisie',
+        // Utiliser les informations du contact principal
+        telephone: contactPrincipal?.tel1 || null,
+        fax: contactPrincipal?.fax || null,
+        email: contactPrincipal?.mail1 || client.email || null,
+        ribIban: client.rib || client.iban,
+        swift: client.swift,
+        notes: `Converti depuis le client ID: ${clientId} - ${new Date().toLocaleDateString('fr-FR')}${contactPrincipal ? `\nContact: ${contactPrincipal.prenom || ''} ${contactPrincipal.nom || ''}`.trim() : ''}`,
+        isActive: client.statut === 'actif',
+      });
+
+      const savedFournisseur = await this.fournisseurRepository.save(fournisseur);
+      console.log(`✅ Fournisseur créé avec le code ${codeFournisseur} (ID: ${savedFournisseur.id})`);
+
+      // 3. Mettre à jour le client avec les informations du fournisseur
+      await this.clientRepository.update(clientId, {
+        is_fournisseur: true,
+        code_fournisseur: codeFournisseur
+      });
+
+      const updatedClient = await this.findOne(clientId);
+
+      console.log(`✅ Client ${client.nom} (ID: ${clientId}) marqué comme fournisseur avec le code ${codeFournisseur}`);
+
+      return {
+        client: updatedClient,
+        codeFournisseur: codeFournisseur
+      };
+    } catch (error) {
+      console.error(`❌ Erreur lors de la conversion du client ${clientId} en fournisseur:`, error);
+      throw new BadRequestException(`Impossible de convertir le client en fournisseur: ${error.message}`);
+    }
+  }
+
+  /**
+   * Génère un code fournisseur unique au format FRN001, FRN002, etc.
+   * Vérifie les codes existants dans TOUTES les sources (table clients ET table fournisseurs)
+   */
+  private async generateCodeFournisseur(): Promise<string> {
+    // Récupérer tous les codes fournisseurs des clients
+    const clientsWithCode = await this.clientRepository
+      .createQueryBuilder('client')
+      .where("client.code_fournisseur LIKE 'FRN%'")
+      .andWhere('client.is_fournisseur = :isFournisseur', { isFournisseur: true })
+      .select(['client.code_fournisseur'])
+      .getMany();
+
+    // Récupérer tous les codes de la table fournisseurs
+    const fournisseurs = await this.fournisseurRepository
+      .createQueryBuilder('fournisseur')
+      .where("fournisseur.code LIKE 'FRN%'")
+      .select(['fournisseur.code'])
+      .getMany();
+
+    // Extraire tous les numéros de code existants
+    const existingNumbers: number[] = [];
+    
+    // Ajouter les numéros des clients
+    for (const client of clientsWithCode) {
+      const match = client.code_fournisseur?.match(/FRN(\d+)/);
+      if (match) {
+        existingNumbers.push(parseInt(match[1], 10));
+      }
+    }
+
+    // Ajouter les numéros de la table fournisseurs
+    for (const fournisseur of fournisseurs) {
+      const match = fournisseur.code?.match(/FRN(\d+)/);
+      if (match) {
+        existingNumbers.push(parseInt(match[1], 10));
+      }
+    }
+
+    // Si aucun code n'existe, commencer à FRN001
+    if (existingNumbers.length === 0) {
+      return 'FRN001';
+    }
+
+    // Trouver le plus grand numéro
+    const maxNumber = Math.max(...existingNumbers);
+    const newNumber = maxNumber + 1;
+    
+    console.log(`📊 Codes fournisseurs existants: ${existingNumbers.sort((a, b) => a - b).join(', ')}, nouveau: ${newNumber}`);
+    
+    return `FRN${newNumber.toString().padStart(3, '0')}`;
+  }
 }

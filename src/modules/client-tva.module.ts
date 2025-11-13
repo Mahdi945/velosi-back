@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AutorisationTVA } from '../entities/autorisation-tva.entity';
 import { BCsusTVA } from '../entities/bcsus-tva.entity';
 import { Client } from '../entities/client.entity';
+import { Fournisseur } from '../entities/fournisseur.entity';
 import { AutorisationTVAService } from '../services/autorisation-tva.service';
 import { ClientService } from '../services/client.service';
 import { BCsusTVAService } from '../services/bcsus-tva.service';
@@ -14,7 +15,7 @@ import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AutorisationTVA, BCsusTVA, Client]),
+    TypeOrmModule.forFeature([AutorisationTVA, BCsusTVA, Client, Fournisseur]),
     AuthModule
   ],
   controllers: [AutorisationTVAController, ClientController, BCsusTVAController],

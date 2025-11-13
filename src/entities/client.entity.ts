@@ -158,6 +158,14 @@ export class Client {
   @Expose()
   is_permanent: boolean; // Flag pour indiquer si le client a un accès permanent au site (avec mot de passe)
 
+  @Column({ type: 'boolean', nullable: true, default: false })
+  @Expose()
+  is_fournisseur: boolean; // Flag pour indiquer si le client est également fournisseur
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  @Expose()
+  code_fournisseur: string; // Code du fournisseur associé (si is_fournisseur = true)
+
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];

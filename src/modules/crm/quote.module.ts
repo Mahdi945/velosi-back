@@ -6,6 +6,7 @@ import { TypeFraisAnnexe } from '../../crm/entities/type-frais-annexe.entity';
 import { Lead } from '../../entities/crm/lead.entity';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
 import { Client } from '../../entities/client.entity';
+import { Fournisseur } from '../../entities/fournisseur.entity';
 import { Personnel } from '../../entities/personnel.entity';
 import { ContactClient } from '../../entities/contact-client.entity';
 import { AutorisationTVA } from '../../entities/autorisation-tva.entity';
@@ -28,6 +29,7 @@ import { KeycloakService } from '../../auth/keycloak.service';
       Lead,
       Opportunity,
       Client,
+      Fournisseur,
       Personnel,
       ContactClient,
       AutorisationTVA,

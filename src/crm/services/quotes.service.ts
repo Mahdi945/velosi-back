@@ -1093,7 +1093,7 @@ export class QuotesService {
         adresse: quote.clientAddress || null,
         pays: quote.country || 'Tunisie',
         etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
-        timbre: true,
+        timbre: false,
         statut: 'actif',
         is_permanent: false,
         mot_de_passe: null,
@@ -1231,11 +1231,12 @@ export class QuotesService {
       console.log(`   - Ville: ${lead.city || 'Non fournie'}`);
       console.log(`   - Code postal: ${lead.postalCode || 'Non fourni'}`);
       
-      // ✅ Mapping correct des données du prospect vers le client
+      // ✅ CORRECTION FINALE: Mapping correct avec catégorie vide, timbre=false, contact principal
       const clientData: any = {
         nom: lead.company || lead.fullName,
         interlocuteur: lead.fullName,
-        categorie: lead.isLocal ? 'LOCAL' : 'ETRANGER',
+        // ✅ Ne PAS remplir la catégorie automatiquement (laisser vide pour que l'admin décide)
+        categorie: null,
         type_client: 'CONVERTI',
         adresse: lead.street || null,
         code_postal: lead.postalCode || null,
@@ -1243,13 +1244,16 @@ export class QuotesService {
         pays: lead.country || 'Tunisie',
         nature: lead.industry || null,
         etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
-        timbre: true,
-        statut: 'actif',
+        // ✅ timbre doit être FALSE par défaut (pas TRUE)
+        timbre: false,
+        statut: null, // ✅ Ne PAS remplir le statut automatiquement
         is_permanent: false,
         mot_de_passe: null,
         keycloak_id: null,
+        // ✅ CONTACT PRINCIPAL: Créer automatiquement avec prenom = nom du client
         contact_mail1: lead.email,
         contact_tel1: lead.phone || null,
+        contact_fonction: 'interlocuteur', // ✅ Fonction = chaîne littérale "interlocuteur"
       };
 
       console.log(`\n📊 DONNÉES CLIENT À CRÉER (depuis lead #${lead.id}):`);
@@ -1350,34 +1354,37 @@ export class QuotesService {
   /**
    * ✅ Créer un client TEMPORAIRE à partir des données de cotation UNIQUEMENT
    * SANS mot de passe et SANS compte Keycloak
+   * ✅ CORRECTION: catégorie vide, timbre=false, contact principal avec prenom = nom client
    */
   private async createTemporaryClientFromQuote(quote: Quote): Promise<Client> {
     try {
       console.log(`🔧 createTemporaryClientFromQuote - Début de création`);
       console.log(`📋 Cotation: ${quote.quoteNumber} - Client: ${quote.clientName}`);
       
-      // ✅ Déterminer la catégorie en fonction du pays
-      const isLocalCountry = !quote.country || quote.country.toLowerCase() === 'tunisie';
-      
+      // ✅ CORRECTION FINALE: Mapping correct avec catégorie vide, timbre=false
       const clientData = {
         nom: quote.clientCompany || quote.clientName,
-        interlocuteur: quote.clientName,
-        categorie: isLocalCountry ? 'LOCAL' : 'ETRANGER',
+        interlocuteur: quote.clientName, // ✅ Ce champ sera utilisé pour créer le 'prenom' du contact_client
+        // ✅ Ne PAS remplir la catégorie automatiquement
+        categorie: null,
         type_client: 'CONVERTI',
         adresse: quote.clientAddress || null,
         pays: quote.country || 'Tunisie',
         etat_fiscal: EtatFiscal.ASSUJETTI_TVA,
-        timbre: true,
-        statut: 'actif',
+        // ✅ timbre doit être FALSE par défaut
+        timbre: false,
+        statut: null, // ✅ Ne PAS remplir le statut automatiquement
         is_permanent: false, // CLIENT TEMPORAIRE
         mot_de_passe: null, // PAS de mot de passe
         keycloak_id: null, // PAS de compte Keycloak
-        // ✅ CORRECTION: Email et téléphone depuis la cotation
+        // ✅ CONTACT PRINCIPAL: Email et téléphone depuis la cotation
+        // Le clientService utilisera 'interlocuteur' pour remplir 'prenom' dans contact_client
         contact_mail1: quote.clientEmail,
         contact_tel1: quote.clientPhone || null,
+        contact_fonction: 'interlocuteur', // ✅ Fonction = chaîne littérale "interlocuteur"
       };
 
-      console.log(`� Données client à créer:`, JSON.stringify(clientData, null, 2));
+      console.log(`📊 Données client à créer:`, JSON.stringify(clientData, null, 2));
       console.log(`⚠️ Client TEMPORAIRE - SANS mot de passe et SANS compte Keycloak`);
       
       console.log(`🔄 Appel de clientService.create()...`);
@@ -1387,9 +1394,10 @@ export class QuotesService {
         console.log(`✅ Client temporaire créé avec succès (FALLBACK depuis cotation)!`);
         console.log(`   - ID: ${newClient.id}`);
         console.log(`   - Nom: ${newClient.nom}`);
-        console.log(`   - Catégorie: ${clientData.categorie}`);
+        console.log(`   - Catégorie: ${clientData.categorie || 'NON DÉFINIE'}`);
         console.log(`   - Email: ${quote.clientEmail}`);
         console.log(`   - Téléphone: ${quote.clientPhone || 'Non fourni'}`);
+        console.log(`   - timbre: ${newClient.timbre}`);
         console.log(`   - is_permanent: ${newClient.is_permanent}`);
         console.log(`   - ✅ contact_client créé automatiquement par clientService`);
       } else {
