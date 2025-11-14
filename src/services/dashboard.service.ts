@@ -1051,10 +1051,12 @@ export class DashboardService {
     console.log('📊 [getCommercialStats] userId:', userId);
 
     // Compter TOUS mes prospects NON ARCHIVÉS (tous les statuts)
+    // ✅ CORRECTION: Gérer NULL comme FALSE
     const myProspectsCount = await this.leadRepository.count({
       where: { 
         assignedToId: userId,
-        deletedAt: IsNull()
+        isArchived: false,
+        deletedAt: IsNull() // ✅ Exclure soft-deleted
       }
     });
 
@@ -1070,65 +1072,77 @@ export class DashboardService {
       OpportunityStage.CLOSED_WON // ✅ INCLURE les opportunités gagnées dans le comptage
     ];
     
+    // ✅ CORRECTION: Ajouter deletedAt: IsNull() pour exclure les soft-deleted
     const myOpportunitiesCount = await this.opportunityRepository.count({
       where: { 
         assignedToId: userId,
         stage: In(allActiveStages),
-        deletedAt: IsNull()
+        isArchived: false,
+        deletedAt: IsNull() // ✅ Exclure soft-deleted
       }
     });
 
     console.log('✅ [getCommercialStats] myOpportunitiesCount:', myOpportunitiesCount);
 
     // Compter les opportunités gagnées (pour taux de conversion)
+    // ✅ CORRECTION: Ajouter deletedAt: IsNull()
     const myWonOpportunitiesCount = await this.opportunityRepository.count({
       where: { 
         assignedToId: userId,
         stage: OpportunityStage.CLOSED_WON,
-        deletedAt: IsNull()
+        isArchived: false,
+        deletedAt: IsNull() // ✅ Exclure soft-deleted
       }
     });
 
     console.log('✅ [getCommercialStats] myWonOpportunitiesCount:', myWonOpportunitiesCount);
 
     // Valeur totale de mes opportunités actives NON ARCHIVÉES
+    // ✅ CORRECTION: Ajouter deletedAt IS NULL
     const myActiveOpportunities = await this.opportunityRepository
       .createQueryBuilder('opp')
       .select('COALESCE(SUM(opp.value), 0)', 'totalValue')
       .where('opp.assignedToId = :userId', { userId })
       .andWhere('opp.stage IN (:...stages)', { stages: allActiveStages })
-      .andWhere('opp.deletedAt IS NULL')
+      .andWhere('opp.isArchived = :isArchived', { isArchived: false })
+      .andWhere('opp.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getRawOne();
 
     const myActiveOpportunitiesValue = parseFloat(myActiveOpportunities?.totalValue || 0);
 
     // Compter TOUTES mes cotations NON ARCHIVÉES (tous les statuts)
+    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
     const myQuotesCount = await this.quoteRepository
       .createQueryBuilder('quote')
-      .where('quote.createdBy = :userId', { userId })
-      .andWhere('quote.deletedAt IS NULL')
+      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
+      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getCount();
 
     console.log('✅ [getCommercialStats] myQuotesCount:', myQuotesCount);
 
     // Compter cotations acceptées
+    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
     const myAcceptedQuotesCount = await this.quoteRepository
       .createQueryBuilder('quote')
-      .where('quote.createdBy = :userId', { userId })
+      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
       .andWhere('quote.status = :status', { status: 'accepted' })
-      .andWhere('quote.deletedAt IS NULL')
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
+      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getCount();
 
     console.log('✅ [getCommercialStats] myAcceptedQuotesCount:', myAcceptedQuotesCount);
 
     // CA accepté (mes cotations acceptées NON ARCHIVÉES)
+    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
     const myAcceptedQuotes = await this.quoteRepository
       .createQueryBuilder('quote')
       .select('COALESCE(SUM(quote.total), 0)', 'totalAccepted')
       .addSelect('COALESCE(SUM(quote.totalMargin), 0)', 'totalMargin')
-      .where('quote.createdBy = :userId', { userId })
+      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
       .andWhere('quote.status = :status', { status: 'accepted' })
-      .andWhere('quote.deletedAt IS NULL')
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
+      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getRawOne();
 
     const myAcceptedQuotesValue = parseFloat(myAcceptedQuotes?.totalAccepted || 0);
@@ -1142,19 +1156,23 @@ export class DashboardService {
     console.log('✅ [getCommercialStats] myConversionRate:', myConversionRate, '%');
 
     // Activités cette semaine (opportunités créées) - NON ARCHIVÉES
+    // ✅ CORRECTION: Ajouter deletedAt IS NULL
     const myActivitiesThisWeek = await this.opportunityRepository
       .createQueryBuilder('opp')
       .where('opp.assignedToId = :userId', { userId })
       .andWhere('opp.createdAt >= :weekStart', { weekStart: firstDayOfWeek })
-      .andWhere('opp.deletedAt IS NULL')
+      .andWhere('opp.isArchived = :isArchived', { isArchived: false })
+      .andWhere('opp.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getCount();
 
     // Cotations ce mois - NON ARCHIVÉES
+    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
     const myQuotesThisMonth = await this.quoteRepository
       .createQueryBuilder('quote')
-      .where('quote.createdBy = :userId', { userId })
+      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
       .andWhere('quote.createdAt >= :monthStart', { monthStart: firstDayOfMonth })
-      .andWhere('quote.deletedAt IS NULL')
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
+      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
       .getCount();
 
     // Valeur moyenne des cotations acceptées - NON ARCHIVÉES
@@ -1268,13 +1286,17 @@ export class DashboardService {
     console.log('📊 [getImportExportStats] Récupération des statistiques Import/Export');
     console.log('📊 [getImportExportStats] Filtres reçus:', filters);
     
-    // Compter d'abord toutes les cotations pour debug
-    const totalQuotes = await this.quoteRepository.count({
-      where: { deletedAt: IsNull() }
-    });
-    console.log('📊 [getImportExportStats] Total cotations non archivées:', totalQuotes);
+    // Compter d'abord toutes les cotations NON ARCHIVÉES pour debug
+    // ✅ CORRECTION: Exclure les archivées (isArchived = true)
+    const totalQuotes = await this.quoteRepository
+      .createQueryBuilder('quote')
+      .where('quote.deletedAt IS NULL')
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
+      .getCount();
+    console.log('📊 [getImportExportStats] Total cotations NON ARCHIVÉES:', totalQuotes);
     
     // Construire la requête de base - utiliser le nom SQL de la colonne: import_export
+    // ✅ CORRECTION: Exclure les archivées (isArchived = true)
     let query = this.quoteRepository
       .createQueryBuilder('quote')
       .select('quote.import_export', 'type')
@@ -1282,6 +1304,7 @@ export class DashboardService {
       .addSelect('COALESCE(SUM(quote.total), 0)', 'totalValue')
       .addSelect('COALESCE(SUM(quote.total_margin), 0)', 'totalMargin')
       .where('quote.deletedAt IS NULL')
+      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
       .andWhere('quote.import_export IS NOT NULL')
       .andWhere("quote.import_export != ''");
     

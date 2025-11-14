@@ -287,9 +287,13 @@ export class QuotesService {
       sortOrder = 'DESC',
     } = filters;
 
-    // ✅ CORRECTION: Ne PAS utiliser .withDeleted() = retourne uniquement les NON-archivés
+    // ✅ CORRECTION: Filtrer explicitement les cotations NON-ARCHIVÉES
     console.log('🔍 Backend: Récupération des cotations NON-ARCHIVÉES uniquement');
     let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
+    
+    // ✅ FILTRE ESSENTIEL: Exclure les archivées
+    queryBuilder.where('(quote.isArchived = false OR quote.isArchived IS NULL)');
+    queryBuilder.andWhere('quote.deletedAt IS NULL');
     
     // Joindre les relations nécessaires
     queryBuilder
@@ -312,7 +316,15 @@ export class QuotesService {
     if (opportunityId) queryBuilder.andWhere('quote.opportunityId = :opportunityId', { opportunityId });
     if (leadId) queryBuilder.andWhere('quote.leadId = :leadId', { leadId });
     if (clientId) queryBuilder.andWhere('quote.clientId = :clientId', { clientId });
-    if (commercialId) queryBuilder.andWhere('quote.commercialId = :commercialId', { commercialId });
+    
+    // ✅ CORRECTION: Filtrage commercial multi-système
+    // Prendre en compte commercialId ET commercialIds (nouveau système)
+    if (commercialId) {
+      queryBuilder.andWhere(
+        '(quote.commercialId = :commercialId OR :commercialId = ANY(quote.commercial_ids) OR (quote.commercialId IS NULL AND (quote.commercial_ids IS NULL OR array_length(quote.commercial_ids, 1) IS NULL)))',
+        { commercialId }
+      );
+    }
 
     // Recherche dynamique dans plusieurs champs
     if (search) {
@@ -413,8 +425,12 @@ export class QuotesService {
       .where('quote.deleted_at IS NOT NULL'); // ✅ Filtrer uniquement les archivées
 
     // Appliquer les filtres optionnels
+    // ✅ CORRECTION: Filtrage commercial multi-système pour les archivées
     if (commercialId) {
-      query.andWhere('quote.commercialId = :commercialId', { commercialId });
+      query.andWhere(
+        '(quote.commercialId = :commercialId OR :commercialId = ANY(quote.commercial_ids) OR (quote.commercialId IS NULL AND (quote.commercial_ids IS NULL OR array_length(quote.commercial_ids, 1) IS NULL)))',
+        { commercialId }
+      );
     }
 
     if (status) {

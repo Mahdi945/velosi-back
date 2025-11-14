@@ -19,7 +19,7 @@ export class LeadsService {
    */
   async findAll(): Promise<Lead[]> {
     return this.leadRepository.find({
-      where: { deletedAt: IsNull() },
+      where: { isArchived: false },
       relations: ['assignedTo', 'createdBy', 'updatedBy'],
       order: { createdAt: 'DESC' },
     });
@@ -32,7 +32,7 @@ export class LeadsService {
     return this.leadRepository.find({
       where: { 
         assignedToId: userId,
-        deletedAt: IsNull()
+        isArchived: false
       },
       relations: ['assignedTo', 'createdBy', 'updatedBy'],
       order: { createdAt: 'DESC' },
@@ -44,7 +44,7 @@ export class LeadsService {
    */
   async findOne(id: number): Promise<Lead> {
     const lead = await this.leadRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id, isArchived: false },
       relations: ['assignedTo', 'createdBy', 'updatedBy'],
     });
 
@@ -153,7 +153,7 @@ export class LeadsService {
    */
   async getStatistics() {
     const allLeads = await this.leadRepository.find({
-      where: { deletedAt: IsNull() },
+      where: { isArchived: false },
     });
 
     return {
@@ -184,7 +184,7 @@ export class LeadsService {
     const allLeads = await this.leadRepository.find({
       where: { 
         assignedToId: userId,
-        deletedAt: IsNull()
+        isArchived: false
       },
     });
 

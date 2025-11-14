@@ -19,7 +19,7 @@ export class OpportunitiesService {
    */
   async findAll(): Promise<Opportunity[]> {
     return this.opportunityRepository.find({
-      where: { deletedAt: IsNull() },
+      where: { deletedAt: IsNull(), isArchived: false },
       relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
       order: { createdAt: 'DESC' },
     });
@@ -32,7 +32,8 @@ export class OpportunitiesService {
     return this.opportunityRepository.find({
       where: { 
         assignedToId: userId,
-        deletedAt: IsNull()
+        deletedAt: IsNull(),
+        isArchived: false
       },
       relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
       order: { createdAt: 'DESC' },
@@ -44,7 +45,7 @@ export class OpportunitiesService {
    */
   async findOne(id: number): Promise<Opportunity> {
     const opportunity = await this.opportunityRepository.findOne({
-      where: { id, deletedAt: IsNull() },
+      where: { id, deletedAt: IsNull(), isArchived: false },
       relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
     });
 

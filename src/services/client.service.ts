@@ -324,6 +324,8 @@ export class ClientService {
         console.log('🔍 Analyse premier client:');
         console.log(`  - ID: ${firstClient.id}, Nom: ${firstClient.nom}`);
         console.log(`  - is_permanent: [${firstClient.is_permanent}] (${typeof firstClient.is_permanent})`);
+        console.log(`  - is_fournisseur: [${firstClient.is_fournisseur}] (${typeof firstClient.is_fournisseur})`);
+        console.log(`  - code_fournisseur: ${firstClient.code_fournisseur || 'N/A'}`);
         console.log(`  - Infos bancaires:`, {
           banque: firstClient.banque,
           iban: firstClient.iban,
@@ -338,10 +340,20 @@ export class ClientService {
           total: clients.length,
           permanent: clients.filter(c => c.is_permanent === true).length,
           temporary: clients.filter(c => c.is_permanent === false).length,
+          fournisseurs: clients.filter(c => c.is_fournisseur === true).length,
           withBankInfo: clients.filter(c => c.banque || c.iban || c.rib).length
         };
         
         console.log('📊 Statistiques:', stats);
+        
+        // 🆕 Afficher les clients qui sont fournisseurs
+        const clientsFournisseurs = clients.filter(c => c.is_fournisseur === true);
+        if (clientsFournisseurs.length > 0) {
+          console.log('🏪 Clients fournisseurs:');
+          clientsFournisseurs.forEach(c => {
+            console.log(`  - ${c.nom} (ID: ${c.id}) - Code: ${c.code_fournisseur}`);
+          });
+        }
       }
       
       return clients;

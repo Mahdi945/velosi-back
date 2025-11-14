@@ -424,7 +424,10 @@ export class UsersService {
           'client.charge_com_ids', // 🆕 Ajouter le champ multi-commerciaux
           'client.keycloak_id',
           'client.is_permanent',
-          // 🏦 Informations bancaires
+          // � CORRECTION: Ajouter les champs fournisseur
+          'client.is_fournisseur',
+          'client.code_fournisseur',
+          // �🏦 Informations bancaires
           'client.banque',
           'client.iban',
           'client.rib',

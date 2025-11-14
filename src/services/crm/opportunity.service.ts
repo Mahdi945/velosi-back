@@ -527,8 +527,13 @@ export class OpportunityService {
       queryBuilder.andWhere('opportunity.priority = :priority', { priority: query.priority });
     }
 
+    // ✅ CORRECTION: Filtrage commercial multi-système
+    // Prendre en compte assignedToId ET assignedToIds
     if (query.assignedToId) {
-      queryBuilder.andWhere('opportunity.assignedToId = :assignedToId', { assignedToId: query.assignedToId });
+      queryBuilder.andWhere(
+        '(opportunity.assignedToId = :assignedToId OR :assignedToId = ANY(opportunity.assigned_to_ids) OR (opportunity.assignedToId IS NULL AND (opportunity.assigned_to_ids IS NULL OR array_length(opportunity.assigned_to_ids, 1) IS NULL)))',
+        { assignedToId: query.assignedToId }
+      );
     }
 
     if (query.leadId) {

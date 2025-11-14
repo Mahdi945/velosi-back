@@ -519,8 +519,14 @@ export class ReportsService {
    * Générer les rapports d'activités par commercial
    */
   async generateActivityReports(filters: ReportFilterDto): Promise<ActivityReport[]> {
-    // Récupérer tous les commerciaux actifs
+    // Récupérer tous les commerciaux actifs ou filtrer par commercialId
     const commercialsQuery: any = { statut: 'actif', role: 'commercial' };
+    
+    // ✨ Filtrer par commercial si spécifié
+    if (filters.commercialId) {
+      commercialsQuery.id = filters.commercialId;
+    }
+    
     const commercials = await this.personnelRepository.find({
       where: commercialsQuery,
     });
@@ -714,6 +720,7 @@ export class ReportsService {
         clientPhone,
         company: client.nom || '',
         clientType: client.type_client || 'particulier',
+        category: client.categorie || 'local', // Ajout de la catégorie (local/etranger)
         createdAt: client.created_at,
         assignedCommercial,
         commercialId,

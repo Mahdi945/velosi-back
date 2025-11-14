@@ -252,6 +252,7 @@ export interface ClientReport {
   clientPhone: string;
   company: string;
   clientType: string;
+  category?: string; // Catégorie: local ou etranger
   createdAt: Date;
   
   assignedCommercial: string;

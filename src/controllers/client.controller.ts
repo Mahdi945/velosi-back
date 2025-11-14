@@ -33,13 +33,20 @@ export class ClientController {
   async findAll(): Promise<any> {
     const clients = await this.clientService.findAll();
     
-    // 🏦 Debug: Vérifier les données COMPLÈTES incluant infos bancaires
+    // 🏦 Debug: Vérifier les données COMPLÈTES incluant infos bancaires ET fournisseur
     if (clients.length > 0) {
       console.log('🔍 CONTROLLER - Premier client (données complètes):', {
         id: clients[0].id,
         nom: clients[0].nom,
         is_permanent: clients[0].is_permanent,
-        type: typeof clients[0].is_permanent,
+        type_is_permanent: typeof clients[0].is_permanent,
+        // 🆕 DEBUG: Vérifier les champs fournisseur
+        is_fournisseur: clients[0].is_fournisseur,
+        type_is_fournisseur: typeof clients[0].is_fournisseur,
+        code_fournisseur: clients[0].code_fournisseur,
+        has_is_fournisseur: 'is_fournisseur' in clients[0],
+        has_code_fournisseur: 'code_fournisseur' in clients[0],
+        // Infos bancaires
         banque: clients[0].banque,
         iban: clients[0].iban,
         rib: clients[0].rib,
@@ -47,10 +54,14 @@ export class ClientController {
         bic: clients[0].bic,
         allFields: Object.keys(clients[0])
       });
+      
+      // 🆕 Compter combien de clients sont fournisseurs
+      const fournisseursCount = clients.filter(c => c.is_fournisseur === true).length;
+      console.log(`📊 CONTROLLER - Statistiques fournisseurs: ${fournisseursCount} clients sont également fournisseurs sur ${clients.length} clients`);
     }
     
     // ✅ CORRECTION: Retourner directement les clients SANS transformation
-    // pour garantir que TOUS les champs (y compris infos bancaires) sont présents
+    // pour garantir que TOUS les champs (y compris infos bancaires et fournisseur) sont présents
     return clients;
   }
 

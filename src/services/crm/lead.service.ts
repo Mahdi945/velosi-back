@@ -103,6 +103,7 @@ export class LeadService {
   /**
    * Obtenir tous les prospects NON-ARCHIVÉS avec filtres
    * ✅ CORRECTION: Retourne uniquement les NON-archivés (sans .withDeleted())
+   * ✅ FILTRAGE COMMERCIAL: Si assignedToId fourni, afficher uniquement les prospects assignés à ce commercial OU non assignés
    */
   async findAll(query: LeadQueryDto): Promise<{ leads: Lead[]; total: number; pages: number }> {
     const {
@@ -147,8 +148,17 @@ export class LeadService {
       queryBuilder.andWhere('lead.priority = :priority', { priority });
     }
 
+    // ✅ CORRECTION CRITIQUE: Filtrage commercial multi-système
+    // Si assignedToId est fourni, afficher UNIQUEMENT:
+    // 1. Les prospects assignés à ce commercial (assignedToId = commercial)
+    // 2. OU les prospects où ce commercial est dans assignedToIds (nouveau système)
+    // 3. OU les prospects non assignés (assignedToId IS NULL ET assignedToIds = [])
     if (assignedToId) {
-      queryBuilder.andWhere('lead.assignedToId = :assignedToId', { assignedToId });
+      queryBuilder.andWhere(
+        '(lead.assignedToId = :assignedToId OR :assignedToId = ANY(lead.assigned_to_ids) OR (lead.assignedToId IS NULL AND (lead.assigned_to_ids IS NULL OR array_length(lead.assigned_to_ids, 1) IS NULL)))',
+        { assignedToId }
+      );
+      console.log(`🎯 Filtrage commercial activé pour ID: ${assignedToId} (affiche ses prospects + dans assignedToIds + non assignés)`);
     }
 
     if (industry) {
@@ -232,8 +242,17 @@ export class LeadService {
       queryBuilder.andWhere('lead.priority = :priority', { priority });
     }
 
+    // ✅ CORRECTION CRITIQUE: Filtrage commercial pour les archivés aussi (multi-système)
+    // Si assignedToId est fourni, afficher UNIQUEMENT:
+    // 1. Les prospects assignés à ce commercial (assignedToId = commercial)
+    // 2. OU les prospects où ce commercial est dans assignedToIds (nouveau système)
+    // 3. OU les prospects non assignés (assignedToId IS NULL ET assignedToIds = [])
     if (assignedToId) {
-      queryBuilder.andWhere('lead.assignedToId = :assignedToId', { assignedToId });
+      queryBuilder.andWhere(
+        '(lead.assignedToId = :assignedToId OR :assignedToId = ANY(lead.assigned_to_ids) OR (lead.assignedToId IS NULL AND (lead.assigned_to_ids IS NULL OR array_length(lead.assigned_to_ids, 1) IS NULL)))',
+        { assignedToId }
+      );
+      console.log(`🎯 Filtrage commercial activé pour archivés - ID: ${assignedToId} (affiche ses prospects + dans assignedToIds + non assignés)`);
     }
 
     if (industry) {
