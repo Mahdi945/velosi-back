@@ -631,28 +631,36 @@ export class AuthService {
       
       try {
         if (this.keycloakService) {
-          // Créer l'utilisateur Keycloak directement (sans délai)
-          const keycloakUser = {
-            username: savedClient.nom,
-            email: contactEmail || '',
-            firstName: savedClient.interlocuteur || savedClient.nom,
-            lastName: '',
-            enabled: true,
-          };
-          
-          const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
-          if (keycloakUserId) {
-            // ✅ Assigner le rôle "client" dans Keycloak
-            await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
+          try {
+            // Créer l'utilisateur Keycloak directement
+            const keycloakUser = {
+              username: savedClient.nom,
+              email: contactEmail || '',
+              firstName: savedClient.interlocuteur || savedClient.nom,
+              lastName: '',
+              enabled: true,
+            };
             
-            // Sauvegarder l'ID Keycloak dans la base
-            savedClient.keycloak_id = keycloakUserId;
-            await this.clientRepository.save(savedClient);
-            this.logger.log(`✅ Client permanent ${savedClient.nom} synchronisé avec Keycloak (ID: ${keycloakUserId}, Rôle: client)`);
+            const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
+            if (keycloakUserId) {
+              // ✅ Assigner le rôle "client" dans Keycloak
+              await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
+              
+              // Sauvegarder l'ID Keycloak dans la base
+              savedClient.keycloak_id = keycloakUserId;
+              await this.clientRepository.save(savedClient);
+              this.logger.log(`✅ Client permanent synchronisé avec Keycloak (ID: ${keycloakUserId})`);
+            } else {
+              this.logger.warn('⚠️ Keycloak n\'a pas retourné d\'ID utilisateur');
+            }
+          } catch (keycloakError) {
+            this.logger.warn('⚠️ Keycloak non disponible:', keycloakError.message);
+            this.logger.log('✅ Client permanent créé sans Keycloak (connexion locale uniquement)');
+            // Le client reste permanent, mais sans keycloak_id
           }
         }
-      } catch (keycloakError) {
-        this.logger.warn('Synchronisation Keycloak échouée pour client permanent:', keycloakError);
+      } catch (error) {
+        this.logger.warn('⚠️ Erreur lors de la tentative Keycloak:', error.message);
         // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
       }
     } else {

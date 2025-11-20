@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsEnum, IsBoolean, Length, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsEnum, IsBoolean, Length, IsNotEmpty, IsArray, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
 import { EtatFiscal } from '../entities/client.entity';
 
@@ -94,6 +94,8 @@ export class CreateClientDto {
   charge_com?: string; // DEPRECATED: Conservé pour compatibilité, utiliser charge_com_ids
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
   charge_com_ids?: number[]; // Array des IDs des commerciaux assignés
 
   @IsOptional()
@@ -255,6 +257,8 @@ export class UpdateClientDto {
   charge_com?: string; // DEPRECATED: Conservé pour compatibilité, utiliser charge_com_ids
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
   charge_com_ids?: number[]; // Array des IDs des commerciaux assignés
 
   @IsOptional()

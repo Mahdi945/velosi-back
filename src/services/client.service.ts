@@ -128,9 +128,9 @@ export class ClientService {
       console.log(`⚠️ AUCUN contact_mail1 ou contact_tel1 fourni - Pas d'insertion dans contact_client`);
     }
 
-    // SEULEMENT si c'est un client permanent, créer automatiquement un utilisateur Keycloak
+    // SEULEMENT si c'est un client permanent, tenter de créer un utilisateur Keycloak
     if (createClientDto.is_permanent === true) {
-      console.log(`🔑 Client permanent détecté - Création compte Keycloak...`);
+      console.log(`🔑 Client permanent détecté - Tentative création compte Keycloak...`);
       
       try {
         // Récupérer l'email depuis contact_mail1
@@ -139,31 +139,37 @@ export class ClientService {
         if (clientEmail) {
           console.log(`📧 Email trouvé: ${clientEmail}`);
           
-          // Préparer les données utilisateur pour Keycloak
-          const keycloakUserData = {
-            username: `client_${savedClient.id}`,
-            email: clientEmail,
-            firstName: createClientDto.interlocuteur?.split(' ')[0] || 'Client',
-            lastName: createClientDto.interlocuteur?.split(' ').slice(1).join(' ') || createClientDto.nom,
-            enabled: true,
-            password: createClientDto.mot_de_passe // Mot de passe pour client permanent
-          };
+          try {
+            // Préparer les données utilisateur pour Keycloak
+            const keycloakUserData = {
+              username: `client_${savedClient.id}`,
+              email: clientEmail,
+              firstName: createClientDto.interlocuteur?.split(' ')[0] || 'Client',
+              lastName: createClientDto.interlocuteur?.split(' ').slice(1).join(' ') || createClientDto.nom,
+              enabled: true,
+              password: createClientDto.mot_de_passe // Mot de passe pour client permanent
+            };
 
-          const keycloakUserId = await this.keycloakService.createUser(keycloakUserData);
-          
-          if (keycloakUserId) {
-            console.log(`✅ Utilisateur Keycloak créé avec succès pour le client permanent ${savedClient.id}: ${keycloakUserId}`);
+            const keycloakUserId = await this.keycloakService.createUser(keycloakUserData);
             
-            // Mettre à jour le client avec l'ID Keycloak
-            await this.clientRepository.update(savedClient.id, { keycloak_id: keycloakUserId });
-          } else {
-            console.warn(`⚠️ Échec de la création utilisateur Keycloak pour le client permanent ${savedClient.id}`);
+            if (keycloakUserId) {
+              console.log(`✅ Utilisateur Keycloak créé avec succès: ${keycloakUserId}`);
+              
+              // Mettre à jour le client avec l'ID Keycloak
+              await this.clientRepository.update(savedClient.id, { keycloak_id: keycloakUserId });
+            } else {
+              console.warn(`⚠️ Keycloak n'a pas retourné d'ID utilisateur`);
+            }
+          } catch (keycloakError) {
+            console.warn(`⚠️ Keycloak non disponible ou erreur:`, keycloakError.message);
+            console.log(`✅ Client permanent créé sans Keycloak (connexion locale uniquement)`);
+            // Le client reste permanent, mais sans keycloak_id
           }
         } else {
-          console.warn(`⚠️ Aucun email trouvé pour le client permanent ${savedClient.id}, pas de création Keycloak`);
+          console.warn(`⚠️ Aucun email trouvé, pas de création Keycloak`);
         }
       } catch (error) {
-        console.error(`❌ Erreur lors de la création utilisateur Keycloak pour le client permanent ${savedClient.id}:`, error);
+        console.warn(`⚠️ Erreur lors de la tentative Keycloak:`, error.message);
         // Ne pas empêcher la création du client en cas d'erreur Keycloak
       }
     } else {
@@ -211,62 +217,78 @@ export class ClientService {
         return { success: false, message: 'Aucun email trouvé pour ce client. Ajoutez un email avant de le rendre permanent.' };
       }
 
-      // Générer un mot de passe fort pour Keycloak
+      // Générer un mot de passe fort
       const strongPassword = this.generateStrongPassword();
+      const hashedPassword = crypto.createHash('sha256').update(strongPassword).digest('hex');
 
-      // Préparer les données utilisateur pour Keycloak
-      const keycloakUserData = {
-        username: client.nom.toLowerCase().replace(/\s+/g, '_'),
-        email: clientEmail,
-        firstName: client.interlocuteur || client.nom,
-        lastName: '',
-        enabled: true,
-        credentials: [{
-          type: 'password',
-          value: strongPassword,
-          temporary: false
-        }]
-      };
+      // Tentative de création dans Keycloak (optionnel)
+      let keycloakUserId: string | null = null;
+      let keycloakError = false;
 
-      // Créer l'utilisateur dans Keycloak
-      const keycloakUserId = await this.keycloakService.createUser(keycloakUserData);
-
-      if (keycloakUserId) {
-        // Hacher le mot de passe pour la BD locale
-        const hashedPassword = crypto.createHash('sha256').update(strongPassword).digest('hex');
-        
-        // Mettre à jour le client comme permanent
-        await this.clientRepository.update(clientId, { 
-          is_permanent: true,
-          mot_de_passe: hashedPassword, // Conserver le mot de passe hashé dans la BD
-          keycloak_id: keycloakUserId,
-        });
-
-        console.log(`✅ Client ${clientId} rendu permanent avec utilisateur Keycloak: ${keycloakUserId}`);
-        
-        // Envoyer l'email avec les identifiants au client
-        try {
-          await this.emailService.sendClientCredentialsEmail(
-            clientEmail,
-            client.nom,
-            strongPassword, // Mot de passe généré
-            client.nom, // Username (nom du client)
-            client.interlocuteur || 'Client'
-          );
-          console.log(`📧 Email d'identifiants envoyé à ${clientEmail} pour le client permanent ${clientId}`);
-        } catch (emailError) {
-          console.warn(`⚠️ Erreur envoi email pour client ${clientId}:`, emailError.message);
-          // Ne pas faire échouer l'opération si l'email échoue
-        }
-        
-        return { 
-          success: true, 
-          message: `Client rendu permanent avec succès. Les identifiants ont été envoyés à ${clientEmail}`,
-          keycloakUserId 
+      try {
+        // Préparer les données utilisateur pour Keycloak
+        const keycloakUserData = {
+          username: client.nom.toLowerCase().replace(/\s+/g, '_'),
+          email: clientEmail,
+          firstName: client.interlocuteur || client.nom,
+          lastName: '',
+          enabled: true,
+          credentials: [{
+            type: 'password',
+            value: strongPassword,
+            temporary: false
+          }]
         };
-      } else {
-        return { success: false, message: 'Échec de la création du compte utilisateur. Veuillez réessayer.' };
+
+        // Créer l'utilisateur dans Keycloak
+        keycloakUserId = await this.keycloakService.createUser(keycloakUserData);
+        
+        if (keycloakUserId) {
+          console.log(`✅ Utilisateur Keycloak créé avec succès: ${keycloakUserId}`);
+        } else {
+          console.warn(`⚠️ Keycloak n'a pas retourné d'ID utilisateur`);
+          keycloakError = true;
+        }
+      } catch (keycloakErr) {
+        console.warn(`⚠️ Keycloak non disponible ou erreur lors de la création:`, keycloakErr.message);
+        keycloakError = true;
+        // Continuer sans Keycloak
       }
+
+      // Mettre à jour le client comme permanent (avec ou sans Keycloak)
+      await this.clientRepository.update(clientId, { 
+        is_permanent: true,
+        mot_de_passe: hashedPassword,
+        keycloak_id: keycloakUserId || null, // NULL si Keycloak non disponible
+      });
+
+      console.log(`✅ Client ${clientId} rendu permanent ${keycloakUserId ? 'avec' : 'sans'} Keycloak`);
+      
+      // Envoyer l'email avec les identifiants au client
+      try {
+        await this.emailService.sendClientCredentialsEmail(
+          clientEmail,
+          client.nom,
+          strongPassword,
+          client.nom,
+          client.interlocuteur || 'Client'
+        );
+        console.log(`📧 Email d'identifiants envoyé à ${clientEmail}`);
+      } catch (emailError) {
+        console.warn(`⚠️ Erreur envoi email:`, emailError.message);
+        // Ne pas faire échouer l'opération si l'email échoue
+      }
+      
+      let message = `Client rendu permanent avec succès. Les identifiants ont été envoyés à ${clientEmail}`;
+      if (keycloakError) {
+        message += ' (Note: Keycloak non disponible, connexion via base de données locale uniquement)';
+      }
+      
+      return { 
+        success: true, 
+        message,
+        keycloakUserId: keycloakUserId || undefined
+      };
 
     } catch (error) {
       console.error(`❌ Erreur lors de la conversion en client permanent ${clientId}:`, error);

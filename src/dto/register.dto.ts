@@ -10,6 +10,8 @@ import {
   Length,
   IsEnum,
   IsBoolean,
+  IsArray,
+  IsInt,
 } from 'class-validator';
 import { EtatFiscal } from '../entities/client.entity';
 
@@ -182,6 +184,11 @@ export class CreateClientDto {
   @IsOptional()
   @IsString()
   contact_fonction?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  charge_com_ids?: number[]; // Array des IDs des commerciaux assignés
 
   @IsOptional()
   @IsString()

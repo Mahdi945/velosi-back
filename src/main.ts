@@ -57,6 +57,12 @@ async function bootstrap() {
       ...allowedOrigins,
       'http://localhost:4200',  // Frontend Angular LOCAL (toujours autorisé)
       'http://localhost:3000',  // Tests LOCAL (toujours autorisé)
+      'https://wyselogiquote.com',  // Frontend Angular PRODUCTION (domaine principal)
+      'https://www.wyselogiquote.com',  // Frontend Angular PRODUCTION (avec www)
+      'https://vps-3b4fd3be.vps.ovh.ca:443',  // Frontend Angular VPS OVH (HTTPS port 443 explicite)
+      'https://vps-3b4fd3be.vps.ovh.ca',  // Frontend Angular VPS OVH (HTTPS sans port)
+      'http://vps-3b4fd3be.vps.ovh.ca:4200',  // Frontend Angular VPS OVH (HTTP port 4200)
+      'http://vps-3b4fd3be.vps.ovh.ca:8080',  // Frontend Angular VPS OVH (HTTP port 8080)
       'https://velosi-front.vercel.app',  // Frontend Angular PRODUCTION sur Vercel
       'https://*.vercel.app'  // Tous les domaines Vercel (pour les previews)
     ],

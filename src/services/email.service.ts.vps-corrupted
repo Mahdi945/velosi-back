@@ -72,6 +72,7 @@ export class EmailService {
     }
   }
 
+
   private initializeTransporter() {
     try {
       const smtpUser = this.configService.get('SMTP_USER', 'velosierp@gmail.com');
@@ -79,7 +80,8 @@ export class EmailService {
       const smtpHost = this.configService.get('SMTP_HOST', 'smtp.gmail.com');
       const smtpPort = this.configService.get('SMTP_PORT', 587);
       const smtpSecure = this.configService.get('SMTP_SECURE', 'false') === 'true';
-      
+
+      // Configuration pour SMTP externe (SendGrid, Gmail, etc.)
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort.toString()),
@@ -93,7 +95,15 @@ export class EmailService {
         },
       });
 
-      this.logger.log(`✅ Service email initialisé avec succès (${smtpUser} via ${smtpHost}:${smtpPort})`);
+      this.logger.log(\ Service email initialisé (\ via \:\)\);
+    } catch (error) {
+      this.logger.error(' Erreur initialisation service email:', error);
+    }
+  }
+
+
+      this.transporter = nodemailer.createTransport(transportConfig);
+      this.logger.log(`✅ Service email initialisé avec succès`);
     } catch (error) {
       this.logger.error('❌ Erreur initialisation service email:', error);
     }
