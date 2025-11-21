@@ -46,13 +46,13 @@ export class Client {
   @Column({ type: 'varchar', nullable: true })
   pays: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   id_fiscal: string;
 
   @Column({ type: 'varchar', nullable: true })
   nature: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   c_douane: string;
 
   @Column({ type: 'integer', nullable: true })
@@ -86,14 +86,14 @@ export class Client {
   @Column({ type: 'boolean', nullable: true })
   timbre: boolean;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   compte_cpt: string;
 
   // Informations bancaires
   @Column({ type: 'varchar', nullable: true })
   banque: string; // Nom de la banque
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   iban: string; // International Bank Account Number
 
   @Column({ type: 'varchar', nullable: true })
@@ -165,6 +165,16 @@ export class Client {
   @Column({ type: 'varchar', length: 20, nullable: true })
   @Expose()
   code_fournisseur: string; // Code du fournisseur associé (si is_fournisseur = true)
+
+  // Champs d'authentification biométrique
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  biometric_hash?: string; // Hash de l'empreinte biométrique
+
+  @Column({ type: 'boolean', nullable: true, default: false })
+  biometric_enabled?: boolean; // Indique si l'authentification biométrique est activée
+
+  @Column({ type: 'timestamp', nullable: true })
+  biometric_registered_at?: Date; // Date d'enregistrement de l'empreinte biométrique
 
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)

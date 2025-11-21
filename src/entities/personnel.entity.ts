@@ -29,7 +29,7 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: true })
   telephone: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   email: string;
 
   @Column({ type: 'varchar', nullable: false, default: 'Homme' })
@@ -48,7 +48,7 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: false })
   mot_de_passe: string;
 
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'uuid', nullable: true, unique: true })
   keycloak_id: string;
 
   @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
@@ -81,6 +81,16 @@ export class Personnel {
 
   @Column({ type: 'boolean', nullable: false, default: false })
   is_location_active: boolean; // Position active (dernière position < 5 min)
+
+  // Champs d'authentification biométrique
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  biometric_hash?: string; // Hash de l'empreinte biométrique
+
+  @Column({ type: 'boolean', nullable: true, default: false })
+  biometric_enabled?: boolean; // Indique si l'authentification biométrique est activée
+
+  @Column({ type: 'timestamp', nullable: true })
+  biometric_registered_at?: Date; // Date d'enregistrement de l'empreinte biométrique
 
   // Relations
   @OneToMany(() => ObjectifCom, (objectif) => objectif.personnel)

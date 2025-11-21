@@ -1,8 +1,14 @@
-import { IsString, IsOptional, IsNumber, MaxLength, IsInt } from 'class-validator';
+import { IsString, IsOptional, IsNumber, MaxLength, IsInt, IsNotEmpty } from 'class-validator';
 
 export class CreateNavireDto {
   @IsString()
-  @MaxLength(255)
+  @IsNotEmpty({ message: 'Le code du navire est obligatoire' })
+  @MaxLength(50, { message: 'Le code ne peut pas dépasser 50 caractères' })
+  code: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Le libellé du navire est obligatoire' })
+  @MaxLength(255, { message: 'Le libellé ne peut pas dépasser 255 caractères' })
   libelle: string;
 
   @IsOptional()

@@ -14,6 +14,20 @@ export class EmailService {
   }
 
   /**
+   * Obtenir l'email expéditeur depuis les variables d'environnement
+   */
+  private getFromEmail(): string {
+    return this.configService.get<string>('SMTP_FROM_EMAIL', this.configService.get<string>('SMTP_USER'));
+  }
+
+  /**
+   * Obtenir le nom de l'expéditeur depuis les variables d'environnement
+   */
+  private getFromName(): string {
+    return this.configService.get<string>('SMTP_FROM_NAME', 'Velosi ERP');
+  }
+
+  /**
    * Obtenir le chemin du logo de la société
    */
   private getLogoPath(): string | null {
@@ -74,18 +88,19 @@ export class EmailService {
 
   private initializeTransporter() {
     try {
-      // 🔒 SÉCURITÉ: Ne JAMAIS mettre de credentials en dur dans le code!
-      // Les credentials doivent être dans le fichier .env (non commité dans Git)
-      const smtpUser = this.configService.get('SMTP_USER');
-      const smtpPass = this.configService.get('SMTP_PASSWORD');
-      const smtpHost = this.configService.get('SMTP_HOST', 'smtp.gmail.com');
-      const smtpPort = this.configService.get('SMTP_PORT', 587);
-      const smtpSecure = this.configService.get('SMTP_SECURE', 'false') === 'true';
+      // ⚠️ Validation stricte: SMTP_USER et SMTP_PASSWORD sont OBLIGATOIRES
+      const smtpUser = this.configService.get<string>('SMTP_USER');
+      const smtpPass = this.configService.get<string>('SMTP_PASSWORD');
       
-      // Vérifier que les credentials sont configurés
       if (!smtpUser || !smtpPass) {
-        throw new Error('SMTP_USER et SMTP_PASSWORD doivent être définis dans le fichier .env');
+        const errorMsg = '🚨 SMTP_USER et SMTP_PASSWORD doivent être définis dans le fichier .env';
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
       }
+      
+      const smtpHost = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
+      const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
+      const smtpSecure = this.configService.get<string>('SMTP_SECURE', 'false') === 'true';
       
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
@@ -103,6 +118,7 @@ export class EmailService {
       this.logger.log(`✅ Service email initialisé avec succès (${smtpUser} via ${smtpHost}:${smtpPort})`);
     } catch (error) {
       this.logger.error('❌ Erreur initialisation service email:', error);
+      throw error; // Remonter l'erreur pour empêcher le démarrage du serveur
     }
   }
 
@@ -173,11 +189,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Récupération de compte',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Récupération de compte`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: '🔐 Code de récupération Velosi ERP',
+        subject: `🔐 Code de récupération ${this.getFromName()}`,
         html: htmlTemplate,
         text: `Votre code de récupération Velosi ERP est: ${otpCode}. Ce code expire dans 10 minutes.`,
         attachments: attachments
@@ -213,8 +229,8 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Sécurité',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Sécurité`,
+          address: this.getFromEmail()
         },
         to: email,
         subject: '✅ Mot de passe réinitialisé - Velosi ERP',
@@ -659,8 +675,8 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Récupération de compte',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Récupération de compte`,
+          address: this.getFromEmail()
         },
         to: email,
         subject: '🔐 Code de récupération Velosi ERP (URL)',
@@ -758,8 +774,8 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Bienvenue',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Bienvenue`,
+          address: this.getFromEmail()
         },
         to: email,
         subject: '🎉 Bienvenue dans Velosi ERP - Vos informations de connexion',
@@ -1176,11 +1192,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Gestion RH',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Gestion RH`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: `⚠️ Compte ${actionText} - Velosi ERP`,
+        subject: `⚠️ Compte ${actionText} - ${this.getFromName()}`,
         html: htmlTemplate,
         text: `Votre compte Velosi ERP a été ${actionText}. Raison: ${reason}. Contactez votre administrateur pour plus d'informations.`,
         attachments: attachments
@@ -1219,11 +1235,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Gestion RH',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Gestion RH`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: '✅ Compte réactivé - Velosi ERP',
+        subject: `✅ Compte réactivé - ${this.getFromName()}`,
         html: htmlTemplate,
         text: `Bonne nouvelle ! Votre compte Velosi ERP a été réactivé. Vous pouvez maintenant vous reconnecter normalement.`,
         attachments: attachments
@@ -1723,11 +1739,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Bienvenue Client',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Bienvenue Client`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: '🎉 Bienvenue chez Velosi ERP - Accès client créé',
+        subject: `🎉 Bienvenue chez ${this.getFromName()} - Accès client créé`,
         html: htmlTemplate,
         text: `Bienvenue ${companyName}! Votre accès client Velosi ERP a été créé: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
         attachments: attachments
@@ -2122,11 +2138,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Service Client',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Service Client`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: `⚠️ Compte client ${actionText} - Velosi ERP`,
+        subject: `⚠️ Compte client ${actionText} - ${this.getFromName()}`,
         html: htmlTemplate,
         text: `Votre compte client Velosi ERP a été ${actionText}. Raison: ${reason}. Contactez notre service client pour plus d'informations.`,
         attachments: attachments
@@ -2165,11 +2181,11 @@ export class EmailService {
       
       const mailOptions = {
         from: {
-          name: 'Velosi ERP - Service Client',
-          address: 'velosierp@gmail.com'
+          name: `${this.getFromName()} - Service Client`,
+          address: this.getFromEmail()
         },
         to: email,
-        subject: '✅ Compte client réactivé - Velosi ERP',
+        subject: `✅ Compte client réactivé - ${this.getFromName()}`,
         html: htmlTemplate,
         text: `Votre compte client Velosi ERP a été réactivé avec succès. Vous pouvez maintenant accéder à nos services normalement.`,
         attachments: attachments
@@ -2621,7 +2637,7 @@ export class EmailService {
       // Configuration de l'email avec pièce jointe du logo si disponible
       const mailOptions: any = {
         from: this.configService.get<string>('EMAIL_FROM') || 'no-reply@velosi.com',
-        to: 'velosierp@gmail.com',
+        to: this.getFromEmail(), // Recevoir les messages de contact sur l'email principal
         subject: `Nouveau message de contact - ${contactData.enquiryType}`,
         html: htmlTemplate,
         attachments: []
@@ -2637,7 +2653,7 @@ export class EmailService {
       }
 
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(`✅ Email de contact envoyé avec succès à velosierp@gmail.com depuis ${contactData.email}`);
+      this.logger.log(`✅ Email de contact envoyé avec succès à ${this.getFromEmail()} depuis ${contactData.email}`);
       return true;
     } catch (error) {
       this.logger.error('❌ Erreur lors de l\'envoi de l\'email de contact:', error);

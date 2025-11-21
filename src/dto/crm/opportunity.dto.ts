@@ -10,6 +10,7 @@ import {
   Max,
   IsNotEmpty,
   IsInt,
+  MaxLength,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { OpportunityStage, TransportType, ServiceFrequency, Priority, TrafficType } from '../../entities/crm/opportunity.entity';
@@ -17,10 +18,12 @@ import { OpportunityStage, TransportType, ServiceFrequency, Priority, TrafficTyp
 export class CreateOpportunityDto {
   @IsNotEmpty()
   @IsString()
+  @MaxLength(200, { message: 'Le titre ne peut pas dépasser 200 caractères' })
   title: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000, { message: 'La description ne peut pas dépasser 2000 caractères' })
   description?: string;
 
   @IsOptional()
@@ -53,10 +56,12 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(300, { message: "L'adresse d'origine ne peut pas dépasser 300 caractères" })
   originAddress?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(300, { message: 'L\'adresse de destination ne peut pas dépasser 300 caractères' })
   destinationAddress?: string;
 
   @IsOptional()
@@ -77,6 +82,7 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000, { message: 'Les exigences spéciales ne peuvent pas dépasser 1000 caractères' })
   specialRequirements?: string;
 
   @IsOptional()
@@ -96,6 +102,7 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(100, { message: 'La source ne peut pas dépasser 100 caractères' })
   source?: string = 'inbound';
 
   @IsOptional()
@@ -114,18 +121,22 @@ export class CreateOpportunityDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000, { message: 'La description de gain ne peut pas dépasser 1000 caractères' })
   wonDescription?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(500, { message: 'La raison de perte ne peut pas dépasser 500 caractères' })
   lostReason?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200, { message: 'Le concurrent ne peut pas dépasser 200 caractères' })
   lostToCompetitor?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(3, { message: 'Le code devise ne peut pas dépasser 3 caractères' })
   currency?: string;
 }
 

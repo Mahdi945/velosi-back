@@ -35,7 +35,7 @@ export class ContactClient {
   @Column({ type: 'varchar', nullable: true })
   fax: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: true, unique: true })
   mail1: string;
 
   @Column({ type: 'varchar', nullable: true })

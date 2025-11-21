@@ -12,20 +12,24 @@ import {
   IsBoolean,
   IsArray,
   IsInt,
+  MaxLength,
 } from 'class-validator';
 import { EtatFiscal } from '../entities/client.entity';
 
 export class CreatePersonnelDto {
   @IsString()
   @IsNotEmpty({ message: 'Le nom est requis' })
+  @MaxLength(100, { message: 'Le nom ne peut pas dépasser 100 caractères' })
   nom: string;
 
   @IsString()
   @IsNotEmpty({ message: 'Le prénom est requis' })
+  @MaxLength(100, { message: 'Le prénom ne peut pas dépasser 100 caractères' })
   prenom: string;
 
   @IsString()
   @IsNotEmpty({ message: "Le nom d'utilisateur est requis" })
+  @MaxLength(50, { message: "Le nom d'utilisateur ne peut pas dépasser 50 caractères" })
   nom_utilisateur: string;
 
   @IsString()
@@ -53,6 +57,7 @@ export class CreatePersonnelDto {
   @IsOptional()
   @ValidateIf((o) => o.email && o.email.length > 0)
   @IsEmail({}, { message: 'Email invalide' })
+  @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   email?: string;
 
   @IsString()
@@ -67,32 +72,39 @@ export class CreatePersonnelDto {
   @MinLength(8, {
     message: 'Le mot de passe doit contenir au moins 8 caractères',
   })
+  @MaxLength(100, { message: 'Le mot de passe ne peut pas dépasser 100 caractères' })
   mot_de_passe: string;
 }
 
 export class CreateClientDto {
   @IsString()
   @IsNotEmpty({ message: 'Le nom est requis' })
+  @MaxLength(100, { message: 'Le nom ne peut pas dépasser 100 caractères' })
   nom: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100, { message: "L'interlocuteur ne peut pas dépasser 100 caractères" })
   interlocuteur?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(300, { message: "L'adresse ne peut pas dépasser 300 caractères" })
   adresse?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100, { message: 'La ville ne peut pas dépasser 100 caractères' })
   ville?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100, { message: 'Le pays ne peut pas dépasser 100 caractères' })
   pays?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(20, { message: 'Le code postal ne peut pas dépasser 20 caractères' })
   code_postal?: string;
 
   @IsString()
@@ -111,6 +123,7 @@ export class CreateClientDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(20, { message: "L'identifiant fiscal ne peut pas dépasser 20 caractères" })
   id_fiscal?: string;
 
   @IsOptional()
@@ -131,6 +144,7 @@ export class CreateClientDto {
   @MinLength(6, {
     message: 'Le mot de passe doit contenir au moins 6 caractères',
   })
+  @MaxLength(100, { message: 'Le mot de passe ne peut pas dépasser 100 caractères' })
   mot_de_passe?: string;
 
   // Champs de contact - emails optionnels et validés seulement si non vides
@@ -169,20 +183,24 @@ export class CreateClientDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(20, { message: 'Le fax ne peut pas dépasser 20 caractères' })
   contact_fax?: string;
 
   @IsOptional()
   @ValidateIf((o) => o.contact_mail1 && o.contact_mail1.trim().length > 0)
   @IsEmail({}, { message: "L'email de contact principal doit être valide" })
+  @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   contact_mail1?: string;
 
   @IsOptional()
   @ValidateIf((o) => o.contact_mail2 && o.contact_mail2.trim().length > 0)
   @IsEmail({}, { message: "L'email de contact secondaire doit être valide" })
+  @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   contact_mail2?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100, { message: 'La fonction ne peut pas dépasser 100 caractères' })
   contact_fonction?: string;
 
   @IsOptional()

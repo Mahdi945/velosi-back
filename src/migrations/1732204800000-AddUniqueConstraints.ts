@@ -229,6 +229,129 @@ export class AddUniqueConstraints1732204800000 implements MigrationInterface {
       console.warn('  ⚠️ Erreur crm_leads:', error.message);
     }
 
+    // ========================================
+    // 6. TABLE PERSONNEL (email et keycloak_id)
+    // ========================================
+    console.log('👥 [PERSONNEL] Ajout des contraintes unique...');
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'personnel', 'email');
+      
+      await queryRunner.query(`
+        ALTER TABLE "personnel" 
+        ADD CONSTRAINT "UQ_personnel_email" 
+        UNIQUE ("email");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: email');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur personnel email:', error.message);
+    }
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'personnel', 'keycloak_id');
+      
+      await queryRunner.query(`
+        ALTER TABLE "personnel" 
+        ADD CONSTRAINT "UQ_personnel_keycloak_id" 
+        UNIQUE ("keycloak_id");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: keycloak_id');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur personnel keycloak_id:', error.message);
+    }
+
+    // ========================================
+    // 7. TABLE FOURNISSEURS (email, codeFiscal, numeroIdentification)
+    // ========================================
+    console.log('📦 [FOURNISSEURS] Ajout des contraintes unique...');
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'fournisseurs', 'email');
+      
+      await queryRunner.query(`
+        ALTER TABLE "fournisseurs" 
+        ADD CONSTRAINT "UQ_fournisseurs_email" 
+        UNIQUE ("email");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: email');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur fournisseurs email:', error.message);
+    }
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'fournisseurs', 'code_fiscal');
+      
+      await queryRunner.query(`
+        ALTER TABLE "fournisseurs" 
+        ADD CONSTRAINT "UQ_fournisseurs_code_fiscal" 
+        UNIQUE ("code_fiscal");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: code_fiscal');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur fournisseurs code_fiscal:', error.message);
+    }
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'fournisseurs', 'numero_identification');
+      
+      await queryRunner.query(`
+        ALTER TABLE "fournisseurs" 
+        ADD CONSTRAINT "UQ_fournisseurs_numero_identification" 
+        UNIQUE ("numero_identification");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: numero_identification');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur fournisseurs numero_identification:', error.message);
+    }
+
+    // ========================================
+    // 8. TABLE ARMATEURS (email)
+    // ========================================
+    console.log('🚢 [ARMATEURS] Ajout des contraintes unique...');
+
+    try {
+      await this.cleanDuplicates(queryRunner, 'armateurs', 'email');
+      
+      await queryRunner.query(`
+        ALTER TABLE "armateurs" 
+        ADD CONSTRAINT "UQ_armateurs_email" 
+        UNIQUE ("email");
+      `);
+      console.log('  ✅ Contrainte unique ajoutée: email');
+    } catch (error) {
+      console.warn('  ⚠️ Erreur armateurs email:', error.message);
+    }
+
+    // ========================================
+    // 9. TABLE CRM_OPPORTUNITIES (uuid)
+    // ========================================
+    console.log('💼 [CRM_OPPORTUNITIES] Vérification des contraintes...');
+
+    try {
+      const hasUniqueUuid = await queryRunner.query(`
+        SELECT COUNT(*) 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'crm_opportunities' 
+        AND constraint_type = 'UNIQUE' 
+        AND constraint_name LIKE '%uuid%';
+      `);
+
+      if (parseInt(hasUniqueUuid[0].count) === 0) {
+        await this.cleanDuplicates(queryRunner, 'crm_opportunities', 'uuid');
+        
+        await queryRunner.query(`
+          ALTER TABLE "crm_opportunities" 
+          ADD CONSTRAINT "UQ_crm_opportunities_uuid" 
+          UNIQUE ("uuid");
+        `);
+        console.log('  ✅ Contrainte unique ajoutée: uuid');
+      } else {
+        console.log('  ℹ️ Contrainte unique déjà présente: uuid');
+      }
+    } catch (error) {
+      console.warn('  ⚠️ Erreur crm_opportunities:', error.message);
+    }
+
     console.log('✅ [MIGRATION] Contraintes d\'unicité ajoutées avec succès!');
   }
 
@@ -258,6 +381,21 @@ export class AddUniqueConstraints1732204800000 implements MigrationInterface {
 
     // Supprimer les contraintes CRM_LEADS (si ajoutées)
     await queryRunner.query(`ALTER TABLE "crm_leads" DROP CONSTRAINT IF EXISTS "UQ_crm_leads_email";`);
+
+    // Supprimer les contraintes PERSONNEL
+    await queryRunner.query(`ALTER TABLE "personnel" DROP CONSTRAINT IF EXISTS "UQ_personnel_email";`);
+    await queryRunner.query(`ALTER TABLE "personnel" DROP CONSTRAINT IF EXISTS "UQ_personnel_keycloak_id";`);
+
+    // Supprimer les contraintes FOURNISSEURS
+    await queryRunner.query(`ALTER TABLE "fournisseurs" DROP CONSTRAINT IF EXISTS "UQ_fournisseurs_email";`);
+    await queryRunner.query(`ALTER TABLE "fournisseurs" DROP CONSTRAINT IF EXISTS "UQ_fournisseurs_code_fiscal";`);
+    await queryRunner.query(`ALTER TABLE "fournisseurs" DROP CONSTRAINT IF EXISTS "UQ_fournisseurs_numero_identification";`);
+
+    // Supprimer les contraintes ARMATEURS
+    await queryRunner.query(`ALTER TABLE "armateurs" DROP CONSTRAINT IF EXISTS "UQ_armateurs_email";`);
+
+    // Supprimer les contraintes CRM_OPPORTUNITIES
+    await queryRunner.query(`ALTER TABLE "crm_opportunities" DROP CONSTRAINT IF EXISTS "UQ_crm_opportunities_uuid";`);
 
     console.log('✅ [MIGRATION] Rollback terminé');
   }

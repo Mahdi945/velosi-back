@@ -57,7 +57,7 @@ export class Opportunity extends BaseEntityWithSoftDelete {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ unique: true })
   @Generated('uuid')
   uuid: string;
 

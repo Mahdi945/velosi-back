@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsDateString, IsBoolean, IsInt } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsDateString, IsBoolean, IsInt, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { LeadSource, LeadStatus, Priority } from '../../entities/crm/lead.entity';
 import { TransportType, TrafficType } from '../../entities/crm/opportunity.entity';
@@ -6,29 +6,36 @@ import { TransportType, TrafficType } from '../../entities/crm/opportunity.entit
 export class CreateLeadDto {
   @IsNotEmpty()
   @IsString()
+  @MaxLength(200, { message: 'Le nom complet ne peut pas dépasser 200 caractères' })
   fullName: string;
 
   @IsEmail()
+  @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   email: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   phone?: string;
 
   @IsNotEmpty()
   @IsString()
+  @MaxLength(200, { message: "Le nom de l'entreprise ne peut pas dépasser 200 caractères" })
   company: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100, { message: 'Le poste ne peut pas dépasser 100 caractères' })
   position?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200, { message: 'Le site web ne peut pas dépasser 200 caractères' })
   website?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100, { message: "L'industrie ne peut pas dépasser 100 caractères" })
   industry?: string;
 
   @IsOptional()

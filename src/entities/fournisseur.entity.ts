@@ -23,10 +23,10 @@ export class Fournisseur {
   @Column({ name: 'nature_identification', length: 20, default: 'mf' })
   natureIdentification: string; // 'mf' | 'cin' | 'passeport' | 'carte_sejour' | 'autre'
 
-  @Column({ name: 'numero_identification', length: 20, nullable: true })
+  @Column({ name: 'numero_identification', length: 20, nullable: true, unique: true })
   numeroIdentification: string;
 
-  @Column({ name: 'code_fiscal', length: 20, nullable: true })
+  @Column({ name: 'code_fiscal', length: 20, nullable: true, unique: true })
   codeFiscal: string;
 
   @Column({ name: 'type_mf', type: 'smallint', default: 0 })
@@ -59,7 +59,7 @@ export class Fournisseur {
   @Column({ length: 20, nullable: true })
   fax: string;
 
-  @Column({ length: 50, nullable: true })
+  @Column({ length: 50, nullable: true, unique: true })
   email: string;
 
   @Column({ name: 'rib_iban', length: 50, nullable: true })

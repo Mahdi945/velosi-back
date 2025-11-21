@@ -57,6 +57,9 @@ async function bootstrap() {
       ...allowedOrigins,
       'http://localhost:4200',  // Frontend Angular LOCAL (toujours autorisé)
       'http://localhost:3000',  // Tests LOCAL (toujours autorisé)
+      'https://localhost:4200',  // Frontend Angular LOCAL avec SSL
+      'https://192.168.1.72:4200',  // Frontend Angular réseau local avec SSL (pour tests mobiles)
+      'http://192.168.1.72:4200',  // Frontend Angular réseau local HTTP (pour tests mobiles)
       'https://wyselogiquote.com',  // Frontend Angular PRODUCTION (domaine principal)
       'https://www.wyselogiquote.com',  // Frontend Angular PRODUCTION (avec www)
       'https://vps-3b4fd3be.vps.ovh.ca:443',  // Frontend Angular VPS OVH (HTTPS port 443 explicite)

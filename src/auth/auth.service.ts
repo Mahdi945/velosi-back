@@ -1998,4 +1998,272 @@ export class AuthService {
       throw error;
     }
   }
+
+  // ==========================================
+  // MÉTHODES D'AUTHENTIFICATION BIOMÉTRIQUE
+  // ==========================================
+
+  /**
+   * Enregistrer une empreinte biométrique pour un utilisateur
+   */
+  async registerBiometric(
+    userId: string,
+    userType: 'personnel' | 'client',
+    biometricHash: string
+  ): Promise<{ success: boolean; registeredAt: Date }> {
+    try {
+      console.log(`🔐 Enregistrement biométrique pour ${userType} #${userId}`);
+
+      // Valider les données biométriques
+      if (!biometricHash || biometricHash.length < 32) {
+        throw new Error('Données biométriques invalides');
+      }
+
+      // Générer un hash sécurisé supplémentaire côté serveur
+      const salt = await bcrypt.genSalt(12);
+      const serverHash = await bcrypt.hash(biometricHash, salt);
+
+      // Mettre à jour l'utilisateur
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      
+      const user = await repository.findOne({ where: { id: parseInt(userId) } });
+      
+      if (!user) {
+        throw new Error('Utilisateur non trouvé');
+      }
+
+      user.biometric_hash = serverHash;
+      user.biometric_enabled = true;
+      user.biometric_registered_at = new Date();
+
+      await (repository as any).save(user);
+
+      console.log(`✅ Empreinte biométrique enregistrée pour ${userType} #${userId}`);
+
+      return {
+        success: true,
+        registeredAt: user.biometric_registered_at,
+      };
+    } catch (error) {
+      console.error('❌ Erreur enregistrement biométrique:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Vérifier une empreinte biométrique
+   */
+  async verifyBiometric(
+    userId: number,
+    userType: 'personnel' | 'client',
+    biometricHash: string
+  ): Promise<{ success: boolean; user?: any }> {
+    try {
+      console.log(`🔍 Vérification biométrique pour ${userType} #${userId}`);
+
+      // Valider les données biométriques
+      if (!biometricHash || biometricHash.length < 32) {
+        throw new UnauthorizedException('Données biométriques invalides');
+      }
+
+      // Récupérer l'utilisateur
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      
+      const user = await repository.findOne({ where: { id: userId } });
+      
+      if (!user) {
+        throw new UnauthorizedException('Utilisateur non trouvé');
+      }
+
+      // Vérifier si la biométrie est activée
+      if (!user.biometric_enabled || !user.biometric_hash) {
+        throw new UnauthorizedException('Authentification biométrique non configurée');
+      }
+
+      // Comparer le hash biométrique
+      const isValid = await bcrypt.compare(biometricHash, user.biometric_hash);
+
+      if (!isValid) {
+        console.log('❌ Empreinte biométrique invalide');
+        throw new UnauthorizedException('Empreinte biométrique invalide');
+      }
+
+      console.log(`✅ Empreinte biométrique valide pour ${userType} #${userId}`);
+
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          username: userType === 'personnel' ? (user as Personnel).nom_utilisateur : user.nom,
+          email: user.email,
+          userType,
+          role: userType === 'personnel' ? (user as Personnel).role : 'client',
+        },
+      };
+    } catch (error) {
+      console.error('❌ Erreur vérification biométrique:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Générer des tokens pour un utilisateur (utilisé après vérification biométrique)
+   */
+  async generateTokensForUser(
+    userId: number,
+    userType: 'personnel' | 'client'
+  ): Promise<AuthResult> {
+    try {
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      const user = await repository.findOne({ where: { id: userId } });
+
+      if (!user) {
+        throw new UnauthorizedException('Utilisateur non trouvé');
+      }
+
+      const payload: JwtPayload = {
+        username: userType === 'personnel' ? (user as Personnel).nom_utilisateur : user.nom,
+        sub: user.id.toString(),
+        email: user.email,
+        role: userType === 'personnel' ? (user as Personnel).role : 'client',
+        userType,
+      };
+
+      const access_token = this.jwtService.sign(payload, {
+        expiresIn: '8h',
+      });
+
+      const refresh_token = this.jwtService.sign(payload, {
+        expiresIn: '8h',
+      });
+
+      return {
+        access_token,
+        refresh_token,
+        user: {
+          id: user.id.toString(),
+          username: payload.username,
+          email: user.email,
+          role: payload.role,
+          userType,
+          photo: user.photo,
+        },
+      };
+    } catch (error) {
+      console.error('❌ Erreur génération tokens:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Vérifier si l'authentification biométrique est activée pour un utilisateur
+   */
+  async isBiometricEnabled(
+    userId: string,
+    userType: 'personnel' | 'client'
+  ): Promise<{ enabled: boolean; registeredAt?: Date }> {
+    try {
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      
+      const user = await repository.findOne({ where: { id: parseInt(userId) } });
+      
+      if (!user) {
+        return { enabled: false };
+      }
+
+      return {
+        enabled: user.biometric_enabled || false,
+        registeredAt: user.biometric_registered_at,
+      };
+    } catch (error) {
+      console.error('❌ Erreur vérification statut biométrique:', error);
+      return { enabled: false };
+    }
+  }
+
+  /**
+   * Vérifier le statut biométrique par nom d'utilisateur (pour l'affichage sur login)
+   */
+  async checkBiometricStatusByUsername(
+    usernameOrEmail: string
+  ): Promise<{ enabled: boolean; userId?: number; userType?: 'personnel' | 'client' }> {
+    try {
+      // Chercher d'abord dans personnel
+      const personnel = await this.personnelRepository
+        .createQueryBuilder('personnel')
+        .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { username: usernameOrEmail })
+        .orWhere('LOWER(personnel.email) = LOWER(:username)', { username: usernameOrEmail })
+        .getOne();
+
+      if (personnel) {
+        return {
+          enabled: personnel.biometric_enabled || false,
+          userId: personnel.id,
+          userType: 'personnel',
+        };
+      }
+
+      // Sinon chercher dans client
+      const client = await this.clientRepository
+        .createQueryBuilder('client')
+        .where('LOWER(client.email) = LOWER(:username)', { username: usernameOrEmail })
+        .orWhere('LOWER(client.nom) = LOWER(:username)', { username: usernameOrEmail })
+        .getOne();
+
+      if (client) {
+        return {
+          enabled: client.biometric_enabled || false,
+          userId: client.id,
+          userType: 'client',
+        };
+      }
+
+      return { enabled: false };
+    } catch (error) {
+      console.error('❌ Erreur vérification statut par username:', error);
+      return { enabled: false };
+    }
+  }
+
+  /**
+   * Désactiver l'authentification biométrique
+   */
+  async disableBiometric(
+    userId: string,
+    userType: 'personnel' | 'client'
+  ): Promise<{ success: boolean }> {
+    try {
+      console.log(`🔓 Désactivation biométrique pour ${userType} #${userId}`);
+
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      
+      const user = await repository.findOne({ where: { id: parseInt(userId) } });
+      
+      if (!user) {
+        throw new Error('Utilisateur non trouvé');
+      }
+
+      user.biometric_enabled = false;
+      user.biometric_hash = null;
+      user.biometric_registered_at = null;
+
+      await (repository as any).save(user);
+
+      console.log(`✅ Biométrie désactivée pour ${userType} #${userId}`);
+
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Erreur désactivation biométrique:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Générer un challenge biométrique
+   */
+  async generateBiometricChallenge(): Promise<string> {
+    const crypto = require('crypto');
+    return crypto.randomBytes(32).toString('hex');
+  }
 }
+

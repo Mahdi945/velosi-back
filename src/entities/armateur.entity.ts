@@ -35,7 +35,7 @@ export class Armateur {
   @Column({ type: 'varchar', length: 20, nullable: true })
   fax: string;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true, unique: true })
   email: string;
 
   @Column({ type: 'varchar', length: 150, nullable: true, name: 'siteweb' })
