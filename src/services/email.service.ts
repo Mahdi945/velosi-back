@@ -74,11 +74,18 @@ export class EmailService {
 
   private initializeTransporter() {
     try {
-      const smtpUser = this.configService.get('SMTP_USER', 'velosierp@gmail.com');
-      const smtpPass = this.configService.get('SMTP_PASSWORD', 'qaas amak tyqq rzet');
+      // 🔒 SÉCURITÉ: Ne JAMAIS mettre de credentials en dur dans le code!
+      // Les credentials doivent être dans le fichier .env (non commité dans Git)
+      const smtpUser = this.configService.get('SMTP_USER');
+      const smtpPass = this.configService.get('SMTP_PASSWORD');
       const smtpHost = this.configService.get('SMTP_HOST', 'smtp.gmail.com');
       const smtpPort = this.configService.get('SMTP_PORT', 587);
       const smtpSecure = this.configService.get('SMTP_SECURE', 'false') === 'true';
+      
+      // Vérifier que les credentials sont configurés
+      if (!smtpUser || !smtpPass) {
+        throw new Error('SMTP_USER et SMTP_PASSWORD doivent être définis dans le fichier .env');
+      }
       
       this.transporter = nodemailer.createTransport({
         host: smtpHost,

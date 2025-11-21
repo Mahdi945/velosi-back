@@ -35,16 +35,42 @@ lerna-debug.log*
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# dotenv environment variable files
+# ===============================================
+# 🔒 FICHIERS DE CONFIGURATION SENSIBLES
+# ===============================================
+# ⚠️ NE JAMAIS COMMITER CES FICHIERS!
+# Ils contiennent des credentials et secrets
+
+# Tous les fichiers .env (sauf .env.example)
 .env
+.env.*
+!.env.example
+.env.local
+.env.development
 .env.development.local
+.env.test
 .env.test.local
 .env.production
 .env.production.local
-.env.local
+.env.staging
 
-# Keycloak secrets (IMPORTANT)
+# Keycloak secrets
 .env.production.keycloak
+.env.keycloak
+
+# Fichiers de configuration avec credentials
+config/*.secret.json
+config/*.private.json
+secrets/
+*.pem
+*.key
+*.cert
+
+# Credentials AWS/Cloud
+.aws/
+.azure/
+credentials.json
+service-account.json
 
 # temp directory
 .temp
