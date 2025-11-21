@@ -43,6 +43,9 @@ COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/package*.json ./
 COPY --from=builder --chown=nodejs:nodejs /app/assets ./assets
 
+# Copier le script de vérification des variables d'environnement
+COPY --from=builder --chown=nodejs:nodejs /app/check-env.js ./check-env.js
+
 # Créer le dossier uploads avec les bonnes permissions
 RUN mkdir -p uploads/profiles uploads/activites uploads/autorisations uploads/bons-de-commande uploads/correspondants-logo uploads/logos_armateurs uploads/logos_fournisseurs uploads/vechat && \
     chown -R nodejs:nodejs uploads
@@ -61,5 +64,6 @@ ENV PORT=3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/api/auth/check', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Démarrer l'application avec dumb-init pour gérer les signaux proprement
-CMD ["dumb-init", "node", "dist/main.js"]
+# Démarrer l'application avec vérification des variables d'environnement
+# puis lancement avec dumb-init pour gérer les signaux proprement
+CMD ["sh", "-c", "node check-env.js && dumb-init node dist/main.js"]
