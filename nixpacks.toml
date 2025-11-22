@@ -5,15 +5,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm ci --legacy-peer-deps"]
 
 [phases.build]
-# Séparer le build et le prune pour éviter les conflits de cache
-cmds = [
-  "npm run build",
-  "npm prune --production --legacy-peer-deps"
-]
+cmds = ["npm run build"]
 
 [start]
 cmd = "node dist/main.js"
-
-# Variables d'environnement pour le build
-[variables]
-NODE_ENV = "production"

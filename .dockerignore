@@ -1,18 +1,10 @@
-# Fichiers Node.js et caches
+# Fichiers Node.js
 node_modules
 npm-debug.log
 yarn-error.log
 .pnpm-debug.log
-.npm
-.cache
-.node-gyp
-*.log
 
-# Build et dist (sera régénéré)
-dist
-build
-
-# Environnement (Railway injecte ses propres variables)
+# Environnement
 .env
 .env.local
 .env.development
