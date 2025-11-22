@@ -88,14 +88,15 @@ export class EmailService {
 
   private initializeTransporter() {
     try {
-      // ⚠️ Validation stricte: SMTP_USER et SMTP_PASSWORD sont OBLIGATOIRES
+      // Variables SMTP optionnelles en production pour permettre le démarrage sans email
       const smtpUser = this.configService.get<string>('SMTP_USER');
       const smtpPass = this.configService.get<string>('SMTP_PASSWORD');
       
       if (!smtpUser || !smtpPass) {
-        const errorMsg = '🚨 SMTP_USER et SMTP_PASSWORD doivent être définis dans le fichier .env';
-        this.logger.error(errorMsg);
-        throw new Error(errorMsg);
+        const warnMsg = '⚠️ SMTP_USER et SMTP_PASSWORD non définis - Service email désactivé';
+        this.logger.warn(warnMsg);
+        this.transporter = null;
+        return; // Continuer sans email
       }
       
       const smtpHost = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
@@ -118,7 +119,8 @@ export class EmailService {
       this.logger.log(`✅ Service email initialisé avec succès (${smtpUser} via ${smtpHost}:${smtpPort})`);
     } catch (error) {
       this.logger.error('❌ Erreur initialisation service email:', error);
-      throw error; // Remonter l'erreur pour empêcher le démarrage du serveur
+      this.transporter = null; // Désactiver les emails en cas d'erreur
+      this.logger.warn('⚠️ Service email désactivé suite à une erreur');
     }
   }
 
@@ -152,6 +154,12 @@ export class EmailService {
    */
   async sendEmail(to: string, subject: string, htmlContent: string): Promise<boolean> {
     try {
+      // Vérifier si le service email est disponible
+      if (!this.transporter) {
+        this.logger.warn(`⚠️ Service email désactivé - Email non envoyé à ${to}`);
+        return false;
+      }
+
       const mailOptions = {
         from: this.configService.get('SMTP_FROM', 'noreply@velosi.com'),
         to,
