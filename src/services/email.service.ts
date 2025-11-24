@@ -88,14 +88,16 @@ export class EmailService {
 
   private initializeTransporter() {
     try {
-      // ⚠️ Validation stricte: SMTP_USER et SMTP_PASSWORD sont OBLIGATOIRES
+      // ✅ MODIFICATION: SMTP_USER et SMTP_PASSWORD sont OPTIONNELS en production
+      // L'application peut démarrer sans email configuré
       const smtpUser = this.configService.get<string>('SMTP_USER');
       const smtpPass = this.configService.get<string>('SMTP_PASSWORD');
       
       if (!smtpUser || !smtpPass) {
-        const errorMsg = '🚨 SMTP_USER et SMTP_PASSWORD doivent être définis dans le fichier .env';
-        this.logger.error(errorMsg);
-        throw new Error(errorMsg);
+        const warningMsg = '⚠️ SMTP_USER et SMTP_PASSWORD non définis - Service email désactivé';
+        this.logger.warn(warningMsg);
+        this.transporter = null; // Pas de transporter, donc pas d'envoi d'email
+        return; // ✅ Ne pas bloquer le démarrage
       }
       
       const smtpHost = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
@@ -118,7 +120,8 @@ export class EmailService {
       this.logger.log(`✅ Service email initialisé avec succès (${smtpUser} via ${smtpHost}:${smtpPort})`);
     } catch (error) {
       this.logger.error('❌ Erreur initialisation service email:', error);
-      throw error; // Remonter l'erreur pour empêcher le démarrage du serveur
+      this.transporter = null; // ✅ Continuer sans email au lieu de bloquer
+      this.logger.warn('⚠️ Application démarrée sans service email - Les notifications par email seront désactivées');
     }
   }
 
@@ -152,6 +155,12 @@ export class EmailService {
    */
   async sendEmail(to: string, subject: string, htmlContent: string): Promise<boolean> {
     try {
+      // ✅ Vérifier si le transporter est configuré
+      if (!this.transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré`);
+        return false;
+      }
+      
       const mailOptions = {
         from: this.configService.get('SMTP_FROM', 'noreply@velosi.com'),
         to,
@@ -173,6 +182,12 @@ export class EmailService {
    */
   async sendOtpEmail(email: string, otpCode: string, userName?: string): Promise<boolean> {
     try {
+      // ✅ Vérifier si le transporter est configuré
+      if (!this.transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer l'OTP à ${email}: Service email non configuré`);
+        return false;
+      }
+      
       const htmlTemplate = this.getOtpEmailTemplate(otpCode, userName);
       
       // Préparer l'attachment du logo
@@ -213,6 +228,12 @@ export class EmailService {
    */
   async sendPasswordResetSuccessEmail(email: string, userName?: string): Promise<boolean> {
     try {
+      // ✅ Vérifier si le transporter est configuré
+      if (!this.transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer la confirmation à ${email}: Service email non configuré`);
+        return false;
+      }
+      
       const htmlTemplate = this.getSuccessEmailTemplate(userName);
       
       // Préparer l'attachment du logo
@@ -657,6 +678,12 @@ export class EmailService {
    */
   async verifyConnection(): Promise<boolean> {
     try {
+      // ✅ Vérifier si le transporter est configuré
+      if (!this.transporter) {
+        this.logger.warn('⚠️ Service email non configuré');
+        return false;
+      }
+      
       await this.transporter.verify();
       this.logger.log('Connexion email vérifiée avec succès');
       return true;
