@@ -152,6 +152,11 @@ export class CreateQuoteItemDto {
   @Min(0)
   conversionRate?: number;
 
+  // 🆕 Unité de mesure (ex: 40HC, TONNE, M3, PIECE, etc.)
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
   @IsNumber()
   @Min(0)
   quantity: number;
@@ -195,14 +200,35 @@ export class CreateQuoteDto {
   title: string;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
   @IsNumber()
   opportunityId?: number;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
   @IsNumber()
   leadId?: number;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
   @IsNumber()
   clientId?: number;
 
@@ -356,6 +382,40 @@ export class UpdateQuoteDto {
   @Type(() => Date)
   @IsDate()
   validUntil?: Date;
+
+  // ✅ CORRECTION: Permettre la mise à jour des IDs de liaison (opportunité, lead, client)
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
+  @IsNumber()
+  opportunityId?: number | null;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
+  @IsNumber()
+  leadId?: number | null;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value.id !== undefined) return Number(value.id);
+    const parsed = Number(value);
+    return isNaN(parsed) ? null : parsed;
+  })
+  @IsNumber()
+  clientId?: number | null;
 
   @IsOptional()
   @IsString()

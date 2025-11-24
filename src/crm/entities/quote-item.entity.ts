@@ -132,6 +132,10 @@ export class QuoteItem {
   @Column({ name: 'conversion_rate', type: 'decimal', precision: 10, scale: 4, nullable: true })
   conversionRate: number;
 
+  // 🆕 Unité de mesure (ex: 40HC, TONNE, M3, PIECE, etc.)
+  @Column({ name: 'unit', length: 50, nullable: true })
+  unit: string;
+
   // Prix et quantités
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 1 })
   quantity: number;

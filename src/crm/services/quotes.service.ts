@@ -567,6 +567,9 @@ export class QuotesService {
 
     console.log('🔄 [UPDATE] Données reçues pour mise à jour:', {
       id,
+      leadId: updateQuoteDto.leadId,
+      opportunityId: updateQuoteDto.opportunityId,
+      clientId: updateQuoteDto.clientId,
       commercialIds: updateQuoteDto.commercialIds,
       commercialId: updateQuoteDto.commercialId,
       armateurId: updateQuoteDto.armateurId,
@@ -601,10 +604,33 @@ export class QuotesService {
       console.log(`✅ 1 commercial assigné (ancien système)`);
     }
 
-    // Mettre à jour les champs principaux
-    Object.assign(quote, updateQuoteDto);
+    // 🎯 FIX CRITIQUE: Décharger les relations TypeORM AVANT d'assigner les nouveaux IDs
+    // TypeORM peut réinitialiser les IDs de clés étrangères lors de la sauvegarde si les objets relation sont chargés
+    // On doit donc les mettre à undefined pour forcer TypeORM à utiliser les IDs numériques
+    if ('leadId' in updateQuoteDto) {
+      quote.lead = undefined;
+      quote.leadId = updateQuoteDto.leadId;
+      console.log('🔧 [UPDATE] Déchargement relation lead + assignation leadId:', updateQuoteDto.leadId);
+    }
+    if ('opportunityId' in updateQuoteDto) {
+      quote.opportunity = undefined;
+      quote.opportunityId = updateQuoteDto.opportunityId;
+      console.log('🔧 [UPDATE] Déchargement relation opportunity + assignation opportunityId:', updateQuoteDto.opportunityId);
+    }
+    if ('clientId' in updateQuoteDto) {
+      quote.client = undefined;
+      quote.clientId = updateQuoteDto.clientId;
+      console.log('🔧 [UPDATE] Déchargement relation client + assignation clientId:', updateQuoteDto.clientId);
+    }
+
+    // Mettre à jour les champs principaux (SAUF leadId, opportunityId, clientId qui sont déjà traités)
+    const { leadId, opportunityId, clientId, ...otherFields } = updateQuoteDto;
+    Object.assign(quote, otherFields);
     
     console.log('✅ [UPDATE] Quote après Object.assign:', {
+      leadId: quote.leadId,
+      opportunityId: quote.opportunityId,
+      clientId: quote.clientId,
       commercialIds: quote.commercialIds,
       armateurId: quote.armateurId,
       navireId: quote.navireId,
@@ -640,6 +666,9 @@ export class QuotesService {
 
     console.log('💾 [UPDATE] Quote avant save:', {
       id: quote.id,
+      leadId: quote.leadId,
+      opportunityId: quote.opportunityId,
+      clientId: quote.clientId,
       commercialIds: quote.commercialIds,
       armateurId: quote.armateurId,
       navireId: quote.navireId,
@@ -655,8 +684,54 @@ export class QuotesService {
     // Sauvegarder
     const updatedQuote = await this.quoteRepository.save(quote);
 
+    // 🎯 FIX CRITIQUE: TOUJOURS forcer la mise à jour des IDs de liaison via UPDATE direct
+    // TypeORM ne détecte pas toujours les changements sur ces colonnes quand les relations sont chargées
+    // ✅ IMPORTANT: On force la mise à jour MÊME si la valeur est null pour réinitialiser correctement
+    const updateData: any = {};
+    
+    // ✅ CORRECTION: Vérifier si la propriété existe dans le DTO (même si null/undefined)
+    // On ne peut pas utiliser hasOwnProperty car class-transformer modifie l'objet
+    // On vérifie plutôt si la propriété n'est pas undefined (null est valide)
+    if ('leadId' in updateQuoteDto) {
+      updateData.leadId = updateQuoteDto.leadId;
+      console.log('🔧 [UPDATE] Forçage leadId:', updateQuoteDto.leadId, '(type:', typeof updateQuoteDto.leadId, ')');
+    }
+    if ('opportunityId' in updateQuoteDto) {
+      updateData.opportunityId = updateQuoteDto.opportunityId;
+      console.log('🔧 [UPDATE] Forçage opportunityId:', updateQuoteDto.opportunityId, '(type:', typeof updateQuoteDto.opportunityId, ')');
+    }
+    if ('clientId' in updateQuoteDto) {
+      updateData.clientId = updateQuoteDto.clientId;
+      console.log('🔧 [UPDATE] Forçage clientId:', updateQuoteDto.clientId, '(type:', typeof updateQuoteDto.clientId, ')');
+    }
+    
+    // ✅ TOUJOURS exécuter l'UPDATE si au moins un ID est présent
+    if (Object.keys(updateData).length > 0) {
+      console.log('💾 [UPDATE] Exécution UPDATE SQL direct avec:', updateData);
+      await this.quoteRepository.update(id, updateData);
+      console.log('✅ [UPDATE] IDs mis à jour via UPDATE SQL direct');
+      
+      // Recharger pour avoir les bonnes valeurs
+      const finalQuote = await this.quoteRepository.findOne({ where: { id } });
+      console.log('✨ [UPDATE] Valeurs finales après UPDATE:', {
+        leadId: finalQuote.leadId,
+        opportunityId: finalQuote.opportunityId,
+        clientId: finalQuote.clientId,
+      });
+      
+      // Mettre à jour l'objet retourné
+      updatedQuote.leadId = finalQuote.leadId;
+      updatedQuote.opportunityId = finalQuote.opportunityId;
+      updatedQuote.clientId = finalQuote.clientId;
+    } else {
+      console.log('⚠️ [UPDATE] Aucun ID de liaison présent dans updateQuoteDto - pas de forçage');
+    }
+
     console.log('✨ [UPDATE] Quote après save:', {
       id: updatedQuote.id,
+      leadId: updatedQuote.leadId,
+      opportunityId: updatedQuote.opportunityId,
+      clientId: updatedQuote.clientId,
       armateurId: updatedQuote.armateurId,
       navireId: updatedQuote.navireId,
       portEnlevementId: updatedQuote.portEnlevementId,
