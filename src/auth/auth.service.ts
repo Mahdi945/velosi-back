@@ -705,6 +705,12 @@ export class AuthService {
       expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
     });
 
+    // 🔧 CORRECTION: Recharger le client avec toutes les relations pour avoir les données complètes
+    const fullClient = await this.clientRepository.findOne({
+      where: { id: savedClient.id },
+      relations: ['contacts'], // Charger aussi les contacts si besoin
+    });
+
     return {
       access_token,
       refresh_token,
@@ -716,11 +722,7 @@ export class AuthService {
         userType: 'client',
         fullName: savedClient.nom,
       },
-      client: {
-        id: savedClient.id,
-        nom: savedClient.nom,
-        email: contactEmail || '',
-      },
+      client: fullClient || savedClient, // 🔧 Retourner le client complet au lieu de seulement 3 champs
     };
   }
 

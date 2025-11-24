@@ -52,45 +52,23 @@ async function bootstrap() {
     ? process.env.ALLOWED_ORIGINS.split(',')
     : ['http://localhost:4200', 'http://localhost:3000'];
   
-  // Configuration CORS dynamique avec support wildcard pour Vercel
   app.enableCors({
-    origin: (origin, callback) => {
-      // Liste des origines autorisées
-      const staticOrigins = [
-        ...allowedOrigins,
-        'http://localhost:4200',
-        'http://localhost:3000',
-        'https://localhost:4200',
-        'https://192.168.1.72:4200',
-        'http://192.168.1.72:4200',
-        'https://wyselogiquote.com',
-        'https://www.wyselogiquote.com',
-        'https://vps-3b4fd3be.vps.ovh.ca:443',
-        'https://vps-3b4fd3be.vps.ovh.ca',
-        'http://vps-3b4fd3be.vps.ovh.ca:4200',
-        'http://vps-3b4fd3be.vps.ovh.ca:8080',
-        'https://velosi-front.vercel.app',
-      ];
-
-      // Permettre les requêtes sans origin (ex: Postman, curl)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Vérifier si l'origin est dans la liste statique
-      if (staticOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      // Vérifier si c'est un domaine Vercel (wildcard)
-      if (origin.endsWith('.vercel.app')) {
-        return callback(null, true);
-      }
-
-      // Origin non autorisée
-      console.warn(`⚠️ CORS: Origin non autorisée: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    },
+    origin: [
+      ...allowedOrigins,
+      'http://localhost:4200',  // Frontend Angular LOCAL (toujours autorisé)
+      'http://localhost:3000',  // Tests LOCAL (toujours autorisé)
+      'https://localhost:4200',  // Frontend Angular LOCAL avec SSL
+      'https://192.168.1.72:4200',  // Frontend Angular réseau local avec SSL (pour tests mobiles)
+      'http://192.168.1.72:4200',  // Frontend Angular réseau local HTTP (pour tests mobiles)
+      'https://wyselogiquote.com',  // Frontend Angular PRODUCTION (domaine principal)
+      'https://www.wyselogiquote.com',  // Frontend Angular PRODUCTION (avec www)
+      'https://vps-3b4fd3be.vps.ovh.ca:443',  // Frontend Angular VPS OVH (HTTPS port 443 explicite)
+      'https://vps-3b4fd3be.vps.ovh.ca',  // Frontend Angular VPS OVH (HTTPS sans port)
+      'http://vps-3b4fd3be.vps.ovh.ca:4200',  // Frontend Angular VPS OVH (HTTP port 4200)
+      'http://vps-3b4fd3be.vps.ovh.ca:8080',  // Frontend Angular VPS OVH (HTTP port 8080)
+      'https://velosi-front.vercel.app',  // Frontend Angular PRODUCTION sur Vercel
+      'https://*.vercel.app'  // Tous les domaines Vercel (pour les previews)
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
@@ -99,11 +77,8 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
-      'x-user-id',
+      'x-user-id', // Header personnalisé pour l'ID utilisateur
     ],
-    exposedHeaders: ['Set-Cookie'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
   });
 
   // Configuration pour servir les fichiers statiques (AVANT le préfixe global)

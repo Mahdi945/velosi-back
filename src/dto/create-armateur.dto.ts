@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsEmail, IsUrl, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsEmail, IsUrl, MaxLength, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateArmateurDto {
@@ -52,7 +52,8 @@ export class CreateArmateurDto {
   fax?: string;
 
   @IsOptional()
-  @IsEmail()
+  @ValidateIf((o) => o.email !== '' && o.email !== null && o.email !== undefined)
+  @IsEmail({}, { message: 'Format d\'email invalide' })
   @MaxLength(100)
   email?: string;
 

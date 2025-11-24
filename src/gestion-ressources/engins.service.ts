@@ -102,8 +102,18 @@ export class EnginsService {
       throw new BadRequestException(`Un engin avec le libellé "${createEnginDto.libelle}" existe déjà`);
     }
 
-    const engin = this.enginRepository.create(createEnginDto);
-    return this.enginRepository.save(engin);
+    try {
+      const engin = this.enginRepository.create(createEnginDto);
+      return await this.enginRepository.save(engin);
+    } catch (error) {
+      // Gérer l'erreur de clé primaire dupliquée
+      if (error.code === '23505' && error.constraint === 'engin_pkey') {
+        throw new BadRequestException(
+          'Erreur de séquence ID. Veuillez contacter l\'administrateur pour réinitialiser la séquence de la table engin.'
+        );
+      }
+      throw error;
+    }
   }
 
   /**
