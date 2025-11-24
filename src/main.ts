@@ -52,6 +52,9 @@ async function bootstrap() {
     ? process.env.ALLOWED_ORIGINS.split(',')
     : ['http://localhost:4200', 'http://localhost:3000'];
   
+  console.log('🔒 CORS - Origines autorisées :');
+  console.log('   - Depuis .env:', allowedOrigins);
+  
   app.enableCors({
     origin: [
       ...allowedOrigins,
@@ -66,8 +69,8 @@ async function bootstrap() {
       'https://vps-3b4fd3be.vps.ovh.ca',  // Frontend Angular VPS OVH (HTTPS sans port)
       'http://vps-3b4fd3be.vps.ovh.ca:4200',  // Frontend Angular VPS OVH (HTTP port 4200)
       'http://vps-3b4fd3be.vps.ovh.ca:8080',  // Frontend Angular VPS OVH (HTTP port 8080)
-      'https://velosi-front.vercel.app',  // Frontend Angular PRODUCTION sur Vercel
-      'https://*.vercel.app'  // Tous les domaines Vercel (pour les previews)
+      'https://velosi-front.vercel.app',  // ✅ Frontend Vercel PRODUCTION
+      'https://velosi-front-git-main-mahdi945s-projects.vercel.app',  // ✅ Vercel Preview (branch main)
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -80,6 +83,9 @@ async function bootstrap() {
       'x-user-id', // Header personnalisé pour l'ID utilisateur
     ],
   });
+  
+  console.log('✅ CORS configuré avec succès');
+  console.log('');
 
   // Configuration pour servir les fichiers statiques (AVANT le préfixe global)
   app.useStaticAssets(join(process.cwd(), 'assets'), {
