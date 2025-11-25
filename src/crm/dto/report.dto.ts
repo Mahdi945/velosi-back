@@ -163,6 +163,8 @@ export interface QuoteReport {
   leadId: number;
   opportunityId: number;
   assignedCommercial: string;
+  commercialIds?: any[]; // ✅ Commerciaux multiples assignés avec leurs noms complets
+  items?: any[]; // ✅ Items de la cotation pour calcul TVA par ligne
   
   // Dates
   createdAt: Date;

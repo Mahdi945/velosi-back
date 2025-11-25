@@ -160,6 +160,30 @@ export class QuoteItem {
   @Column({ name: 'item_type', length: 50, default: 'freight' })
   itemType: string; // 'freight' ou 'additional_cost'
 
+  // 🆕 TAXATION PAR LIGNE (remplace TVA globale)
+  @Column({ name: 'tax_rate', type: 'decimal', precision: 5, scale: 2, default: 19.0 })
+  taxRate: number; // Taux TVA spécifique (19%, 7%, 0%)
+
+  @Column({ name: 'tax_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
+  taxAmount: number; // Montant TVA calculé pour cette ligne
+
+  @Column({ name: 'is_taxable', type: 'boolean', default: true })
+  isTaxable: boolean; // Si cette ligne est soumise à TVA
+
+  // 🆕 COMPTABILITÉ
+  @Column({ name: 'taxable_account', length: 200, nullable: true })
+  taxableAccount: string; // Compte G.Taxable (ex: "PRESTATIONS DE SERVICE IMPORT")
+
+  @Column({ name: 'non_taxable_account', length: 200, nullable: true })
+  nonTaxableAccount: string; // Compte Non Taxable (ex: "PRESTATIONS DE SERVICE EN SUISSE")
+
+  // 🆕 CLASSIFICATION
+  @Column({ name: 'is_debours', type: 'boolean', default: false })
+  isDebours: boolean; // Indicateur débours (frais avancés sans marge)
+
+  @Column({ name: 'ca_type', length: 50, nullable: true, default: 'Oui' })
+  caType: string; // Type CA: "Oui", "Non", "Oui débours"
+
   // Métadonnées
   @Column({ name: 'line_order', type: 'integer', default: 1 })
   lineOrder: number;

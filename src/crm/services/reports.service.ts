@@ -37,14 +37,27 @@ export class ReportsService {
   ) {}
 
   /**
+   * 🎯 Helper: Crée une plage de dates inclusive (début à 00:00:00, fin à 23:59:59)
+   */
+  private createDateRange(startDateStr: string, endDateStr: string) {
+    const startDate = new Date(startDateStr);
+    startDate.setHours(0, 0, 0, 0); // Début de la journée
+    
+    const endDate = new Date(endDateStr);
+    endDate.setHours(23, 59, 59, 999); // Fin de la journée
+    
+    return Between(startDate, endDate);
+  }
+
+  /**
    * Générer un rapport global CRM
    */
   async generateGlobalReport(filters: ReportFilterDto): Promise<GlobalReport> {
     const whereClause: any = {};
     
-    // Filtres de période
+    // Filtres de période (inclusif: début à 00:00:00, fin à 23:59:59)
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
 
     // Récupérer tous les commerciaux ou filtrer
@@ -129,7 +142,7 @@ export class ReportsService {
     const whereClause: any = { assignedToId: commercialId };
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
 
     // Prospects
@@ -167,7 +180,7 @@ export class ReportsService {
     };
     
     if (filters.startDate && filters.endDate) {
-      quoteWhereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      quoteWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
 
     const quotes = await this.quoteRepository.find({
@@ -203,7 +216,7 @@ export class ReportsService {
       where: {
         assignedTo: commercialId,
         ...(filters.startDate && filters.endDate && {
-          scheduledAt: Between(new Date(filters.startDate), new Date(filters.endDate)),
+          scheduledAt: this.createDateRange(filters.startDate, filters.endDate),
         }),
       },
     });
@@ -278,7 +291,7 @@ export class ReportsService {
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
     
     if (filters.status) {
@@ -358,7 +371,7 @@ export class ReportsService {
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
     
     if (filters.opportunityStage) {
@@ -420,7 +433,7 @@ export class ReportsService {
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
     
     if (filters.quoteStatus) {
@@ -429,7 +442,7 @@ export class ReportsService {
 
     const quotes = await this.quoteRepository.find({
       where: whereClause,
-      relations: ['commercial', 'creator', 'opportunity', 'lead'],
+      relations: ['commercial', 'creator', 'opportunity', 'lead', 'items'], // ✅ Charger les items pour recalculer le total avec TVA par ligne
       order: { createdAt: 'DESC' },
     });
 
@@ -444,6 +457,26 @@ export class ReportsService {
       let assignedCommercial = 'N/A';
       if (quote.commercial) {
         assignedCommercial = `${quote.commercial.prenom} ${quote.commercial.nom}`;
+      }
+
+      // ✅ Charger les commerciaux multiples assignés avec leurs noms complets
+      let commercialIds = [];
+      if ((quote as any).commercialIds && Array.isArray((quote as any).commercialIds)) {
+        const ids = (quote as any).commercialIds;
+        
+        // Charger les objets personnels complets pour chaque ID
+        const commercials = await this.personnelRepository.find({
+          where: { id: In(ids) },
+          select: ['id', 'nom', 'prenom'],
+        });
+        
+        // Créer un tableau d'objets avec nom complet
+        commercialIds = commercials.map(c => ({
+          id: c.id,
+          nom: c.nom,
+          prenom: c.prenom,
+          nomComplet: `${c.prenom} ${c.nom}`,
+        }));
       }
 
       quoteReports.push({
@@ -467,6 +500,8 @@ export class ReportsService {
         leadId: quote.leadId,
         opportunityId: quote.opportunityId,
         assignedCommercial,
+        commercialIds, // ✅ Ajouter les commerciaux multiples avec leurs noms complets
+        items: quote.items || [], // ✅ Ajouter les items pour le calcul de TVA par ligne côté frontend
         createdAt: quote.createdAt,
         sentAt: quote.sentAt,
         acceptedAt: quote.acceptedAt,
@@ -485,7 +520,7 @@ export class ReportsService {
     const whereClause: any = {};
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = Between(new Date(filters.startDate), new Date(filters.endDate));
+      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
 
     if (filters.commercialId) {
@@ -540,10 +575,7 @@ export class ReportsService {
       };
 
       if (filters.startDate && filters.endDate) {
-        activityWhereClause.createdAt = Between(
-          new Date(filters.startDate),
-          new Date(filters.endDate),
-        );
+        activityWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
       }
 
       // Récupérer toutes les activités du commercial
@@ -642,10 +674,7 @@ export class ReportsService {
     // Récupérer toutes les cotations en une seule requête
     const quoteWhereClause: any = {};
     if (filters.startDate && filters.endDate) {
-      quoteWhereClause.createdAt = Between(
-        new Date(filters.startDate),
-        new Date(filters.endDate),
-      );
+      quoteWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
     }
 
     const allQuotes = await this.quoteRepository.find({

@@ -91,22 +91,62 @@ export class QuotesService {
   /**
    * Génère un numéro de devis unique (format: Q25/0629)
    */
+  /**
+   * Génère un numéro de cotation unique
+   * Format: Q{Année}/{Mois}{Séquence}
+   * Exemple: Q25/110001, Q25/110002, Q25/120001 (mois suivant)
+   * 
+   * LOGIQUE SIMPLIFIÉE:
+   * 1. Chercher le dernier numéro du mois actuel dans la BDD
+   * 2. Extraire sa séquence et incrémenter de 1
+   * 3. Si aucun devis ce mois → commencer à 0001
+   */
+  /**
+   * 🎯 Génère un numéro de cotation avec année/mois-séquence
+   * Format: Q25/11-1, Q25/11-2, Q25/12-1, Q25/12-2...
+   * La séquence redémarre à 1 chaque nouveau mois
+   */
   private async generateQuoteNumber(): Promise<string> {
-    const year = new Date().getFullYear().toString().slice(-2);
-    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    try {
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2); // 2 derniers chiffres de l'année (25 pour 2025)
+      const month = (now.getMonth() + 1).toString().padStart(2, '0'); // Mois sur 2 chiffres (01-12)
+      
+      // Chercher le dernier numéro du mois actuel
+      // Format attendu: Q25/11-X où X est la séquence
+      const pattern = `Q${year}/${month}-%`;
+      
+      const result = await this.quoteRepository
+        .createQueryBuilder('quote')
+        .select('quote.quoteNumber', 'quoteNumber')
+        .where('quote.quoteNumber LIKE :pattern', { pattern })
+        .orderBy('quote.createdAt', 'DESC')
+        .limit(1)
+        .getRawOne();
 
-    // Compter les devis du mois actuel
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+      let sequence = 1; // Par défaut, premier devis du mois
 
-    const count = await this.quoteRepository.count({
-      where: {
-        createdAt: Between(startOfMonth, endOfMonth),
-      },
-    });
+      if (result && result.quoteNumber) {
+        // Extraire la séquence du dernier numéro (ex: "Q25/11-5" → 5)
+        const match = result.quoteNumber.match(/-(\d+)$/);
+        if (match) {
+          sequence = parseInt(match[1], 10) + 1;
+        }
+      }
 
-    const sequence = (count + 1).toString().padStart(4, '0');
-    return `Q${year}/${month}${sequence.slice(-2)}`;
+      const quoteNumber = `Q${year}/${month}-${sequence}`;
+      console.log(`✅ [QUOTE_NUMBER] Numéro généré: ${quoteNumber} (année: ${year}, mois: ${month}, séquence: ${sequence})`);
+      return quoteNumber;
+    } catch (error) {
+      console.error('❌ [QUOTE_NUMBER] Erreur lors de la génération:', error);
+      // Fallback: utiliser timestamp si erreur
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2);
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
+      const fallback = `Q${year}/${month}-${Date.now()}`;
+      console.warn(`⚠️ [QUOTE_NUMBER] Utilisation du fallback: ${fallback}`);
+      return fallback;
+    }
   }
 
   /**
@@ -179,11 +219,28 @@ export class QuotesService {
     // Sous-total HT (basé sur les prix de vente convertis en TND)
     quote.subtotal = quote.totalOffers;
     
-    // TVA et Total TTC (en TND)
-    quote.taxAmount = (quote.subtotal * (quote.taxRate || 19)) / 100;
+    // ✅ CORRECTION MAJEURE: Calculer la TVA ligne par ligne au lieu d'une TVA globale
+    // Chaque ligne peut avoir un taux de TVA différent (0%, 7%, 13%, 19%, etc.)
+    quote.taxAmount = quote.items.reduce((sum, item) => {
+      const conversionRate = (item as any).conversionRate || 1;
+      const taxRate = (item as any).taxRate || 19;
+      const isTaxable = (item as any).isTaxable !== false; // Par défaut true
+      
+      if (!isTaxable) return sum; // Ligne non taxable, TVA = 0
+      
+      // Total HT de la ligne en TND
+      const lineTotal = item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate;
+      
+      // TVA de la ligne = Total HT × (Taux TVA / 100)
+      const lineTax = lineTotal * (taxRate / 100);
+      
+      return sum + lineTax;
+    }, 0);
+    
+    // Total TTC = Sous-total HT + TVA totale (somme des TVA de chaque ligne)
     quote.total = quote.subtotal + quote.taxAmount;
     
-    console.log('💰 [Backend] Totaux calculés en TND:', {
+    console.log('💰 [Backend] Totaux calculés en TND (TVA par ligne):', {
       quoteNumber: quote.quoteNumber,
       totalOffers: quote.totalOffers,
       taxAmount: quote.taxAmount,
@@ -623,8 +680,51 @@ export class QuotesService {
       console.log('🔧 [UPDATE] Déchargement relation client + assignation clientId:', updateQuoteDto.clientId);
     }
 
-    // Mettre à jour les champs principaux (SAUF leadId, opportunityId, clientId qui sont déjà traités)
-    const { leadId, opportunityId, clientId, ...otherFields } = updateQuoteDto;
+    // 🆕 FIX: Décharger les relations de transport (armateur, navire, ports, aéroports)
+    if ('armateurId' in updateQuoteDto) {
+      quote.armateur = undefined;
+      quote.armateurId = updateQuoteDto.armateurId;
+      console.log('🔧 [UPDATE] Déchargement relation armateur + assignation armateurId:', updateQuoteDto.armateurId);
+    }
+    if ('navireId' in updateQuoteDto) {
+      quote.navire = undefined;
+      quote.navireId = updateQuoteDto.navireId;
+      console.log('🔧 [UPDATE] Déchargement relation navire + assignation navireId:', updateQuoteDto.navireId);
+    }
+    if ('portEnlevementId' in updateQuoteDto) {
+      quote.portEnlevement = undefined;
+      quote.portEnlevementId = updateQuoteDto.portEnlevementId;
+      console.log('🔧 [UPDATE] Déchargement relation portEnlevement + assignation portEnlevementId:', updateQuoteDto.portEnlevementId);
+    }
+    if ('portLivraisonId' in updateQuoteDto) {
+      quote.portLivraison = undefined;
+      quote.portLivraisonId = updateQuoteDto.portLivraisonId;
+      console.log('🔧 [UPDATE] Déchargement relation portLivraison + assignation portLivraisonId:', updateQuoteDto.portLivraisonId);
+    }
+    if ('aeroportEnlevementId' in updateQuoteDto) {
+      quote.aeroportEnlevement = undefined;
+      quote.aeroportEnlevementId = updateQuoteDto.aeroportEnlevementId;
+      console.log('🔧 [UPDATE] Déchargement relation aeroportEnlevement + assignation aeroportEnlevementId:', updateQuoteDto.aeroportEnlevementId);
+    }
+    if ('aeroportLivraisonId' in updateQuoteDto) {
+      quote.aeroportLivraison = undefined;
+      quote.aeroportLivraisonId = updateQuoteDto.aeroportLivraisonId;
+      console.log('🔧 [UPDATE] Déchargement relation aeroportLivraison + assignation aeroportLivraisonId:', updateQuoteDto.aeroportLivraisonId);
+    }
+
+    // Mettre à jour les champs principaux (SAUF les IDs de relation qui sont déjà traités)
+    const { 
+      leadId, 
+      opportunityId, 
+      clientId, 
+      armateurId, 
+      navireId, 
+      portEnlevementId, 
+      portLivraisonId, 
+      aeroportEnlevementId, 
+      aeroportLivraisonId,
+      ...otherFields 
+    } = updateQuoteDto;
     Object.assign(quote, otherFields);
     
     console.log('✅ [UPDATE] Quote après Object.assign:', {
@@ -704,6 +804,44 @@ export class QuotesService {
       updateData.clientId = updateQuoteDto.clientId;
       console.log('🔧 [UPDATE] Forçage clientId:', updateQuoteDto.clientId, '(type:', typeof updateQuoteDto.clientId, ')');
     }
+
+    // 🆕 FIX: Forcer aussi les champs de transport
+    if ('armateurId' in updateQuoteDto) {
+      updateData.armateurId = updateQuoteDto.armateurId;
+      console.log('🔧 [UPDATE] Forçage armateurId:', updateQuoteDto.armateurId, '(type:', typeof updateQuoteDto.armateurId, ')');
+    }
+    if ('navireId' in updateQuoteDto) {
+      updateData.navireId = updateQuoteDto.navireId;
+      console.log('🔧 [UPDATE] Forçage navireId:', updateQuoteDto.navireId, '(type:', typeof updateQuoteDto.navireId, ')');
+    }
+    if ('portEnlevementId' in updateQuoteDto) {
+      updateData.portEnlevementId = updateQuoteDto.portEnlevementId;
+      console.log('🔧 [UPDATE] Forçage portEnlevementId:', updateQuoteDto.portEnlevementId, '(type:', typeof updateQuoteDto.portEnlevementId, ')');
+    }
+    if ('portLivraisonId' in updateQuoteDto) {
+      updateData.portLivraisonId = updateQuoteDto.portLivraisonId;
+      console.log('🔧 [UPDATE] Forçage portLivraisonId:', updateQuoteDto.portLivraisonId, '(type:', typeof updateQuoteDto.portLivraisonId, ')');
+    }
+    if ('aeroportEnlevementId' in updateQuoteDto) {
+      updateData.aeroportEnlevementId = updateQuoteDto.aeroportEnlevementId;
+      console.log('🔧 [UPDATE] Forçage aeroportEnlevementId:', updateQuoteDto.aeroportEnlevementId, '(type:', typeof updateQuoteDto.aeroportEnlevementId, ')');
+    }
+    if ('aeroportLivraisonId' in updateQuoteDto) {
+      updateData.aeroportLivraisonId = updateQuoteDto.aeroportLivraisonId;
+      console.log('🔧 [UPDATE] Forçage aeroportLivraisonId:', updateQuoteDto.aeroportLivraisonId, '(type:', typeof updateQuoteDto.aeroportLivraisonId, ')');
+    }
+    if ('hbl' in updateQuoteDto) {
+      updateData.hbl = updateQuoteDto.hbl;
+      console.log('🔧 [UPDATE] Forçage hbl:', updateQuoteDto.hbl);
+    }
+    if ('mbl' in updateQuoteDto) {
+      updateData.mbl = updateQuoteDto.mbl;
+      console.log('🔧 [UPDATE] Forçage mbl:', updateQuoteDto.mbl);
+    }
+    if ('condition' in updateQuoteDto) {
+      updateData.condition = updateQuoteDto.condition;
+      console.log('🔧 [UPDATE] Forçage condition:', updateQuoteDto.condition);
+    }
     
     // ✅ TOUJOURS exécuter l'UPDATE si au moins un ID est présent
     if (Object.keys(updateData).length > 0) {
@@ -717,12 +855,30 @@ export class QuotesService {
         leadId: finalQuote.leadId,
         opportunityId: finalQuote.opportunityId,
         clientId: finalQuote.clientId,
+        armateurId: finalQuote.armateurId,
+        navireId: finalQuote.navireId,
+        portEnlevementId: finalQuote.portEnlevementId,
+        portLivraisonId: finalQuote.portLivraisonId,
+        aeroportEnlevementId: finalQuote.aeroportEnlevementId,
+        aeroportLivraisonId: finalQuote.aeroportLivraisonId,
+        hbl: finalQuote.hbl,
+        mbl: finalQuote.mbl,
+        condition: finalQuote.condition,
       });
       
       // Mettre à jour l'objet retourné
       updatedQuote.leadId = finalQuote.leadId;
       updatedQuote.opportunityId = finalQuote.opportunityId;
       updatedQuote.clientId = finalQuote.clientId;
+      updatedQuote.armateurId = finalQuote.armateurId;
+      updatedQuote.navireId = finalQuote.navireId;
+      updatedQuote.portEnlevementId = finalQuote.portEnlevementId;
+      updatedQuote.portLivraisonId = finalQuote.portLivraisonId;
+      updatedQuote.aeroportEnlevementId = finalQuote.aeroportEnlevementId;
+      updatedQuote.aeroportLivraisonId = finalQuote.aeroportLivraisonId;
+      updatedQuote.hbl = finalQuote.hbl;
+      updatedQuote.mbl = finalQuote.mbl;
+      updatedQuote.condition = finalQuote.condition;
     } else {
       console.log('⚠️ [UPDATE] Aucun ID de liaison présent dans updateQuoteDto - pas de forçage');
     }
@@ -823,13 +979,22 @@ export class QuotesService {
    * Générer le HTML pour l'email de la cotation
    */
   private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto): string {
-    // ✅ Le total est déjà calculé EN TND avec conversion dans calculateTotals()
+    // ✅ Le total est déjà calculé EN TND avec conversion ET TVA par ligne dans calculateTotals()
     const total = quote.total || 0;
 
+    // ✅ Format cohérent avec le frontend (jusqu'à 3 décimales pour TND)
     const formatAmount = (amount: number) => {
+      let minDecimals = 0;
+      let maxDecimals = 3; // Pour TND, autoriser jusqu'à 3 décimales (millimes)
+      
+      // Ne pas forcer les décimales si le nombre est entier
+      if (amount % 1 !== 0) {
+        minDecimals = 0; // Laisser JavaScript décider
+      }
+      
       return amount.toLocaleString('fr-FR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        minimumFractionDigits: minDecimals,
+        maximumFractionDigits: maxDecimals
       });
     };
 
@@ -1090,12 +1255,31 @@ export class QuotesService {
     quote.acceptedAt = new Date();
 
     // ✅ Mettre à jour les champs de transport (fiche dossier)
-    if (acceptQuoteDto.armateurId !== undefined) quote.armateurId = acceptQuoteDto.armateurId;
-    if (acceptQuoteDto.navireId !== undefined) quote.navireId = acceptQuoteDto.navireId;
-    if (acceptQuoteDto.portEnlevementId !== undefined) quote.portEnlevementId = acceptQuoteDto.portEnlevementId;
-    if (acceptQuoteDto.portLivraisonId !== undefined) quote.portLivraisonId = acceptQuoteDto.portLivraisonId;
-    if (acceptQuoteDto.aeroportEnlevementId !== undefined) quote.aeroportEnlevementId = acceptQuoteDto.aeroportEnlevementId;
-    if (acceptQuoteDto.aeroportLivraisonId !== undefined) quote.aeroportLivraisonId = acceptQuoteDto.aeroportLivraisonId;
+    // 🆕 FIX: Décharger les relations TypeORM avant d'assigner les IDs
+    if (acceptQuoteDto.armateurId !== undefined) {
+      quote.armateur = undefined;
+      quote.armateurId = acceptQuoteDto.armateurId;
+    }
+    if (acceptQuoteDto.navireId !== undefined) {
+      quote.navire = undefined;
+      quote.navireId = acceptQuoteDto.navireId;
+    }
+    if (acceptQuoteDto.portEnlevementId !== undefined) {
+      quote.portEnlevement = undefined;
+      quote.portEnlevementId = acceptQuoteDto.portEnlevementId;
+    }
+    if (acceptQuoteDto.portLivraisonId !== undefined) {
+      quote.portLivraison = undefined;
+      quote.portLivraisonId = acceptQuoteDto.portLivraisonId;
+    }
+    if (acceptQuoteDto.aeroportEnlevementId !== undefined) {
+      quote.aeroportEnlevement = undefined;
+      quote.aeroportEnlevementId = acceptQuoteDto.aeroportEnlevementId;
+    }
+    if (acceptQuoteDto.aeroportLivraisonId !== undefined) {
+      quote.aeroportLivraison = undefined;
+      quote.aeroportLivraisonId = acceptQuoteDto.aeroportLivraisonId;
+    }
     if (acceptQuoteDto.hbl !== undefined) quote.hbl = acceptQuoteDto.hbl;
     if (acceptQuoteDto.mbl !== undefined) quote.mbl = acceptQuoteDto.mbl;
     if (acceptQuoteDto.condition !== undefined) quote.condition = acceptQuoteDto.condition;

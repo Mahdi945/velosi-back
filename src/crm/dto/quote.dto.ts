@@ -186,6 +186,39 @@ export class CreateQuoteItemDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // 🆕 TAXATION PAR LIGNE
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  taxRate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  taxAmount?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isTaxable?: boolean;
+
+  @IsOptional()
+  @IsString()
+  taxableAccount?: string;
+
+  @IsOptional()
+  @IsString()
+  nonTaxableAccount?: string;
+
+  // 🆕 CLASSIFICATION
+  @IsOptional()
+  @IsBoolean()
+  isDebours?: boolean;
+
+  @IsOptional()
+  @IsString()
+  caType?: string;
 }
 
 export class UpdateQuoteItemDto extends CreateQuoteItemDto {
