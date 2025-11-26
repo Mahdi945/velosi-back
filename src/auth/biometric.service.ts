@@ -104,9 +104,11 @@ export class BiometricService {
   ): Promise<{ success: boolean; user?: any }> {
     try {
       console.log(`🔍 Vérification biométrique pour ${userType} #${userId}`);
+      console.log(`📊 Hash reçu (longueur: ${biometricData?.length || 0})`);
 
       // Valider les données biométriques
       if (!biometricData || biometricData.length < 32) {
+        console.log('❌ Données biométriques invalides (trop courtes)');
         throw new UnauthorizedException('Données biométriques invalides');
       }
 
@@ -114,25 +116,34 @@ export class BiometricService {
       const repository = userType === 'personnel' ? personnelRepository : clientRepository;
       
       if (!repository) {
+        console.log('❌ Repository non disponible');
         throw new UnauthorizedException('Repository non disponible');
       }
 
       const user = await repository.findOne({ where: { id: userId } });
       
       if (!user) {
+        console.log(`❌ Utilisateur ${userType} #${userId} non trouvé`);
         throw new UnauthorizedException('Utilisateur non trouvé');
       }
 
       // Vérifier si la biométrie est activée
       if (!user.biometric_enabled || !user.biometric_hash) {
+        console.log(`❌ Biométrie non activée pour ${userType} #${userId}`);
         throw new UnauthorizedException('Authentification biométrique non configurée');
       }
 
-      // Comparer le hash biométrique
+      console.log(`🔐 Hash en BD (longueur: ${user.biometric_hash?.length || 0})`);
+      console.log(`🔍 Comparaison avec bcrypt.compare()...`);
+
+      // ✅ CORRECTION: Comparer le hash biométrique
+      // bcrypt.compare() prend les données en clair et le hash
       const isValid = await bcrypt.compare(biometricData, user.biometric_hash);
 
+      console.log(`📊 Résultat bcrypt.compare: ${isValid}`);
+
       if (!isValid) {
-        console.log('❌ Empreinte biométrique invalide');
+        console.log('❌ Empreinte biométrique invalide - Hash ne correspond pas');
         throw new UnauthorizedException('Empreinte biométrique invalide');
       }
 
@@ -146,6 +157,8 @@ export class BiometricService {
           email: user.email,
           userType,
           role: user.role || 'client',
+          firstName: user.prenom || user.nom,
+          lastName: user.nom || '',
         },
       };
     } catch (error) {

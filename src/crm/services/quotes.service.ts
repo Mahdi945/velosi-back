@@ -981,6 +981,46 @@ export class QuotesService {
   private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto): string {
     // ✅ Le total est déjà calculé EN TND avec conversion ET TVA par ligne dans calculateTotals()
     const total = quote.total || 0;
+    
+    // 🆕 Calculer les totaux FRET par devise (sans conversion)
+    const freightTotalsByDevise = new Map<string, number>();
+    (quote.items || [])
+      .filter(item => item.itemType === 'freight')
+      .forEach(item => {
+        const currency = (item as any).currency || 'TND';
+        const itemTotal = (item.sellingPrice || 0) * (item.quantity || 0);
+        freightTotalsByDevise.set(
+          currency,
+          (freightTotalsByDevise.get(currency) || 0) + itemTotal
+        );
+      });
+    
+    // 🆕 Calculer les totaux FRAIS ANNEXES par devise (sans conversion)
+    const additionalTotalsByDevise = new Map<string, number>();
+    (quote.items || [])
+      .filter(item => item.itemType === 'additional_cost')
+      .forEach(item => {
+        const currency = (item as any).currency || 'TND';
+        const itemTotal = (item.sellingPrice || 0) * (item.quantity || 0);
+        additionalTotalsByDevise.set(
+          currency,
+          (additionalTotalsByDevise.get(currency) || 0) + itemTotal
+        );
+      });
+
+    // 🆕 Générer le HTML pour afficher les montants par devise
+    const generateAmountsByDevise = (totalsByDevise: Map<string, number>) => {
+      const devises = Array.from(totalsByDevise.entries());
+      if (devises.length === 0) return '<div class="total-item-value">0 TND</div>';
+      
+      return devises.map(([currency, amount]) => {
+        const symbol = currency === 'TND' ? 'TND' : 
+                       currency === 'EUR' ? '€' : 
+                       currency === 'USD' ? '$' : 
+                       currency === 'GBP' ? '£' : currency;
+        return `<div class="total-item-value">${formatAmount(amount)} ${symbol}</div>`;
+      }).join('');
+    };
 
     // ✅ Format cohérent avec le frontend (jusqu'à 3 décimales pour TND)
     const formatAmount = (amount: number) => {
@@ -1003,8 +1043,9 @@ export class QuotesService {
     };
 
     // Générer le lien de visualisation avec tracking
-    // Supporte localhost (dev) et production (Vercel: https://velosi-front.vercel.app)
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+    // Production: https://wyselogiquote.com (domaine principal)
+    // Dev: localhost
+    const frontendUrl = process.env.FRONTEND_URL || 'https://wyselogiquote.com';
     const viewLink = `${frontendUrl}/public/quote-view/${quote.id}`;
 
     return `
@@ -1085,6 +1126,43 @@ export class QuotesService {
   box-shadow: 0 4px 10px rgba(76, 29, 149, 0.25);
   transform: translateY(-1px);
 }
+          .totals-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+          }
+          .total-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+          }
+          .total-item-freight {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            border-color: #2196f3;
+          }
+          .total-item-additional {
+            background: linear-gradient(135deg, #e0f2f1 0%, #b2dfdb 100%);
+            border-color: #009688;
+          }
+          .total-item-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+            font-weight: 500;
+          }
+          .total-item-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+          }
+          .total-item-currency {
+            font-size: 11px;
+            color: #888;
+            margin-top: 3px;
+          }
 
           .amount-label {
             font-size: 14px;
@@ -1156,6 +1234,19 @@ export class QuotesService {
               </div>
             ` : ''}
 
+            <!-- Totaux FRET et FRAIS ANNEXES (en grille 2 colonnes) -->
+            <div class="totals-grid">
+              <div class="total-item total-item-freight">
+                <div class="total-item-label">🚚 FRET (Transport)</div>
+                ${generateAmountsByDevise(freightTotalsByDevise)}
+              </div>
+              <div class="total-item total-item-additional">
+                <div class="total-item-label">📄 FRAIS ANNEXES</div>
+                ${generateAmountsByDevise(additionalTotalsByDevise)}
+              </div>
+            </div>
+
+            <!-- Total TTC -->
             <div class="amount-box">
               <div class="amount-label">Montant Total TTC</div>
               <div class="amount-value">${formatAmount(total)} TND</div>
