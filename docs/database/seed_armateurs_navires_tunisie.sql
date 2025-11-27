@@ -12,13 +12,9 @@
 -- Désactiver temporairement les contraintes de clé étrangère
 SET session_replication_role = 'replica';
 
--- Vider la table navires (dépendante de armateurs)
-TRUNCATE TABLE navires CASCADE;
-RESET sequence navires_id_seq RESTART WITH 1;
-
--- Vider la table armateurs
-TRUNCATE TABLE armateurs CASCADE;
-RESET sequence armateurs_id_seq RESTART WITH 1;
+-- Vider les tables avec réinitialisation automatique des séquences
+TRUNCATE TABLE navires RESTART IDENTITY CASCADE;
+TRUNCATE TABLE armateurs RESTART IDENTITY CASCADE;
 
 -- Réactiver les contraintes de clé étrangère
 SET session_replication_role = 'origin';

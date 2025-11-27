@@ -1787,6 +1787,55 @@ export class AuthController {
   }
 
   /**
+   * Récupérer la credential biométrique stockée en BD
+   * Endpoint NON authentifié pour permettre la connexion
+   */
+  @Post('biometric/get-credential')
+  @HttpCode(HttpStatus.OK)
+  async getBiometricCredential(
+    @Body() credentialData: { 
+      userId: number; 
+      userType: 'personnel' | 'client';
+    }
+  ) {
+    try {
+      console.log('🔍 Récupération credential pour:', credentialData.userId);
+
+      if (!credentialData.userId || !credentialData.userType) {
+        throw new BadRequestException('userId et userType requis');
+      }
+
+      const status = await this.authService.isBiometricEnabled(
+        credentialData.userId.toString(),
+        credentialData.userType
+      );
+
+      if (!status.enabled) {
+        return {
+          success: false,
+          enabled: false,
+          message: 'Aucune empreinte enregistrée'
+        };
+      }
+
+      // Récupérer le hash biométrique (credential ID)
+      const credential = await this.authService.getBiometricCredential(
+        credentialData.userId,
+        credentialData.userType
+      );
+
+      return {
+        success: true,
+        enabled: true,
+        biometricHash: credential,
+      };
+    } catch (error) {
+      console.error('❌ Erreur récupération credential:', error);
+      throw new BadRequestException(`Erreur: ${error.message}`);
+    }
+  }
+
+  /**
    * Vérifier si un utilisateur a activé la biométrie
    */
   @Get('biometric/status')

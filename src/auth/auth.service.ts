@@ -2007,6 +2007,7 @@ export class AuthService {
 
   /**
    * Enregistrer une empreinte biométrique pour un utilisateur
+   * ✅ CORRECTION : Pour WebAuthn, on stocke directement la credential ID (pas de bcrypt)
    */
   async registerBiometric(
     userId: string,
@@ -2021,10 +2022,6 @@ export class AuthService {
         throw new Error('Données biométriques invalides');
       }
 
-      // Générer un hash sécurisé supplémentaire côté serveur
-      const salt = await bcrypt.genSalt(12);
-      const serverHash = await bcrypt.hash(biometricHash, salt);
-
       // Mettre à jour l'utilisateur
       const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
       
@@ -2034,13 +2031,15 @@ export class AuthService {
         throw new Error('Utilisateur non trouvé');
       }
 
-      user.biometric_hash = serverHash;
+      // ✅ CORRECTION : Pour WebAuthn, stocker directement la credential ID
+      // Pas de bcrypt car c'est déjà un identifiant unique généré par WebAuthn
+      user.biometric_hash = biometricHash;
       user.biometric_enabled = true;
       user.biometric_registered_at = new Date();
 
       await (repository as any).save(user);
 
-      console.log(`✅ Empreinte biométrique enregistrée pour ${userType} #${userId}`);
+      console.log(`✅ Credential WebAuthn enregistrée pour ${userType} #${userId}`);
 
       return {
         success: true,
@@ -2054,6 +2053,8 @@ export class AuthService {
 
   /**
    * Vérifier une empreinte biométrique
+   * ✅ CORRECTION : Le frontend a déjà vérifié l'empreinte via WebAuthn
+   * On vérifie juste que la credential correspond à celle en BD
    */
   async verifyBiometric(
     userId: number,
@@ -2082,15 +2083,17 @@ export class AuthService {
         throw new UnauthorizedException('Authentification biométrique non configurée');
       }
 
-      // Comparer le hash biométrique
-      const isValid = await bcrypt.compare(biometricHash, user.biometric_hash);
+      // ✅ CORRECTION : Pour WebAuthn, le hash est la credential ID
+      // On compare directement (pas de bcrypt pour les credentials WebAuthn)
+      // Le frontend a déjà vérifié l'empreinte via WebAuthn
+      const isValid = (biometricHash === user.biometric_hash);
 
       if (!isValid) {
-        console.log('❌ Empreinte biométrique invalide');
-        throw new UnauthorizedException('Empreinte biométrique invalide');
+        console.log('❌ Credential biométrique invalide');
+        throw new UnauthorizedException('Credential biométrique invalide');
       }
 
-      console.log(`✅ Empreinte biométrique valide pour ${userType} #${userId}`);
+      console.log(`✅ Credential biométrique valide pour ${userType} #${userId}`);
 
       return {
         success: true,
@@ -2154,6 +2157,29 @@ export class AuthService {
     } catch (error) {
       console.error('❌ Erreur génération tokens:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Récupérer la credential biométrique (hash) stockée en BD
+   */
+  async getBiometricCredential(
+    userId: number,
+    userType: 'personnel' | 'client'
+  ): Promise<string | null> {
+    try {
+      const repository = userType === 'personnel' ? this.personnelRepository : this.clientRepository;
+      
+      const user = await repository.findOne({ where: { id: userId } });
+      
+      if (!user || !user.biometric_enabled || !user.biometric_hash) {
+        return null;
+      }
+
+      return user.biometric_hash;
+    } catch (error) {
+      console.error('❌ Erreur récupération credential:', error);
+      return null;
     }
   }
 
