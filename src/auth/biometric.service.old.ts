@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+/* import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
@@ -7,7 +7,7 @@ import { Personnel } from '../entities/personnel.entity';
 import { Client } from '../entities/client.entity';
 
 // ================================================================
-// DTOs SIMPLIFIÉS pour les opérations biométriques
+// DTOs pour les opérations biométriques
 // ================================================================
 
 export interface RegisterBiometricDto {
@@ -15,11 +15,11 @@ export interface RegisterBiometricDto {
   userType: 'personnel' | 'client';
   credentialId: string; // ID unique du credential WebAuthn (base64url)
   publicKey: string; // Clé publique au format PEM ou JWK
-  userHandle?: string; // User handle pour resident keys (base64)
   deviceName?: string; // Nom de l'appareil (optionnel)
   deviceType?: string; // Type d'appareil (mobile, desktop, tablet)
   browserInfo?: string; // Info sur le navigateur
-  isResidentKey?: boolean; // ✅ NOUVEAU: Indiquer si c'est un Resident Key
+  isResidentKey?: boolean; // Indique si c'est un Resident Key
+  userHandle?: string; // Handle utilisateur pour Resident Keys (optionnel)
 }
 
 export interface VerifyBiometricDto {
@@ -34,10 +34,16 @@ export interface BiometricCredentialInfo {
   credentialId: string;
   deviceName: string;
   deviceType: string | null;
+  isResidentKey: boolean;
   createdAt: Date;
   lastUsedAt: Date | null;
   isRecentlyUsed: boolean;
   counter: number;
+  userHandle: string | null;
+}
+
+export interface CheckBiometricStatusDto {
+  usernameOrEmail: string;
 }
 
 export interface BiometricStatusResponse {
@@ -46,11 +52,12 @@ export interface BiometricStatusResponse {
   registeredAt?: Date;
   userId?: number;
   userType?: 'personnel' | 'client';
+  hasResidentKey?: boolean;
   credentials?: BiometricCredentialInfo[];
 }
 
 // ================================================================
-// SERVICE BIOMÉTRIQUE SIMPLIFIÉ
+// SERVICE BIOMÉTRIQUE
 // ================================================================
 
 @Injectable()
@@ -66,12 +73,14 @@ export class BiometricService {
 
   /**
    * 🔐 Enregistrer un nouveau credential biométrique pour un utilisateur
-   * ✅ SIMPLIFIÉ: Support multi-appareils sans Resident Keys
-   */
+   * ✅ Support multi-appareils: n'écrase PAS les credentials existants
+   * ✅ Support Resident Keys (Passkeys) pour connexion sans username
+  
   async registerBiometric(dto: RegisterBiometricDto): Promise<{ 
     success: boolean; 
     message: string; 
-    credentialId: number;
+    credentialId: number; 
+    userHandle?: string;
   }> {
     try {
       console.log(`🔐 Enregistrement biométrique pour ${dto.userType} #${dto.userId}`);
@@ -81,66 +90,78 @@ export class BiometricService {
         credentialIdLength: dto.credentialId?.length || 0,
         credentialIdPreview: dto.credentialId?.substring(0, 30),
         publicKeyLength: dto.publicKey?.length || 0,
-        deviceName: dto.deviceName
+        publicKeyPreview: dto.publicKey?.substring(0, 30),
+        deviceName: dto.deviceName,
+        isResidentKey: dto.isResidentKey,
+        hasUserHandle: !!dto.userHandle
       });
 
       // Valider les données
+      // WebAuthn credential IDs font généralement 16-32 bytes, soit ~22-44 caractères en base64url
       if (!dto.credentialId || dto.credentialId.length < 16) {
-        throw new BadRequestException('credentialId invalide (trop court)');
+        console.error('❌ Validation échouée:', {
+          hasCredentialId: !!dto.credentialId,
+          length: dto.credentialId?.length || 0,
+          type: typeof dto.credentialId
+        });
+        throw new BadRequestException('Credential ID invalide (trop court - min 16 caractères requis)');
       }
 
       if (!dto.publicKey || dto.publicKey.length < 32) {
-        throw new BadRequestException('publicKey invalide (trop court)');
+        console.error('❌ Validation échouée:', {
+          hasPublicKey: !!dto.publicKey,
+          length: dto.publicKey?.length || 0,
+          type: typeof dto.publicKey
+        });
+        throw new BadRequestException('Clé publique invalide (min 32 caractères requis)');
       }
 
       // Vérifier que l'utilisateur existe
       let user: Personnel | Client;
       if (dto.userType === 'personnel') {
         user = await this.personnelRepository.findOne({ where: { id: dto.userId } });
+        if (!user) throw new BadRequestException('Personnel introuvable');
       } else {
         user = await this.clientRepository.findOne({ where: { id: dto.userId } });
+        if (!user) throw new BadRequestException('Client introuvable');
       }
 
-      if (!user) {
-        throw new BadRequestException(`Utilisateur ${dto.userType} #${dto.userId} introuvable`);
-      }
-
-      // Vérifier si le credential existe déjà
+      // Vérifier si le credential existe déjà (éviter les doublons)
       const existingCredential = await this.credentialRepository.findOne({
         where: { credential_id: dto.credentialId },
       });
 
       if (existingCredential) {
-        console.log('🔍 Credential existant trouvé:', {
-          id: existingCredential.id,
-          credentialId: existingCredential.credential_id.substring(0, 30),
-          personnel_id: existingCredential.personnel_id,
-          client_id: existingCredential.client_id,
-          device_name: existingCredential.device_name
-        });
+        console.log('⚠️ Credential déjà enregistré, mise à jour...');
+        existingCredential.device_name = dto.deviceName || existingCredential.device_name;
+        existingCredential.device_type = dto.deviceType || existingCredential.device_type;
+        existingCredential.browser_info = dto.browserInfo || existingCredential.browser_info;
+        existingCredential.is_resident_key = dto.isResidentKey ?? existingCredential.is_resident_key;
         
-        // Si c'est le même utilisateur, mettre à jour le credential
-        if ((dto.userType === 'personnel' && existingCredential.personnel_id === dto.userId) ||
-            (dto.userType === 'client' && existingCredential.client_id === dto.userId)) {
-          console.log('🔄 Même utilisateur - Mise à jour du credential existant');
-          existingCredential.device_name = dto.deviceName || existingCredential.device_name;
-          existingCredential.last_used_at = new Date();
-          const updated = await this.credentialRepository.save(existingCredential);
-          
-          return {
-            success: true,
-            message: 'Credential biométrique mis à jour (appareil déjà enregistré)',
-            credentialId: updated.id,
-          };
-        } else {
-          console.error('❌ Credential déjà utilisé par un autre utilisateur:', {
-            existingUserId: existingCredential.personnel_id || existingCredential.client_id,
-            existingUserType: existingCredential.user_type,
-            newUserId: dto.userId,
-            newUserType: dto.userType
-          });
-          throw new BadRequestException('Ce credential est déjà associé à un autre utilisateur');
+        if (existingCredential.is_resident_key && !existingCredential.user_handle) {
+          existingCredential.user_handle = dto.userHandle || BiometricCredential.generateUserHandle(
+            dto.userId,
+            dto.userType === 'personnel' ? UserType.PERSONNEL : UserType.CLIENT,
+          );
         }
+        
+        await this.credentialRepository.save(existingCredential);
+        return { 
+          success: true, 
+          message: 'Credential mis à jour', 
+          credentialId: existingCredential.id,
+          userHandle: existingCredential.user_handle || undefined,
+        };
+      }
+
+      // Générer un user_handle pour Resident Keys
+      let userHandle: string | null = null;
+      if (dto.isResidentKey) {
+        userHandle = dto.userHandle || BiometricCredential.generateUserHandle(
+          dto.userId,
+          dto.userType === 'personnel' ? UserType.PERSONNEL : UserType.CLIENT,
+        );
+        console.log(`🔑 Resident Key activé, user_handle généré: ${userHandle.substring(0, 20)}...`);
       }
 
       // Créer le nouveau credential
@@ -154,8 +175,8 @@ export class BiometricService {
         device_name: dto.deviceName || 'Appareil inconnu',
         device_type: dto.deviceType || null,
         browser_info: dto.browserInfo || null,
-        is_resident_key: dto.isResidentKey ?? !!dto.userHandle, // ✅ Utiliser isResidentKey si fourni, sinon détecter via userHandle
-        user_handle: dto.userHandle || null, // ✅ Stocker le user handle
+        is_resident_key: dto.isResidentKey || false,
+        user_handle: userHandle,
         last_used_at: null,
       });
 
@@ -168,12 +189,13 @@ export class BiometricService {
       // Sauvegarder
       const saved = await this.credentialRepository.save(credential);
 
-      console.log(`✅ Credential biométrique enregistré: ID=${saved.id}, Device=${saved.device_name}`);
+      console.log(`✅ Credential biométrique enregistré: ID=${saved.id}, Device=${saved.device_name}, ResidentKey=${saved.is_resident_key}`);
 
       return {
         success: true,
         message: 'Credential biométrique enregistré avec succès',
         credentialId: saved.id,
+        userHandle: saved.user_handle || undefined,
       };
     } catch (error) {
       console.error('❌ Erreur enregistrement biométrique:', error);
@@ -186,7 +208,8 @@ export class BiometricService {
   /**
    * 🔍 Vérifier un credential biométrique et authentifier l'utilisateur
    * ✅ SIMPLIFIÉ: Utilise UNIQUEMENT le credentialId
-   */
+   * ✅ Support multi-appareils: vérifie le counter anti-replay
+   
   async verifyBiometric(dto: VerifyBiometricDto): Promise<{ 
     success: boolean; 
     user: any; 
@@ -195,97 +218,135 @@ export class BiometricService {
     try {
       console.log(`🔍 Vérification biométrique...`);
       console.log('📦 Données reçues:', {
-        credentialIdLength: dto.credentialId?.length,
-        credentialIdCOMPLET: dto.credentialId, // AFFICHER COMPLET pour débogage
-        hasSignature: !!dto.signature,
-        hasAuthData: !!dto.authenticatorData,
-        hasClientData: !!dto.clientDataJSON
+        credentialId: dto.credentialId?.substring(0, 30),
+        hasSignature: !!dto.signature
       });
 
       // ✅ SIMPLIFIÉ: Chercher UNIQUEMENT par credentialId
       if (!dto.credentialId) {
+        console.error('❌ credentialId manquant');
         throw new UnauthorizedException('credentialId requis pour l\'authentification biométrique');
       }
 
-      // Chercher le credential par son ID unique
-      let credential = await this.credentialRepository.findOne({
-        where: { credential_id: dto.credentialId },
-        relations: ['personnel', 'client'],
-      });
+      let credential: BiometricCredential | null = null;
 
-      if (!credential) {
-        // 🔄 FALLBACK: Chercher par correspondance partielle dans tous les credentials
-        console.log('⚠️ Credential exact non trouvé, tentative de fallback...');
-        
-        const allCredentials = await this.credentialRepository.find({
-          relations: ['personnel', 'client']
+      // Chercher le credential par son ID unique
+      if (dto.credentialId) {
+        console.log(`🔍 Recherche par credentialId: ${dto.credentialId.substring(0, 20)}...`);
+        credential = await this.credentialRepository.findOne({
+          where: { credential_id: dto.credentialId },
+          relations: ['personnel', 'client'],
+        });
+
+        if (credential) {
+          console.log(`✅ Credential trouvé par credentialId pour ${credential.user_type} #${credential.personnel_id || credential.client_id}`);
+        } else {
+          console.log(`⚠️ Credential introuvable avec ID: ${dto.credentialId}`);
+          console.log(`🔄 Tentative de recherche par userHandle...`);
+          
+          // FALLBACK: Chercher par userHandle si credentialId non trouvé
+          if (dto.userHandle) {
+            credential = await this.credentialRepository.findOne({
+              where: { user_handle: dto.userHandle },
+              relations: ['personnel', 'client'],
+            });
+            
+            if (credential) {
+              console.log(`✅ Credential trouvé par userHandle pour ${credential.user_type} #${credential.personnel_id || credential.client_id}`);
+            }
+          }
+          
+          // FALLBACK 2: Si toujours pas trouvé, chercher parmi TOUTES les credentials Resident Key
+          // et vérifier la signature avec chacune
+          if (!credential) {
+            console.log(`🔄 Recherche parmi toutes les credentials Resident Key...`);
+            const allResidentKeys = await this.credentialRepository.find({
+              where: { is_resident_key: true },
+              relations: ['personnel', 'client'],
+              take: 50 // Limite pour éviter trop de tentatives
+            });
+            
+            console.log(`📋 ${allResidentKeys.length} Resident Keys trouvées, test de signature...`);
+            
+            // On va essayer de vérifier la signature avec chaque credential
+            // La bonne credential sera celle dont la signature est valide
+            for (const testCredential of allResidentKeys) {
+              try {
+                // Tester si la signature correspond à cette credential
+                const isValid = await this.verifySignature(
+                  testCredential,
+                  dto.signature,
+                  dto.authenticatorData,
+                  dto.clientDataJSON
+                );
+                
+                if (isValid) {
+                  console.log(`✅ Signature valide trouvée pour credential ${testCredential.credential_id.substring(0, 20)}... (user: ${testCredential.user_type} #${testCredential.personnel_id || testCredential.client_id})`);
+                  credential = testCredential;
+                  break;
+                }
+              } catch (err) {
+                // Ignorer les erreurs de vérification, continuer avec la prochaine credential
+                continue;
+              }
+            }
+            
+            if (!credential) {
+              throw new UnauthorizedException('Aucune credential valide trouvée pour cette empreinte');
+            }
+          }
+        }
+      }
+      // Cas 2: Resident Key avec userHandle uniquement
+      else if (dto.userHandle) {
+        console.log(`🔑 Recherche par userHandle reçu:`, {
+          userHandle: dto.userHandle,
+          length: dto.userHandle.length,
+          first20: dto.userHandle.substring(0, 20)
         });
         
-        console.log(`🔍 Recherche parmi ${allCredentials.length} credential(s) en BD...`);
-        
-        // Essayer de trouver un credential qui CONTIENT le credentialId recherché
-        // ou dont le credentialId recherché CONTIENT celui de la BD
-        let foundCredential = null;
-        
-        for (const cred of allCredentials) {
-          const bdCredId = cred.credential_id;
-          const searchCredId = dto.credentialId;
-          
-          // Normaliser les deux formats (supprimer padding et convertir en minuscules)
-          const normalizedBd = bdCredId.replace(/=/g, '').toLowerCase();
-          const normalizedSearch = searchCredId.replace(/=/g, '').toLowerCase();
-          
-          // Aussi essayer de convertir base64 standard en base64url
-          const base64ToBase64url = (str: string) => str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-          const bdAsBase64url = base64ToBase64url(bdCredId).toLowerCase();
-          const searchAsBase64url = base64ToBase64url(searchCredId).toLowerCase();
-          
-          // Vérifier si c'est le même (plusieurs formats possibles)
-          if (bdCredId === searchCredId || 
-              normalizedBd === normalizedSearch ||
-              bdAsBase64url === searchAsBase64url) {
-            foundCredential = cred;
-            console.log('✅ Correspondance exacte trouvée (fallback)');
-            break;
-          }
-          
-          // Vérifier si l'un contient l'autre (cas de troncature)
-          if (bdCredId.includes(searchCredId) || searchCredId.includes(bdCredId) ||
-              normalizedBd.includes(normalizedSearch) || normalizedSearch.includes(normalizedBd)) {
-            foundCredential = cred;
-            console.log('⚠️ Correspondance partielle trouvée:', {
-              bdLength: bdCredId.length,
-              searchLength: searchCredId.length,
-              device: cred.device_name
-            });
-            break;
-          }
-        }
-        
-        if (foundCredential) {
-          credential = foundCredential;
-          console.log('✅ Credential trouvé via fallback');
-        } else {
-          // Si toujours pas trouvé, logger pour debug
-          console.error('❌ Credential introuvable même avec fallback:', {
-            'recherchéCOMPLET': dto.credentialId,
-            'recherchéLength': dto.credentialId.length,
-            totalCredentialsEnBD: allCredentials.length,
-            exemplesCredentialIds: allCredentials.slice(0, 3).map(c => ({
-              id: c.id,
-              credentialIdCOMPLET: c.credential_id,
-              credentialIdLength: c.credential_id.length,
-              device: c.device_name
-            }))
+        credential = await this.credentialRepository.findOne({
+          where: { user_handle: dto.userHandle },
+          relations: ['personnel', 'client'],
+        });
+
+        if (!credential) {
+          // Log pour debug - vérifier ce qui est en DB
+          const allCredentials = await this.credentialRepository.find({
+            select: ['id', 'user_handle', 'credential_id'],
+            take: 5
           });
-          
-          throw new UnauthorizedException(`Credential introuvable. Total credentials en BD: ${allCredentials.length}`);
+          console.log('❌ User handle non trouvé. Credentials en DB:', allCredentials);
+          throw new UnauthorizedException('User handle invalide');
         }
+      }
+      // Cas 3: UserId + UserType fournis
+      else if (dto.userId && dto.userType) {
+        console.log(`🔍 Recherche par userId: ${dto.userType} #${dto.userId}`);
+        const whereClause = dto.userType === 'personnel'
+          ? { personnel_id: dto.userId, user_type: UserType.PERSONNEL }
+          : { client_id: dto.userId, user_type: UserType.CLIENT };
+
+        // Récupérer le credential le plus récemment utilisé
+        const credentials = await this.credentialRepository.find({
+          where: whereClause,
+          relations: ['personnel', 'client'],
+          order: { last_used_at: 'DESC' },
+        });
+
+        if (credentials.length === 0) {
+          throw new UnauthorizedException('Aucun credential trouvé pour cet utilisateur');
+        }
+
+        credential = credentials[0]; // Utiliser le plus récent
+      } else {
+        throw new BadRequestException('credentialId, userHandle ou userId+userType requis');
       }
 
       console.log(`✅ Credential trouvé: ID=${credential.id}, User=${credential.user_type} #${credential.userId}`);
 
-      // Vérifier la signature WebAuthn
+      // Vérifier la signature WebAuthn (implémentation simplifiée)
+      // Dans un vrai système, utilisez la bibliothèque @simplewebauthn/server
       const isValid = await this.verifyWebAuthnSignature(
         dto.signature,
         dto.authenticatorData,
@@ -294,7 +355,8 @@ export class BiometricService {
       );
 
       if (!isValid) {
-        throw new UnauthorizedException('Signature biométrique invalide');
+        console.log('❌ Signature WebAuthn invalide');
+        throw new UnauthorizedException('Signature invalide');
       }
 
       // Mettre à jour le credential (last_used_at et counter)
@@ -313,7 +375,7 @@ export class BiometricService {
 
       console.log(`✅ Authentification réussie pour ${credential.user_type} #${credential.userId}`);
 
-      // Construire l'objet user
+      // Construire l'objet user en fonction du type
       const userResponse = credential.user_type === UserType.PERSONNEL
         ? {
             id: (user as Personnel).id,
@@ -354,7 +416,7 @@ export class BiometricService {
 
   /**
    * 📋 Lister tous les credentials d'un utilisateur (multi-appareils)
-   */
+   
   async listUserCredentials(userId: number, userType: 'personnel' | 'client'): Promise<BiometricCredentialInfo[]> {
     try {
       const whereClause = userType === 'personnel'
@@ -371,10 +433,12 @@ export class BiometricService {
         credentialId: cred.credential_id,
         deviceName: cred.displayName,
         deviceType: cred.device_type,
+        isResidentKey: cred.is_resident_key,
         createdAt: cred.created_at,
         lastUsedAt: cred.last_used_at,
         isRecentlyUsed: cred.isRecentlyUsed,
         counter: Number(cred.counter),
+        userHandle: cred.user_handle,
       }));
     } catch (error) {
       console.error('❌ Erreur liste credentials:', error);
@@ -384,7 +448,7 @@ export class BiometricService {
 
   /**
    * 🗑️ Supprimer un credential spécifique
-   */
+   
   async deleteCredential(credentialId: number, userId: number, userType: 'personnel' | 'client'): Promise<{ success: boolean; message: string }> {
     try {
       const whereClause = userType === 'personnel'
@@ -394,7 +458,7 @@ export class BiometricService {
       const credential = await this.credentialRepository.findOne({ where: whereClause });
 
       if (!credential) {
-        throw new BadRequestException('Credential introuvable');
+        throw new BadRequestException('Credential introuvable ou non autorisé');
       }
 
       await this.credentialRepository.remove(credential);
@@ -412,89 +476,8 @@ export class BiometricService {
   }
 
   /**
-   * 📋 Récupérer les credentials d'un utilisateur par username/email
-   * ✅ NOUVEAU: Pour permettre la connexion multi-appareils
-   */
-  async getUserCredentials(usernameOrEmail: string): Promise<{ 
-    success: boolean; 
-    credentials: Array<{ credentialId: string; deviceName: string }>;
-    userId?: number;
-    userType?: 'personnel' | 'client';
-  }> {
-    try {
-      console.log(`🔍 Recherche credentials pour: ${usernameOrEmail}`);
-
-      // Rechercher dans Personnel
-      const personnel = await this.personnelRepository.findOne({
-        where: [
-          { nom_utilisateur: usernameOrEmail },
-          { email: usernameOrEmail },
-        ],
-      });
-
-      if (personnel) {
-        const credentials = await this.credentialRepository.find({
-          where: { personnel_id: personnel.id, user_type: UserType.PERSONNEL },
-          order: { created_at: 'DESC' },
-        });
-
-        console.log(`✅ ${credentials.length} credential(s) trouvé(s) pour personnel #${personnel.id}`);
-
-        return {
-          success: true,
-          userId: personnel.id,
-          userType: 'personnel',
-          credentials: credentials.map(cred => ({
-            credentialId: cred.credential_id,
-            deviceName: cred.displayName || cred.device_name || 'Appareil inconnu'
-          }))
-        };
-      }
-
-      // Rechercher dans Client
-      const client = await this.clientRepository.findOne({
-        where: [
-          { nom: usernameOrEmail },
-          { email: usernameOrEmail },
-        ],
-      });
-
-      if (client) {
-        const credentials = await this.credentialRepository.find({
-          where: { client_id: client.id, user_type: UserType.CLIENT },
-          order: { created_at: 'DESC' },
-        });
-
-        console.log(`✅ ${credentials.length} credential(s) trouvé(s) pour client #${client.id}`);
-
-        return {
-          success: true,
-          userId: client.id,
-          userType: 'client',
-          credentials: credentials.map(cred => ({
-            credentialId: cred.credential_id,
-            deviceName: cred.displayName || cred.device_name || 'Appareil inconnu'
-          }))
-        };
-      }
-
-      console.log(`❌ Utilisateur non trouvé: ${usernameOrEmail}`);
-      return {
-        success: false,
-        credentials: []
-      };
-    } catch (error) {
-      console.error('❌ Erreur récupération credentials:', error);
-      return {
-        success: false,
-        credentials: []
-      };
-    }
-  }
-
-  /**
    * 🔍 Vérifier si l'utilisateur a au moins un credential actif
-   */
+   
   async hasBiometricEnabled(userId: number, userType: 'personnel' | 'client'): Promise<{ 
     enabled: boolean; 
     credentialCount: number;
@@ -507,10 +490,12 @@ export class BiometricService {
 
       const credentials = await this.credentialRepository.find({ where: whereClause });
 
+      const hasResidentKey = credentials.some(cred => cred.is_resident_key);
+
       return {
         enabled: credentials.length > 0,
         credentialCount: credentials.length,
-        hasResidentKey: false, // Simplifié: pas de Resident Keys
+        hasResidentKey,
       };
     } catch (error) {
       console.error('❌ Erreur vérification biométrique:', error);
@@ -520,7 +505,7 @@ export class BiometricService {
 
   /**
    * 📊 Vérifier le statut biométrique d'un utilisateur par username/email
-   */
+   
   async checkBiometricStatus(usernameOrEmail: string): Promise<BiometricStatusResponse> {
     try {
       // Rechercher dans Personnel
@@ -532,18 +517,20 @@ export class BiometricService {
       });
 
       if (personnel) {
-        const status = await this.hasBiometricEnabled(personnel.id, 'personnel');
-        const credentials = status.enabled
-          ? await this.listUserCredentials(personnel.id, 'personnel')
-          : [];
+        const credentials = await this.credentialRepository.find({
+          where: { personnel_id: personnel.id, user_type: UserType.PERSONNEL },
+          order: { created_at: 'ASC' },
+        });
+
+        const hasResidentKey = credentials.some(cred => cred.is_resident_key);
 
         return {
-          enabled: status.enabled,
-          credentialCount: status.credentialCount,
-          registeredAt: credentials[0]?.createdAt,
+          enabled: credentials.length > 0,
+          credentialCount: credentials.length,
+          registeredAt: credentials.length > 0 ? credentials[0].created_at : undefined,
           userId: personnel.id,
           userType: 'personnel',
-          credentials,
+          hasResidentKey,
         };
       }
 
@@ -551,23 +538,25 @@ export class BiometricService {
       const client = await this.clientRepository.findOne({
         where: [
           { nom: usernameOrEmail },
-          { email: usernameOrEmail },
+          { interlocuteur: usernameOrEmail },
         ],
       });
 
       if (client) {
-        const status = await this.hasBiometricEnabled(client.id, 'client');
-        const credentials = status.enabled
-          ? await this.listUserCredentials(client.id, 'client')
-          : [];
+        const credentials = await this.credentialRepository.find({
+          where: { client_id: client.id, user_type: UserType.CLIENT },
+          order: { created_at: 'ASC' },
+        });
+
+        const hasResidentKey = credentials.some(cred => cred.is_resident_key);
 
         return {
-          enabled: status.enabled,
-          credentialCount: status.credentialCount,
-          registeredAt: credentials[0]?.createdAt,
+          enabled: credentials.length > 0,
+          credentialCount: credentials.length,
+          registeredAt: credentials.length > 0 ? credentials[0].created_at : undefined,
           userId: client.id,
           userType: 'client',
-          credentials,
+          hasResidentKey,
         };
       }
 
@@ -585,8 +574,8 @@ export class BiometricService {
   }
 
   /**
-   * 🔑 Obtenir un credential par credentialId
-   */
+   * 🔑 Obtenir un credential par credentialId (pour l'authentification)
+   
   async getCredentialById(credentialId: string): Promise<BiometricCredential | null> {
     try {
       return await this.credentialRepository.findOne({
@@ -601,15 +590,32 @@ export class BiometricService {
 
   /**
    * 🔑 Générer un challenge pour la vérification biométrique
-   */
+   
   generateBiometricChallenge(): string {
     return crypto.randomBytes(32).toString('base64url');
   }
 
   /**
+   * Helper pour vérifier une signature avec une credential spécifique
+   
+  private async verifySignature(
+    credential: BiometricCredential,
+    signature: string,
+    authenticatorData: string,
+    clientDataJSON: string,
+  ): Promise<boolean> {
+    return this.verifyWebAuthnSignature(
+      signature,
+      authenticatorData,
+      clientDataJSON,
+      credential.public_key,
+    );
+  }
+
+  /**
    * 🔐 Vérifier la signature WebAuthn (implémentation simplifiée)
    * IMPORTANT: Dans un vrai système, utilisez @simplewebauthn/server
-   */
+   
   private async verifyWebAuthnSignature(
     signature: string,
     authenticatorData: string,
@@ -617,8 +623,8 @@ export class BiometricService {
     publicKey: string,
   ): Promise<boolean> {
     try {
-      // ⚠️ IMPLÉMENTATION SIMPLIFIÉE - Mode développement
-      // En production, utilisez @simplewebauthn/server
+      // ⚠️ IMPLÉMENTATION SIMPLIFIÉE - NE PAS UTILISER EN PRODUCTION
+      // En production, utilisez @simplewebauthn/server pour une vérification complète
       
       console.log('⚠️ Vérification signature WebAuthn (mode simplifié)');
       
@@ -630,14 +636,20 @@ export class BiometricService {
       // Hash du clientDataJSON
       const clientDataHash = crypto.createHash('sha256').update(clientDataBuffer).digest();
       
-      // Construire le message signé
+      // Construire le message signé (authenticatorData + clientDataHash)
       const signedData = Buffer.concat([authDataBuffer, clientDataHash]);
       
-      // ✅ MODE DÉVELOPPEMENT: Accepter toutes les signatures valides
-      // En production, remplacer par une vraie vérification
-      console.log('✅ Signature acceptée (mode développement)');
-      return true;
+      // Vérifier la signature avec la clé publique
+      // Note: Ceci est une version simplifiée, en production utilisez une bibliothèque robuste
+      const verify = crypto.createVerify('SHA256');
+      verify.update(signedData);
       
+      // Convertir la clé publique si nécessaire (format PEM attendu)
+      const isValid = verify.verify(publicKey, signatureBuffer);
+      
+      console.log(`${isValid ? '✅' : '❌'} Signature vérifiée: ${isValid}`);
+      
+      return isValid;
     } catch (error) {
       console.error('❌ Erreur vérification signature:', error);
       return false;
@@ -646,24 +658,21 @@ export class BiometricService {
 
   /**
    * 🧹 Nettoyer les credentials inactifs (>90 jours)
-   */
+   
   async cleanupInactiveCredentials(days: number = 90): Promise<{ deleted: number }> {
     try {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
+      const credentials = await this.credentialRepository.find();
+      const inactiveCredentials = credentials.filter(cred => cred.isInactive(days));
 
-      const result = await this.credentialRepository
-        .createQueryBuilder()
-        .delete()
-        .where('last_used_at < :cutoffDate', { cutoffDate })
-        .execute();
+      await this.credentialRepository.remove(inactiveCredentials);
 
-      console.log(`🧹 ${result.affected} credentials inactifs supprimés`);
+      console.log(`🧹 ${inactiveCredentials.length} credentials inactifs supprimés (>${days} jours)`);
 
-      return { deleted: result.affected || 0 };
+      return { deleted: inactiveCredentials.length };
     } catch (error) {
       console.error('❌ Erreur nettoyage credentials:', error);
-      return { deleted: 0 };
+      throw new BadRequestException('Erreur lors du nettoyage des credentials');
     }
   }
 }
+ */

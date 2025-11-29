@@ -10,6 +10,7 @@ import { Exclude, Expose } from 'class-transformer';
 import { ContactClient } from './contact-client.entity';
 import { AutorisationTVA } from './autorisation-tva.entity';
 import { BCsusTVA } from './bcsus-tva.entity';
+import { BiometricCredential } from './biometric-credential.entity';
 
 export enum EtatFiscal {
   ASSUJETTI_TVA = 'ASSUJETTI_TVA',
@@ -166,22 +167,15 @@ export class Client {
   @Expose()
   code_fournisseur: string; // Code du fournisseur associé (si is_fournisseur = true)
 
-  // Champs d'authentification biométrique
-  @Column({ type: 'varchar', length: 500, nullable: true })
-  biometric_hash?: string; // Hash de l'empreinte biométrique
-
-  @Column({ type: 'boolean', nullable: true, default: false })
-  biometric_enabled?: boolean; // Indique si l'authentification biométrique est activée
-
-  @Column({ type: 'timestamp', nullable: true })
-  biometric_registered_at?: Date; // Date d'enregistrement de l'empreinte biométrique
-
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];
 
   @OneToMany(() => AutorisationTVA, (autorisation) => autorisation.client, { cascade: true })
   autorisationsTVA: AutorisationTVA[];
+
+  @OneToMany(() => BiometricCredential, (credential) => credential.client)
+  biometricCredentials: BiometricCredential[];
 
   // Méthode virtuelle pour obtenir le nom d'utilisateur (utilise le nom ou l'id)
   get username(): string {

@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { ObjectifCom } from './objectif-com.entity';
+import { BiometricCredential } from './biometric-credential.entity';
 
 @Entity('personnel')
 export class Personnel {
@@ -82,19 +83,12 @@ export class Personnel {
   @Column({ type: 'boolean', nullable: false, default: false })
   is_location_active: boolean; // Position active (dernière position < 5 min)
 
-  // Champs d'authentification biométrique
-  @Column({ type: 'varchar', length: 500, nullable: true })
-  biometric_hash?: string; // Hash de l'empreinte biométrique
-
-  @Column({ type: 'boolean', nullable: true, default: false })
-  biometric_enabled?: boolean; // Indique si l'authentification biométrique est activée
-
-  @Column({ type: 'timestamp', nullable: true })
-  biometric_registered_at?: Date; // Date d'enregistrement de l'empreinte biométrique
-
   // Relations
   @OneToMany(() => ObjectifCom, (objectif) => objectif.personnel)
   objectifs: ObjectifCom[];
+
+  @OneToMany(() => BiometricCredential, (credential) => credential.personnel)
+  biometricCredentials: BiometricCredential[];
 
   // Méthode virtuelle pour obtenir le nom complet
   get fullName(): string {

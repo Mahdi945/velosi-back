@@ -32,6 +32,7 @@ import { Opportunity } from './entities/crm/opportunity.entity';
 import { Quote } from './crm/entities/quote.entity';
 import { ObjectifCom } from './entities/objectif-com.entity';
 import { Navire } from './entities/navire.entity';
+import { BiometricCredential } from './entities/biometric-credential.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { PersonnelService } from './services/personnel.service';
@@ -73,7 +74,7 @@ import { ImportDataModule } from './modules/import-data.module';
     VechatModule, // Module VelosiChat
     ClientTVAModule, // Module de gestion des clients et autorisations TVA
     ImportDataModule, // Module d'importation de données (ports et aéroports)
-  TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService
+  TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire, BiometricCredential]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService et BiometricCredential pour l'authentification biométrique
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],
   providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService],

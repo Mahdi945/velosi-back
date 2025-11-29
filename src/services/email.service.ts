@@ -395,6 +395,43 @@ export class EmailService {
                 border: 3px solid #5e72e4;
                 box-shadow: 0 8px 25px rgba(94, 114, 228, 0.2);
                 animation: pulse 2s infinite;
+                word-break: break-all;
+                max-width: 100%;
+            }
+            
+            @media (max-width: 600px) {
+                .container {
+                    margin: 0;
+                    border-radius: 0;
+                }
+                
+                .otp-code {
+                    font-size: 28px;
+                    padding: 15px 20px;
+                    letter-spacing: 4px;
+                    word-break: break-all;
+                }
+                
+                .otp-section {
+                    padding: 20px 15px;
+                    margin: 25px 0;
+                }
+                
+                .content {
+                    padding: 30px 20px;
+                }
+                
+                .header {
+                    padding: 25px 20px;
+                }
+                
+                .header h1 {
+                    font-size: 24px;
+                }
+                
+                .instructions, .security-warning {
+                    padding: 15px;
+                }
             }
             
             @keyframes pulse {

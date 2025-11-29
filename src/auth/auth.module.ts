@@ -12,13 +12,16 @@ import { Client } from '../entities/client.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { ContactClient } from '../entities/contact-client.entity';
 import { ObjectifCom } from '../entities/objectif-com.entity';
+import { BiometricCredential } from '../entities/biometric-credential.entity';
 import { ContactClientService } from '../services/contact-client.service';
 import { EmailService } from '../services/email.service';
 import { OtpService } from '../services/otp.service';
+import { BiometricService } from './biometric.service';
+import { BiometricController } from './biometric.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Client, Personnel, ContactClient, ObjectifCom]),
+    TypeOrmModule.forFeature([Client, Personnel, ContactClient, ObjectifCom, BiometricCredential]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -33,8 +36,8 @@ import { OtpService } from '../services/otp.service';
       inject: [ConfigService],
     }),
   ],
-  providers: [AuthService, KeycloakService, LocalStrategy, JwtStrategy, ContactClientService, EmailService, OtpService],
-  controllers: [AuthController],
-  exports: [AuthService, KeycloakService, JwtModule],
+  providers: [AuthService, KeycloakService, LocalStrategy, JwtStrategy, ContactClientService, EmailService, OtpService, BiometricService],
+  controllers: [AuthController, BiometricController],
+  exports: [AuthService, KeycloakService, JwtModule, BiometricService],
 })
 export class AuthModule {}
