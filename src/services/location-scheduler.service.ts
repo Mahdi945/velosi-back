@@ -13,19 +13,21 @@ export class LocationSchedulerService {
   ) {}
 
   /**
-   * Marque les positions inactives toutes les 5 minutes
+   * Marque les positions inactives toutes les 1 minute pour une meilleure réactivité
    */
-  @Cron('*/5 * * * *') // Toutes les 5 minutes
+  @Cron('*/1 * * * *') // Toutes les 1 minute
   async handleInactiveLocationCleanup() {
     try {
-      this.logger.log('Début du nettoyage des positions inactives...');
+      this.logger.debug('Début du nettoyage des positions inactives...');
       await this.locationService.markInactiveLocations();
       
-      // Diffuser les nouvelles statistiques
-      const stats = await this.locationService.getLocationStats();
-      await this.locationGateway.broadcastLocationStats(stats);
-      
-      this.logger.log('Nettoyage des positions inactives terminé');
+      // Diffuser les nouvelles statistiques toutes les 5 minutes seulement
+      const currentMinute = new Date().getMinutes();
+      if (currentMinute % 5 === 0) {
+        const stats = await this.locationService.getLocationStats();
+        await this.locationGateway.broadcastLocationStats(stats);
+        this.logger.log('Nettoyage des positions inactives terminé + stats diffusées');
+      }
     } catch (error) {
       this.logger.error('Erreur lors du nettoyage des positions inactives:', error);
     }

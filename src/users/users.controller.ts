@@ -48,7 +48,7 @@ export class UsersController {
 
   @Post('personnel')
   @UseGuards(TokenAuthGuard, RolesGuard)
-  @Roles('administratif', 'admin')
+  @Roles('administratif', 'admin', 'superviseur')
   async createPersonnel(@Body() createPersonnelDto: CreatePersonnelDto) {
     try {
       const personnel = await this.usersService.createPersonnel(createPersonnelDto);

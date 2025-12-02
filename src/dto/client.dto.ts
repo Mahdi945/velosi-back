@@ -140,7 +140,11 @@ export class CreateClientDto {
 
   @IsOptional()
   @IsBoolean()
-  is_permanent?: boolean = false;
+  is_permanent?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  sendEmailWithPassword?: boolean; // Contrôler l'envoi d'email avec mot de passe
 
   @IsOptional()
   @IsString()

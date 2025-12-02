@@ -32,6 +32,7 @@ export interface CreateClientDto {
   contact_mail2?: string;
   contact_fonction?: string;
   is_permanent?: boolean;
+  send_email?: boolean; // Flag pour l'envoi d'email
 }
 
 export interface UpdateClientDto {
@@ -83,6 +84,8 @@ export interface CreatePersonnelDto {
   email?: string;
   genre?: string;
   statut?: string;
+  send_email?: boolean; // Flag pour l'envoi d'email
+  is_superviseur?: boolean; // Flag pour le statut de superviseur
   // Champs pour les objectifs commerciaux
   objectif_titre?: string;
   objectif_ca?: number;
@@ -235,6 +238,24 @@ export class UsersService {
       } catch (error) {
         console.warn('Erreur lors de la création dans Keycloak:', error.message);
       }
+
+      // Envoyer l'email avec les identifiants (seulement si demandé)
+      if (createClientDto.contact_mail1 && createClientDto.send_email !== false && createClientDto.mot_de_passe) {
+        try {
+          await this.emailService.sendClientCredentialsEmail(
+            createClientDto.contact_mail1,
+            savedClient.nom,
+            createClientDto.mot_de_passe, // Mot de passe original
+            createClientDto.interlocuteur || savedClient.nom
+          );
+          this.logger.log(`Email de bienvenue envoyé au client ${savedClient.nom} à ${createClientDto.contact_mail1}`);
+        } catch (error) {
+          this.logger.warn(`Erreur lors de l'envoi de l'email au client: ${error.message}`);
+          // On continue même si l'email échoue
+        }
+      } else if (createClientDto.contact_mail1 && createClientDto.send_email === false) {
+        this.logger.log(`Email non envoyé au client ${savedClient.nom} (send_email = false)`);
+      }
     } else {
       console.log(`🕘 Client temporaire - AUCUNE création Keycloak (comportement voulu)`);
     }
@@ -360,8 +381,8 @@ export class UsersService {
       }
     }
 
-    // Envoyer l'email de bienvenue avec les informations de connexion
-    if (savedPersonnel.email) {
+    // Envoyer l'email de bienvenue avec les informations de connexion (seulement si demandé)
+    if (savedPersonnel.email && createPersonnelDto.send_email !== false) {
       try {
         await this.emailService.sendPersonnelCredentialsEmail(
           savedPersonnel.email,
@@ -375,6 +396,8 @@ export class UsersService {
         this.logger.warn(`Erreur lors de l'envoi de l'email de bienvenue: ${error.message}`);
         // On continue même si l'email échoue
       }
+    } else if (savedPersonnel.email && createPersonnelDto.send_email === false) {
+      this.logger.log(`Email non envoyé à ${savedPersonnel.email} (send_email = false)`);
     }
 
     return savedPersonnel;
@@ -427,6 +450,9 @@ export class UsersService {
           // � CORRECTION: Ajouter les champs fournisseur
           'client.is_fournisseur',
           'client.code_fournisseur',
+          // ✅ Champs de session et statut en ligne
+          'client.statut_en_ligne',
+          'client.last_activity',
           // �🏦 Informations bancaires
           'client.banque',
           'client.iban',
@@ -442,13 +468,18 @@ export class UsersService {
           'contact.fonction'
         ]);
 
-      // Si l'utilisateur est commercial, filtrer par charge_com
+      // 🆕 Si l'utilisateur est commercial, filtrer par charge_com_ids (tableau)
       if (user && user.role === 'commercial') {
-        const username = user.username || user.nom_utilisateur;
-        console.log('🔒 [getAllClients] Filtrage commercial - charge_com:', username);
-        query = query.where('client.charge_com = :chargecom', { 
-          chargecom: username 
+        const userId = user.sub || user.id;
+        console.log('🔒 [getAllClients] Filtrage commercial - ID utilisateur:', userId);
+        
+        // Vérifier si l'ID du commercial est dans le tableau charge_com_ids
+        // Utilisation de l'opérateur PostgreSQL @> pour vérifier si le tableau contient l'élément
+        query = query.where(':userId = ANY(client.charge_com_ids)', { 
+          userId: userId 
         });
+        
+        console.log('🔍 [getAllClients] Requête SQL avec filtre charge_com_ids appliqué');
       }
 
       const clients = await query.getMany();
@@ -518,7 +549,20 @@ export class UsersService {
         'photo',
         'genre',
         'created_at',
+        'is_superviseur',
+        'latitude',
+        'longitude',
+        'last_location_update',
+        'location_accuracy',
+        'location_source',
+        'is_location_active',
+        'location_tracking_enabled',
+        'statut_en_ligne',
+        'last_activity',
       ],
+      order: {
+        id: 'DESC', // 🆕 Tri décroissant par ID
+      },
     });
   }
 
@@ -780,6 +824,7 @@ export class UsersService {
     if (updateData.email) updateFields.email = updateData.email;
     if (updateData.genre) updateFields.genre = updateData.genre;
     if (updateData.statut) updateFields.statut = updateData.statut;
+    if (updateData.is_superviseur !== undefined) updateFields.is_superviseur = updateData.is_superviseur;
 
     // Effectuer la mise à jour
     await this.personnelRepository.update(id, updateFields);

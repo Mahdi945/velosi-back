@@ -20,6 +20,7 @@ import {
   Param,
   NotFoundException,
   Req,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -62,6 +63,8 @@ export interface AuthenticatedUser {
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private authService: AuthService,
     private configService: ConfigService
@@ -291,14 +294,149 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@Res({ passthrough: true }) response: Response) {
-    // Supprimer les cookies
-    response.clearCookie('access_token');
-    response.clearCookie('refresh_token');
+  async logout(@Request() req, @Res({ passthrough: true }) response: Response) {
+    try {
+      this.logger.log('🔴 ========== ENDPOINT LOGOUT APPELÉ ==========');
+      
+      // Récupérer les informations utilisateur depuis le token JWT
+      const user = req.user;
+      this.logger.log(`📋 User from JWT: ${JSON.stringify({ id: user?.id, username: user?.username, userType: user?.userType })}`);
+      
+      if (user && user.id && user.userType) {
+        this.logger.log(`🔄 Appel authService.logout pour user ${user.id} (${user.userType})`);
+        
+        // Mettre à jour le statut en ligne dans la base de données
+        const result = await this.authService.logout(user.id.toString(), user.userType);
+        
+        this.logger.log(`✅ Déconnexion de ${user.userType} ${user.username} (ID: ${user.id}) - Result: ${JSON.stringify(result)}`);
+      } else {
+        this.logger.warn('⚠️ User ou user.id ou user.userType manquant dans la requête');
+      }
 
-    return {
-      message: 'Déconnexion réussie',
-    };
+      // Supprimer les cookies
+      response.clearCookie('access_token');
+      response.clearCookie('refresh_token');
+      this.logger.log('🍪 Cookies supprimés');
+
+      this.logger.log('🔴 ========== FIN ENDPOINT LOGOUT ==========');
+      return {
+        success: true,
+        message: 'Déconnexion réussie',
+      };
+    } catch (error) {
+      this.logger.error('❌ ========== ERREUR DANS LOGOUT ==========');
+      this.logger.error('Erreur lors de la déconnexion:', error);
+      this.logger.error('Stack:', error.stack);
+      
+      // Même en cas d'erreur, supprimer les cookies
+      response.clearCookie('access_token');
+      response.clearCookie('refresh_token');
+      
+      this.logger.log('🔴 ========== FIN ENDPOINT LOGOUT (AVEC ERREUR) ==========');
+      return {
+        success: true, // On retourne quand même success car les cookies sont supprimés
+        message: 'Déconnexion réussie',
+      };
+    }
+  }
+
+  /**
+   * Heartbeat pour maintenir le statut en ligne
+   * Appelé régulièrement par le frontend
+   */
+  @Post('heartbeat')
+  @HttpCode(HttpStatus.OK)
+  async heartbeat(@Body() data: { userId: string; userType: 'personnel' | 'client' }) {
+    try {
+      const { userId, userType } = data;
+      
+      if (!userId || !userType) {
+        this.logger.warn('❌ Heartbeat - Données manquantes');
+        return { success: false, message: 'Données manquantes' };
+      }
+
+      const id = parseInt(userId);
+
+      if (userType === 'personnel') {
+        const result = await this.authService.personnelRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: true })
+          .where('id = :id', { id })
+          .execute();
+        this.logger.debug(`💓 Heartbeat personnel ${id} - affected: ${result.affected}`);
+      } else {
+        const result = await this.authService.clientRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: true })
+          .where('id = :id', { id })
+          .execute();
+        this.logger.debug(`💓 Heartbeat client ${id} - affected: ${result.affected}`);
+      }
+
+      return { success: true, message: 'Heartbeat reçu' };
+    } catch (error) {
+      this.logger.error('❌ Erreur heartbeat:', error);
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
+   * Mettre l'utilisateur hors ligne (appelé via sendBeacon lors de beforeunload)
+   */
+  @Post('set-offline')
+  @HttpCode(HttpStatus.OK)
+  async setOffline(@Body() data: { userId: string; userType: 'personnel' | 'client' }) {
+    try {
+      this.logger.log('🔴 ========== SET-OFFLINE APPELÉ ==========');
+      const { userId, userType } = data;
+      this.logger.log(`📋 Données reçues: userId=${userId}, userType=${userType}`);
+      
+      if (!userId || !userType) {
+        this.logger.warn('❌ Données manquantes');
+        return { success: false, message: 'Données manquantes' };
+      }
+
+      const id = parseInt(userId);
+      this.logger.log(`🔢 ID parsé: ${id}`);
+
+      if (userType === 'personnel') {
+        const result = await this.authService.personnelRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: false })
+          .where('id = :id', { id })
+          .execute();
+        
+        this.logger.log(`✅ Personnel ${id} marqué hors ligne - affected: ${result.affected}`);
+        
+        // Vérification
+        const personnel = await this.authService.personnelRepository.findOne({ where: { id } });
+        this.logger.log(`📊 Vérification - statut_en_ligne: ${personnel?.statut_en_ligne}`);
+      } else {
+        const result = await this.authService.clientRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: false })
+          .where('id = :id', { id })
+          .execute();
+        
+        this.logger.log(`✅ Client ${id} marqué hors ligne - affected: ${result.affected}`);
+        
+        // Vérification
+        const client = await this.authService.clientRepository.findOne({ where: { id } });
+        this.logger.log(`📊 Vérification - statut_en_ligne: ${client?.statut_en_ligne}`);
+      }
+
+      this.logger.log('🔴 ========== FIN SET-OFFLINE ==========');
+      return { success: true, message: 'Statut mis à jour' };
+    } catch (error) {
+      this.logger.error('❌ ========== ERREUR SET-OFFLINE ==========');
+      this.logger.error('Erreur set-offline:', error);
+      this.logger.error('Stack:', error.stack);
+      return { success: false, message: error.message };
+    }
   }
 
   @Get('check')
@@ -1573,6 +1711,66 @@ export class AuthController {
       };
     } catch (error) {
       throw new BadRequestException(`Erreur lors de la migration: ${error.message}`);
+    }
+  }
+
+  /**
+   * Endpoint de diagnostic pour vérifier le statut en ligne d'un utilisateur
+   */
+  @Get('check-online-status/:userType/:userId')
+  @HttpCode(HttpStatus.OK)
+  async checkOnlineStatus(
+    @Param('userType') userType: 'personnel' | 'client',
+    @Param('userId') userId: string
+  ) {
+    try {
+      const id = parseInt(userId);
+      this.logger.log(`🔍 Vérification statut pour ${userType} ID ${id}`);
+
+      if (userType === 'personnel') {
+        const personnel = await this.authService.personnelRepository.findOne({
+          where: { id },
+          select: ['id', 'nom_utilisateur', 'statut_en_ligne', 'last_activity']
+        });
+
+        if (!personnel) {
+          return { success: false, message: 'Personnel non trouvé' };
+        }
+
+        this.logger.log(`📊 Personnel ${personnel.nom_utilisateur} - statut_en_ligne: ${personnel.statut_en_ligne}`);
+
+        return {
+          success: true,
+          userType: 'personnel',
+          userId: personnel.id,
+          username: personnel.nom_utilisateur,
+          statut_en_ligne: personnel.statut_en_ligne,
+          last_activity: personnel.last_activity
+        };
+      } else {
+        const client = await this.authService.clientRepository.findOne({
+          where: { id },
+          select: ['id', 'nom', 'statut_en_ligne', 'last_activity']
+        });
+
+        if (!client) {
+          return { success: false, message: 'Client non trouvé' };
+        }
+
+        this.logger.log(`📊 Client ${client.nom} - statut_en_ligne: ${client.statut_en_ligne}`);
+
+        return {
+          success: true,
+          userType: 'client',
+          userId: client.id,
+          username: client.nom,
+          statut_en_ligne: client.statut_en_ligne,
+          last_activity: client.last_activity
+        };
+      }
+    } catch (error) {
+      this.logger.error('Erreur check-online-status:', error);
+      throw new BadRequestException(`Erreur: ${error.message}`);
     }
   }
 

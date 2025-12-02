@@ -218,4 +218,8 @@ export class CreateClientDto {
   @IsOptional()
   @IsBoolean()
   is_permanent?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_email?: boolean; // Indique si un email avec les identifiants doit être envoyé au client permanent
 }

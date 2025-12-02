@@ -28,7 +28,7 @@ import { BiometricController } from './biometric.controller';
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get('JWT_SECRET') || 'velosi-secret-key-2024',
         signOptions: {
-          expiresIn: configService.get('JWT_EXPIRES_IN') || '24h',
+          expiresIn: configService.get('JWT_EXPIRES_IN') || '8h', // Durée de session limitée à 8 heures
           issuer: 'velosi-erp',
           audience: 'velosi-users',
         },

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, MaxLength, IsEmail, Matches } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, MaxLength, IsEmail, Matches, ValidateIf } from 'class-validator';
 
 export class CreateContactClientDto {
   @IsNumber()
@@ -15,18 +15,21 @@ export class CreateContactClientDto {
   prenom?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel1 && o.tel1.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
   tel1?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel2 && o.tel2.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
   tel2?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel3 && o.tel3.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
@@ -38,11 +41,13 @@ export class CreateContactClientDto {
   fax?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.mail1 && o.mail1.trim().length > 0)
   @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   mail1?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.mail2 && o.mail2.trim().length > 0)
   @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   mail2?: string;
@@ -73,18 +78,21 @@ export class UpdateContactClientDto {
   prenom?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel1 && o.tel1.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
   tel1?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel2 && o.tel2.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
   tel2?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.tel3 && o.tel3.trim().length > 0)
   @IsString()
   @MaxLength(20, { message: 'Le téléphone ne peut pas dépasser 20 caractères' })
   @Matches(/^[0-9+\-\s()]+$/, { message: 'Format de téléphone invalide' })
@@ -96,11 +104,13 @@ export class UpdateContactClientDto {
   fax?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.mail1 && o.mail1.trim().length > 0)
   @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   mail1?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.mail2 && o.mail2.trim().length > 0)
   @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(100, { message: "L'email ne peut pas dépasser 100 caractères" })
   mail2?: string;

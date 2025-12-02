@@ -157,6 +157,24 @@ export class ClientService {
               
               // Mettre à jour le client avec l'ID Keycloak
               await this.clientRepository.update(savedClient.id, { keycloak_id: keycloakUserId });
+
+              // 📧 ENVOYER L'EMAIL UNIQUEMENT SI sendEmailWithPassword = true
+              if (createClientDto.sendEmailWithPassword === true && createClientDto.mot_de_passe) {
+                try {
+                  await this.emailService.sendClientCredentialsEmail(
+                    clientEmail,
+                    savedClient.nom,
+                    createClientDto.mot_de_passe,
+                    savedClient.nom,
+                    createClientDto.interlocuteur || 'Client'
+                  );
+                  console.log(`📧 Email avec identifiants envoyé à ${clientEmail}`);
+                } catch (emailError) {
+                  console.warn(`⚠️ Erreur envoi email:`, emailError.message);
+                }
+              } else {
+                console.log(`🚫 Envoi d'email désactivé (sendEmailWithPassword = ${createClientDto.sendEmailWithPassword})`);
+              }
             } else {
               console.warn(`⚠️ Keycloak n'a pas retourné d'ID utilisateur`);
             }

@@ -33,6 +33,7 @@ export interface JwtPayload {
   email: string;
   role: string;
   userType: 'client' | 'personnel';
+  is_superviseur?: boolean; // Ajouter le champ superviseur
   iat?: number;
   exp?: number;
 }
@@ -61,11 +62,15 @@ export interface AuthResult {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  // Exposer les repositories publiquement pour les endpoints heartbeat/set-offline
+  public clientRepository: Repository<Client>;
+  public personnelRepository: Repository<Personnel>;
+
   constructor(
     @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    clientRepository: Repository<Client>,
     @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
+    personnelRepository: Repository<Personnel>,
     @InjectRepository(ContactClient)
     private contactClientRepository: Repository<ContactClient>,
     private jwtService: JwtService,
@@ -74,7 +79,10 @@ export class AuthService {
     private contactClientService: ContactClientService,
     private emailService: EmailService,
     private otpService: OtpService,
-  ) {}
+  ) {
+    this.clientRepository = clientRepository;
+    this.personnelRepository = personnelRepository;
+  }
 
   async validateUser(username: string, password: string): Promise<any> {
     // Rechercher d'abord dans le personnel (par nom_utilisateur OU email) - insensible à la casse
@@ -191,12 +199,28 @@ export class AuthService {
       }
     }
 
+    // ✅ Mettre à jour le statut en ligne et l'activité lors du login
+    if (user.userType === 'personnel') {
+      await this.personnelRepository.update(user.id, {
+        statut_en_ligne: true,
+        last_activity: new Date(),
+      });
+      this.logger.log(`Personnel ${user.nom_utilisateur} marqué comme en ligne`);
+    } else if (user.userType === 'client') {
+      await this.clientRepository.update(user.id, {
+        statut_en_ligne: true,
+        last_activity: new Date(),
+      });
+      this.logger.log(`Client ${user.nom} marqué comme en ligne`);
+    }
+
     const payload: JwtPayload = {
       sub: user.id.toString(),
       username: user.userType === 'personnel' ? user.nom_utilisateur : user.nom,
       email: userEmail,
       role: user.userType === 'personnel' ? user.role : 'client',
       userType: user.userType,
+      is_superviseur: user.userType === 'personnel' ? (user.is_superviseur || false) : false,
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -246,6 +270,7 @@ export class AuthService {
         email: payload.email,
         role: payload.role,
         userType: payload.userType,
+        is_superviseur: payload.userType === 'personnel' ? (user.is_superviseur || false) : false,
       };
 
       const access_token = this.jwtService.sign(newPayload);
@@ -383,11 +408,56 @@ export class AuthService {
           throw new UnauthorizedException(`Compte ${userAnyStatus.statut} - contactez l'administration`);
         }
       }
+
+      // ✅ Vérifier l'expiration de session (24h max)
+      if (user && user.last_activity) {
+        const now = new Date();
+        const sessionDuration = now.getTime() - user.last_activity.getTime();
+        const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+        
+        if (sessionDuration > maxSessionDuration) {
+          // Session expirée - marquer comme hors ligne
+          await this.personnelRepository.update(user.id, {
+            statut_en_ligne: false,
+          });
+          this.logger.warn(`Session expirée pour personnel ${user.nom_utilisateur} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
+          throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+        }
+      }
+
+      // ✅ Mettre à jour last_activity à chaque validation
+      if (user) {
+        await this.personnelRepository.update(user.id, {
+          last_activity: new Date(),
+        });
+      }
     } else {
       console.log('validateJwtPayload - Recherche client avec ID:', payload.sub);
       user = await this.clientRepository.findOne({
         where: { id: parseInt(payload.sub) },
       });
+
+      // ✅ Vérifier l'expiration de session pour les clients aussi
+      if (user && user.last_activity) {
+        const now = new Date();
+        const sessionDuration = now.getTime() - user.last_activity.getTime();
+        const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+        
+        if (sessionDuration > maxSessionDuration) {
+          await this.clientRepository.update(user.id, {
+            statut_en_ligne: false,
+          });
+          this.logger.warn(`Session expirée pour client ${user.nom} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
+          throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+        }
+      }
+
+      // ✅ Mettre à jour last_activity
+      if (user) {
+        await this.clientRepository.update(user.id, {
+          last_activity: new Date(),
+        });
+      }
       
       // Pour les clients, récupérer l'email depuis contact_client si pas dans le payload
       if (user && (!payload.email || payload.email === '')) {
@@ -522,6 +592,7 @@ export class AuthService {
       email: savedPersonnel.email || '',
       role: savedPersonnel.role,
       userType: 'personnel',
+      is_superviseur: savedPersonnel.is_superviseur || false,
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -670,8 +741,8 @@ export class AuthService {
       await this.clientRepository.save(savedClient);
     }
 
-    // Envoyer l'email avec les informations de connexion SEULEMENT pour les clients permanents
-    if (createClientDto.is_permanent === true) {
+    // Envoyer l'email avec les informations de connexion SEULEMENT si explicitement demandé
+    if (createClientDto.is_permanent === true && createClientDto.send_email === true) {
       try {
         if (contactEmail && this.emailService && createClientDto.mot_de_passe) {
           await this.emailService.sendClientCredentialsEmail(
@@ -682,11 +753,15 @@ export class AuthService {
             savedClient.interlocuteur
           );
           this.logger.log(`📧 Email d'informations client permanent envoyé à ${contactEmail}`);
+        } else if (!contactEmail) {
+          this.logger.warn(`📧 Envoi email demandé mais aucun email de contact disponible`);
         }
       } catch (emailError) {
         this.logger.warn('Erreur envoi email informations client permanent:', emailError);
         // Ne pas faire échouer l'inscription si l'envoi d'email échoue
       }
+    } else if (createClientDto.is_permanent === true && createClientDto.send_email !== true) {
+      this.logger.log(`📧 Client permanent - Envoi email NON demandé (send_email: ${createClientDto.send_email})`);
     } else {
       this.logger.log(`📧 Client temporaire - Aucun email de credentials envoyé (comportement voulu)`);
     }
@@ -698,6 +773,7 @@ export class AuthService {
       email: contactEmail || '',
       role: 'client',
       userType: 'client',
+      is_superviseur: false, // Les clients ne sont jamais superviseurs
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -2028,6 +2104,7 @@ export class AuthService {
         email: user.email,
         role: userType === 'personnel' ? (user as Personnel).role : 'client',
         userType,
+        is_superviseur: userType === 'personnel' ? ((user as Personnel).is_superviseur || false) : false,
       };
 
       const access_token = this.jwtService.sign(payload, {
@@ -2053,6 +2130,119 @@ export class AuthService {
     } catch (error) {
       console.error('❌ Erreur génération tokens:', error);
       throw error;
+    }
+  }
+
+  /**
+   * ✅ Déconnexion d'un utilisateur - Marque le statut comme hors ligne
+   */
+  async logout(userId: string, userType: 'personnel' | 'client'): Promise<{ success: boolean; message: string }> {
+    try {
+      const id = parseInt(userId);
+      this.logger.log(`🔴 DÉBUT LOGOUT - userId: ${userId}, userType: ${userType}, id: ${id}`);
+
+      if (userType === 'personnel') {
+        const personnel = await this.personnelRepository.findOne({
+          where: { id },
+        });
+
+        if (!personnel) {
+          this.logger.error(`❌ Personnel ID ${id} non trouvé`);
+          throw new UnauthorizedException('Personnel non trouvé');
+        }
+
+        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${personnel.statut_en_ligne}`);
+
+        // Mettre à jour le statut en ligne à false avec query builder pour garantir la persistence
+        const updateResult = await this.personnelRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: false })
+          .where('id = :id', { id })
+          .execute();
+
+        this.logger.log(`✅ UPDATE RESULT - affected: ${updateResult.affected}`);
+
+        // Vérification post-update
+        const personnelUpdated = await this.personnelRepository.findOne({ where: { id } });
+        this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${personnelUpdated?.statut_en_ligne}`);
+
+        if (personnelUpdated?.statut_en_ligne === true) {
+          this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
+        } else {
+          this.logger.log(`✅ SUCCÈS: Personnel ${personnel.nom_utilisateur} marqué comme hors ligne`);
+        }
+
+        // Fermer les sessions Keycloak si disponible
+        if (this.keycloakService && personnel.keycloak_id) {
+          try {
+            await this.keycloakService.logoutAllUserSessions(personnel.keycloak_id);
+            this.logger.log(`Sessions Keycloak fermées pour ${personnel.nom_utilisateur}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
+          }
+        }
+
+        return {
+          success: true,
+          message: 'Déconnexion réussie',
+        };
+      } else {
+        const client = await this.clientRepository.findOne({
+          where: { id },
+        });
+
+        if (!client) {
+          this.logger.error(`❌ Client ID ${id} non trouvé`);
+          throw new UnauthorizedException('Client non trouvé');
+        }
+
+        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${client.statut_en_ligne}`);
+
+        // Mettre à jour le statut en ligne à false avec query builder
+        const updateResult = await this.clientRepository
+          .createQueryBuilder()
+          .update()
+          .set({ statut_en_ligne: false })
+          .where('id = :id', { id })
+          .execute();
+
+        this.logger.log(`✅ UPDATE RESULT - affected: ${updateResult.affected}`);
+
+        // Vérification post-update
+        const clientUpdated = await this.clientRepository.findOne({ where: { id } });
+        this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${clientUpdated?.statut_en_ligne}`);
+
+        if (clientUpdated?.statut_en_ligne === true) {
+          this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
+        } else {
+          this.logger.log(`✅ SUCCÈS: Client ${client.nom} marqué comme hors ligne`);
+        }
+
+        // Fermer les sessions Keycloak si disponible
+        if (this.keycloakService && client.keycloak_id) {
+          try {
+            await this.keycloakService.logoutAllUserSessions(client.keycloak_id);
+            this.logger.log(`Sessions Keycloak fermées pour ${client.nom}`);
+          } catch (keycloakError) {
+            this.logger.warn(`Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
+          }
+        }
+
+        return {
+          success: true,
+          message: 'Déconnexion réussie',
+        };
+      }
+    } catch (error) {
+      this.logger.error(`Erreur lors de la déconnexion: ${error.message}`);
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      return {
+        success: false,
+        message: 'Erreur lors de la déconnexion',
+      };
     }
   }
 }

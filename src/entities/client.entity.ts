@@ -167,6 +167,13 @@ export class Client {
   @Expose()
   code_fournisseur: string; // Code du fournisseur associé (si is_fournisseur = true)
 
+  // Champs de gestion de session et statut en ligne
+  @Column({ type: 'boolean', nullable: false, default: false })
+  statut_en_ligne: boolean; // Indique si l'utilisateur est actuellement connecté (true) ou hors ligne (false)
+
+  @Column({ type: 'timestamp', nullable: true })
+  last_activity: Date; // Timestamp de la dernière activité de l'utilisateur pour gérer l'expiration de session
+
   // Relations
   @OneToMany(() => ContactClient, (contact) => contact.client)
   contacts: ContactClient[];
@@ -193,6 +200,28 @@ export class Client {
   // Rôle par défaut pour les clients
   get role(): string {
     return 'client';
+  }
+
+  // Méthodes de gestion de session et statut en ligne
+  get isOnline(): boolean {
+    return this.statut_en_ligne === true;
+  }
+
+  get isSessionValid(): boolean {
+    if (!this.last_activity) return false;
+    const now = new Date();
+    const sessionDuration = now.getTime() - this.last_activity.getTime();
+    const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures en millisecondes
+    return sessionDuration < maxSessionDuration;
+  }
+
+  get sessionExpiresIn(): number | null {
+    if (!this.last_activity) return null;
+    const now = new Date();
+    const sessionDuration = now.getTime() - this.last_activity.getTime();
+    const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+    const remaining = maxSessionDuration - sessionDuration;
+    return remaining > 0 ? remaining : 0;
   }
 
   // Méthodes pour la gestion de l'état fiscal

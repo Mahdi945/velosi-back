@@ -83,6 +83,16 @@ export class Personnel {
   @Column({ type: 'boolean', nullable: false, default: false })
   is_location_active: boolean; // Position active (dernière position < 5 min)
 
+  @Column({ type: 'boolean', nullable: false, default: false })
+  is_superviseur: boolean; // Indique si le personnel a le statut de superviseur (peut créer du personnel administratif)
+
+  // Champs de gestion de session et statut en ligne
+  @Column({ type: 'boolean', nullable: false, default: false })
+  statut_en_ligne: boolean; // Indique si l'utilisateur est actuellement connecté (true) ou hors ligne (false)
+
+  @Column({ type: 'timestamp', nullable: true })
+  last_activity: Date; // Timestamp de la dernière activité de l'utilisateur pour gérer l'expiration de session
+
   // Relations
   @OneToMany(() => ObjectifCom, (objectif) => objectif.personnel)
   objectifs: ObjectifCom[];
@@ -120,6 +130,28 @@ export class Personnel {
     if (!this.location_tracking_enabled) return 'disabled';
     if (this.is_location_active && this.isLocationRecent) return 'active';
     return 'inactive';
+  }
+
+  // Méthodes de gestion de session et statut en ligne
+  get isOnline(): boolean {
+    return this.statut_en_ligne === true;
+  }
+
+  get isSessionValid(): boolean {
+    if (!this.last_activity) return false;
+    const now = new Date();
+    const sessionDuration = now.getTime() - this.last_activity.getTime();
+    const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures en millisecondes
+    return sessionDuration < maxSessionDuration;
+  }
+
+  get sessionExpiresIn(): number | null {
+    if (!this.last_activity) return null;
+    const now = new Date();
+    const sessionDuration = now.getTime() - this.last_activity.getTime();
+    const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+    const remaining = maxSessionDuration - sessionDuration;
+    return remaining > 0 ? remaining : 0;
   }
 
   // Méthode pour calculer la distance avec une autre position
