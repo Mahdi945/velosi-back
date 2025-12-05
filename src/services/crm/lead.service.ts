@@ -149,11 +149,22 @@ export class LeadService {
     }
 
     // ✅ CORRECTION CRITIQUE: Filtrage commercial multi-système
-    // Si assignedToId est fourni, afficher UNIQUEMENT:
-    // 1. Les prospects assignés à ce commercial (assignedToId = commercial)
-    // 2. OU les prospects où ce commercial est dans assignedToIds (nouveau système)
-    // 3. OU les prospects non assignés (assignedToId IS NULL ET assignedToIds = [])
-    if (assignedToId) {
+    // Priorité 1: Si assignedToIds (pluriel) est fourni - NOUVEAU SYSTÈME
+    if (query.assignedToIds && query.assignedToIds.length > 0) {
+      const conditions = query.assignedToIds.map((_, index) => 
+        `:assignedToId${index} = ANY(lead.assigned_to_ids)`
+      ).join(' OR ');
+      
+      const params: any = {};
+      query.assignedToIds.forEach((id, index) => {
+        params[`assignedToId${index}`] = id;
+      });
+      
+      queryBuilder.andWhere(`(${conditions})`, params);
+      console.log(`🎯 Filtrage multi-commercial activé pour IDs: ${query.assignedToIds.join(', ')}`);
+    }
+    // Priorité 2: Si assignedToId (singulier) est fourni - ANCIEN SYSTÈME (compatibilité)
+    else if (assignedToId) {
       queryBuilder.andWhere(
         '(lead.assignedToId = :assignedToId OR :assignedToId = ANY(lead.assigned_to_ids) OR (lead.assignedToId IS NULL AND (lead.assigned_to_ids IS NULL OR array_length(lead.assigned_to_ids, 1) IS NULL)))',
         { assignedToId }

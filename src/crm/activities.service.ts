@@ -118,7 +118,22 @@ export class ActivitiesService {
       }
 
       // Filtres de personnel
-      if (filters.assignedTo) {
+      // ✅ Priorité 1: Si assignedToIds (pluriel) est fourni - NOUVEAU SYSTÈME
+      if (filters.assignedToIds && filters.assignedToIds.length > 0) {
+        const conditions = filters.assignedToIds.map((_, index) => 
+          `:assignedToId${index} = ANY(activity.assigned_to_ids)`
+        ).join(' OR ');
+        
+        const params: any = {};
+        filters.assignedToIds.forEach((id, index) => {
+          params[`assignedToId${index}`] = id;
+        });
+        
+        queryBuilder.andWhere(`(${conditions})`, params);
+        console.log(`🎯 [ACTIVITY] Filtrage multi-commercial activé pour IDs: ${filters.assignedToIds.join(', ')}`);
+      }
+      // ✅ Priorité 2: Si assignedTo (singulier) est fourni - ANCIEN SYSTÈME (compatibilité)
+      else if (filters.assignedTo) {
         queryBuilder.andWhere('activity.assignedTo = :assignedTo', {
           assignedTo: filters.assignedTo,
         });

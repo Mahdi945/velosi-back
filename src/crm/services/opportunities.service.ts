@@ -27,17 +27,35 @@ export class OpportunitiesService {
 
   /**
    * 🔍 Récupérer les opportunités assignées à un commercial spécifique
+   * ✅ MULTI-COMMERCIAUX: Utilise assignedToIds (array) au lieu de assignedToId (single)
    */
   async findByAssignedTo(userId: number): Promise<Opportunity[]> {
-    return this.opportunityRepository.find({
-      where: { 
-        assignedToId: userId,
-        deletedAt: IsNull(),
-        isArchived: false
-      },
-      relations: ['lead', 'client', 'assignedTo', 'createdBy', 'updatedBy'],
-      order: { createdAt: 'DESC' },
-    });
+    console.log('🔍 [OpportunitiesService.findByAssignedTo] Filtrage pour userId:', userId);
+    
+    // Utiliser createQueryBuilder pour les requêtes complexes avec tableaux PostgreSQL
+    const results = await this.opportunityRepository
+      .createQueryBuilder('opportunity')
+      .leftJoinAndSelect('opportunity.lead', 'lead')
+      .leftJoinAndSelect('opportunity.client', 'client')
+      .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
+      .leftJoinAndSelect('opportunity.createdBy', 'createdBy')
+      .leftJoinAndSelect('opportunity.updatedBy', 'updatedBy')
+      .where('opportunity.deletedAt IS NULL')
+      .andWhere('opportunity.isArchived = false')
+      .andWhere(':userId = ANY(opportunity.assignedToIds)', { userId })
+      .orderBy('opportunity.createdAt', 'DESC')
+      .getMany();
+    
+    console.log('✅ [OpportunitiesService.findByAssignedTo] Résultats filtrés:', results.length);
+    if (results.length > 0) {
+      console.log('📋 [OpportunitiesService.findByAssignedTo] Première opportunité:', {
+        id: results[0].id,
+        title: results[0].title,
+        assignedToIds: results[0].assignedToIds
+      });
+    }
+    
+    return results;
   }
 
   /**
@@ -184,14 +202,14 @@ export class OpportunitiesService {
 
   /**
    * 📊 Statistiques des opportunités pour un commercial spécifique
+   * ✅ MULTI-COMMERCIAUX: Utilise assignedToIds (array)
    */
   async getStatisticsByCommercial(userId: number) {
-    const allOpportunities = await this.opportunityRepository.find({
-      where: { 
-        assignedToId: userId,
-        deletedAt: IsNull()
-      },
-    });
+    const allOpportunities = await this.opportunityRepository
+      .createQueryBuilder('opportunity')
+      .where('opportunity.deletedAt IS NULL')
+      .andWhere(':userId = ANY(opportunity.assignedToIds)', { userId })
+      .getMany();
 
     const totalValue = allOpportunities.reduce((sum, opp) => sum + Number(opp.value), 0);
     const wonOpportunities = allOpportunities.filter((opp) => opp.stage === 'closed_won');

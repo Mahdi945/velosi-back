@@ -27,16 +27,32 @@ export class LeadsService {
 
   /**
    * 🔍 Récupérer les leads assignés à un commercial spécifique
+   * ✅ MULTI-COMMERCIAUX: Utilise assignedToIds (array) au lieu de assignedToId (single)
    */
   async findByAssignedTo(userId: number): Promise<Lead[]> {
-    return this.leadRepository.find({
-      where: { 
-        assignedToId: userId,
-        isArchived: false
-      },
-      relations: ['assignedTo', 'createdBy', 'updatedBy'],
-      order: { createdAt: 'DESC' },
-    });
+    console.log('🔍 [LeadsService.findByAssignedTo] Filtrage pour userId:', userId);
+    
+    // Utiliser createQueryBuilder pour les requêtes complexes avec tableaux PostgreSQL
+    const results = await this.leadRepository
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
+      .leftJoinAndSelect('lead.createdBy', 'createdBy')
+      .leftJoinAndSelect('lead.updatedBy', 'updatedBy')
+      .where('lead.isArchived = false')
+      .andWhere(':userId = ANY(lead.assignedToIds)', { userId })
+      .orderBy('lead.createdAt', 'DESC')
+      .getMany();
+    
+    console.log('✅ [LeadsService.findByAssignedTo] Résultats filtrés:', results.length);
+    if (results.length > 0) {
+      console.log('📋 [LeadsService.findByAssignedTo] Premier lead:', {
+        id: results[0].id,
+        company: results[0].company,
+        assignedToIds: results[0].assignedToIds
+      });
+    }
+    
+    return results;
   }
 
   /**
@@ -179,14 +195,14 @@ export class LeadsService {
 
   /**
    * 📊 Statistiques des leads pour un commercial spécifique
+   * ✅ MULTI-COMMERCIAUX: Utilise assignedToIds (array)
    */
   async getStatisticsByCommercial(userId: number) {
-    const allLeads = await this.leadRepository.find({
-      where: { 
-        assignedToId: userId,
-        isArchived: false
-      },
-    });
+    const allLeads = await this.leadRepository
+      .createQueryBuilder('lead')
+      .where('lead.isArchived = false')
+      .andWhere(':userId = ANY(lead.assignedToIds)', { userId })
+      .getMany();
 
     return {
       total: allLeads.length,

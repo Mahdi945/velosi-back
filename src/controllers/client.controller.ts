@@ -271,6 +271,25 @@ export class ClientController {
     }
   }
 
+  @Post(':id/revoke-portal-access')
+  @HttpCode(HttpStatus.OK)
+  async revokePortalAccess(
+    @Param('id', ParseIntPipe) id: number
+  ): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    try {
+      await this.clientService.revokePortalAccess(id);
+      return {
+        success: true,
+        message: 'Accès au portail révoqué avec succès. Le client a été désinscrit du portail.'
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {

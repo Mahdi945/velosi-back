@@ -528,8 +528,22 @@ export class OpportunityService {
     }
 
     // ✅ CORRECTION: Filtrage commercial multi-système
-    // Prendre en compte assignedToId ET assignedToIds
-    if (query.assignedToId) {
+    // Priorité 1: Si assignedToIds (pluriel) est fourni - NOUVEAU SYSTÈME
+    if (query.assignedToIds && query.assignedToIds.length > 0) {
+      const conditions = query.assignedToIds.map((_, index) => 
+        `:assignedToId${index} = ANY(opportunity.assigned_to_ids)`
+      ).join(' OR ');
+      
+      const params: any = {};
+      query.assignedToIds.forEach((id, index) => {
+        params[`assignedToId${index}`] = id;
+      });
+      
+      queryBuilder.andWhere(`(${conditions})`, params);
+      console.log(`🎯 [OPPORTUNITY] Filtrage multi-commercial activé pour IDs: ${query.assignedToIds.join(', ')}`);
+    }
+    // Priorité 2: Si assignedToId (singulier) est fourni - ANCIEN SYSTÈME (compatibilité)
+    else if (query.assignedToId) {
       queryBuilder.andWhere(
         '(opportunity.assignedToId = :assignedToId OR :assignedToId = ANY(opportunity.assigned_to_ids) OR (opportunity.assignedToId IS NULL AND (opportunity.assigned_to_ids IS NULL OR array_length(opportunity.assigned_to_ids, 1) IS NULL)))',
         { assignedToId: query.assignedToId }

@@ -6,7 +6,7 @@ import {
   IsDateString,
   IsArray,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   ActivityType,
   ActivityStatus,
@@ -54,6 +54,18 @@ export class FilterActivityDto {
   @Type(() => Number)
   @IsNumber()
   assignedTo?: number;
+
+  // ✅ NOUVEAU: Filtrage multi-commercial (pluriel)
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) {
+      return value.map(Number);
+    }
+    return value ? [Number(value)] : undefined;
+  })
+  @IsArray()
+  @IsNumber({}, { each: true })
+  assignedToIds?: number[];
 
   @IsOptional()
   @Type(() => Number)

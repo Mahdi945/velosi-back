@@ -441,7 +441,17 @@ export class QuotesService {
       
       for (const quote of data) {
         if (quote.commercialIds && quote.commercialIds.length > 0) {
-          quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+          const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
+          // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
+          quote.assignedCommercials = fullPersonnel.map(p => ({
+            id: p.id,
+            nom: p.nom,
+            prenom: p.prenom,
+            nom_utilisateur: p.nom_utilisateur,
+            email: p.email,
+            telephone: p.telephone,
+            role: p.role
+          })) as any;
         }
       }
     }
@@ -531,7 +541,17 @@ export class QuotesService {
       
       for (const quote of data) {
         if (quote.commercialIds && quote.commercialIds.length > 0) {
-          quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+          const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
+          // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
+          quote.assignedCommercials = fullPersonnel.map(p => ({
+            id: p.id,
+            nom: p.nom,
+            prenom: p.prenom,
+            nom_utilisateur: p.nom_utilisateur,
+            email: p.email,
+            telephone: p.telephone,
+            role: p.role
+          })) as any;
         }
       }
     }
@@ -577,7 +597,18 @@ export class QuotesService {
       
       // Utiliser le repository pour charger les commerciaux
       const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
-      quote.assignedCommercials = await personnelRepo.findByIds(quote.commercialIds);
+      const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
+      
+      // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
+      quote.assignedCommercials = fullPersonnel.map(p => ({
+        id: p.id,
+        nom: p.nom,
+        prenom: p.prenom,
+        nom_utilisateur: p.nom_utilisateur,
+        email: p.email,
+        telephone: p.telephone,
+        role: p.role
+      })) as any;
       
       console.log(`✅ ${quote.assignedCommercials.length} commerciaux chargés pour cotation ${quote.quoteNumber}`);
     }
@@ -1977,18 +2008,30 @@ export class QuotesService {
   /**
    * Obtenir les statistiques des devis
    */
+  /**
+   * 📊 Statistiques des cotations
+   * ✅ MULTI-COMMERCIAUX: Utilise commercial_ids (array) avec ANY operator
+   */
   async getStatistics(filters?: { startDate?: Date; endDate?: Date; commercialId?: number }) {
-    const where: FindOptionsWhere<Quote> = {};
+    let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
 
+    // Filtrer par commercial si spécifié (multi-commerciaux)
     if (filters?.commercialId) {
-      where.commercialId = filters.commercialId;
+      queryBuilder.andWhere(
+        ':commercialId = ANY(quote.commercial_ids)',
+        { commercialId: filters.commercialId }
+      );
     }
 
+    // Filtrer par dates si spécifiées
     if (filters?.startDate && filters?.endDate) {
-      where.createdAt = Between(filters.startDate, filters.endDate);
+      queryBuilder.andWhere(
+        'quote.createdAt BETWEEN :startDate AND :endDate',
+        { startDate: filters.startDate, endDate: filters.endDate }
+      );
     }
 
-    const quotes = await this.quoteRepository.find({ where });
+    const quotes = await queryBuilder.getMany();
 
     return {
       total: quotes.length,

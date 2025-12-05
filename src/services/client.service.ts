@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Client, EtatFiscal } from '../entities/client.entity';
@@ -856,6 +856,75 @@ export class ClientService {
     } catch (error) {
       console.error(`❌ Erreur lors de la conversion du client ${clientId} en fournisseur:`, error);
       throw new BadRequestException(`Impossible de convertir le client en fournisseur: ${error.message}`);
+    }
+  }
+
+  /**
+   * Révoquer l'accès au portail d'un client
+   * 1. Supprime l'utilisateur de Keycloak
+   * 2. Met à jour is_permanent à false
+   * 3. Supprime le mot de passe de la base de données
+   */
+  async revokePortalAccess(clientId: number): Promise<void> {
+    const client = await this.clientRepository.findOne({
+      where: { id: clientId },
+      relations: ['contacts']
+    });
+
+    // Vérifier que le client existe
+    if (!client) {
+      throw new NotFoundException(`Client avec l'ID ${clientId} introuvable`);
+    }
+
+    // Vérifier si le client a un accès au portail
+    if (!client.is_permanent) {
+      throw new ConflictException(`Le client "${client.nom}" n'a pas d'accès au portail`);
+    }
+
+    try {
+      // 1. Supprimer l'utilisateur de Keycloak si un keycloak_id existe
+      if (client.keycloak_id) {
+        console.log(`🔑 Suppression de l'utilisateur Keycloak ID: ${client.keycloak_id}`);
+        try {
+          await this.keycloakService.deleteUser(client.keycloak_id);
+          console.log(`✅ Utilisateur Keycloak supprimé avec succès`);
+        } catch (keycloakError) {
+          console.warn(`⚠️ Erreur lors de la suppression Keycloak (l'utilisateur n'existe peut-être plus):`, keycloakError.message);
+          // Continue même si Keycloak échoue
+        }
+      }
+
+      // 2. Mettre à jour le client: is_permanent = false, mot_de_passe = null, keycloak_id = null
+      await this.clientRepository.update(clientId, {
+        is_permanent: false,
+        mot_de_passe: null,
+        keycloak_id: null
+      });
+
+      console.log(`✅ Accès au portail révoqué pour le client ${client.nom} (ID: ${clientId})`);
+
+      // 3. Envoyer un email de notification (optionnel)
+      try {
+        const contactEmail = client.email || client.contacts?.[0]?.mail1;
+        if (contactEmail) {
+          await this.emailService.sendEmail(
+            contactEmail,
+            'Accès au portail révoqué',
+            `Bonjour ${client.interlocuteur || client.nom},\n\n` +
+            `Votre accès au portail client Velosi a été révoqué.\n\n` +
+            `Si vous pensez qu'il s'agit d'une erreur, veuillez contacter notre support.\n\n` +
+            `Cordialement,\n` +
+            `L'équipe Velosi`
+          );
+          console.log(`📧 Email de notification envoyé à ${contactEmail}`);
+        }
+      } catch (emailError) {
+        console.warn(`⚠️ Impossible d'envoyer l'email de notification:`, emailError.message);
+        // Continue même si l'email échoue
+      }
+    } catch (error) {
+      console.error(`❌ Erreur lors de la révocation de l'accès au portail:`, error);
+      throw new InternalServerErrorException(`Impossible de révoquer l'accès au portail: ${error.message}`);
     }
   }
 

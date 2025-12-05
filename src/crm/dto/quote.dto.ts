@@ -229,8 +229,9 @@ export class UpdateQuoteItemDto extends CreateQuoteItemDto {
 
 // DTO pour créer un devis
 export class CreateQuoteDto {
+  @IsOptional()
   @IsString()
-  title: string;
+  title?: string;
 
   @IsOptional()
   @Transform(({ value }) => {

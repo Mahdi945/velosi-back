@@ -298,6 +298,17 @@ export class LeadQueryDto {
   @Transform(({ value }) => parseInt(value))
   assignedToId?: number;
 
+  // ✅ NOUVEAU: Filtrage multi-commercial (pluriel)
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Transform(({ value }) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map(v => parseInt(v));
+    return [parseInt(value)];
+  })
+  assignedToIds?: number[];
+
   @IsOptional()
   @IsString()
   industry?: string;

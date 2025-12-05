@@ -43,6 +43,14 @@ export class QuotesController {
     const userId = req.user?.userId || req.user?.id;
     const userRoles = req.user?.roles || [];
     
+    // Si l'utilisateur est SEULEMENT client (pas admin/commercial), filtrer par clientId
+    const isClientOnly = userRoles.includes('client') && !userRoles.includes('administratif') && !userRoles.includes('admin') && !userRoles.includes('commercial');
+    
+    if (isClientOnly && userId && !filters.clientId) {
+      console.log(`🔐 [Quotes] Filtrage par client: ${userId}`);
+      filters.clientId = userId;
+    }
+    
     // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses cotations
     const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
     
