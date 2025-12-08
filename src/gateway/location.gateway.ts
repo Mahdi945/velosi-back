@@ -18,7 +18,16 @@ import {
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:4200', 'http://localhost:3000'],
+    origin: [
+      'http://localhost:4200',
+      'http://localhost:3000',
+      'https://localhost:4200',
+      'https://wyselogiquote.com',
+      'https://www.wyselogiquote.com',
+      'http://vps-3b4fd3be.vps.ovh.ca:4200',
+      'https://vps-3b4fd3be.vps.ovh.ca',
+      'https://velosi-front.vercel.app'
+    ],
     methods: ['GET', 'POST'],
     credentials: true,
   },

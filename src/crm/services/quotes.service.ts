@@ -613,6 +613,12 @@ export class QuotesService {
       console.log(`✅ ${quote.assignedCommercials.length} commerciaux chargés pour cotation ${quote.quoteNumber}`);
     }
 
+    // ✅ Trier les items par ID croissant pour garantir l'ordre d'affichage
+    if (quote.items && quote.items.length > 0) {
+      quote.items.sort((a, b) => (a.id || 0) - (b.id || 0));
+      console.log(`✅ Items triés par ID croissant pour cotation ${quote.quoteNumber}`);
+    }
+
     return quote;
   }
 
@@ -641,6 +647,18 @@ export class QuotesService {
 
     if (!quote) {
       throw new NotFoundException(`Devis ${quoteNumber} introuvable`);
+    }
+
+    // ✅ Trier les items par lineOrder croissant pour garantir l'ordre de présentation
+    if (quote.items && quote.items.length > 0) {
+      quote.items.sort((a, b) => (a.lineOrder || 0) - (b.lineOrder || 0));
+      console.log(`✅ Items triés par lineOrder croissant pour cotation ${quoteNumber}`);
+    }
+
+    // ✅ Trier les items par ID croissant pour garantir l'ordre d'affichage
+    if (quote.items && quote.items.length > 0) {
+      quote.items.sort((a, b) => (a.id || 0) - (b.id || 0));
+      console.log(`✅ Items triés par ID croissant pour cotation ${quote.quoteNumber}`);
     }
 
     return quote;

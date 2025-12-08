@@ -14,13 +14,21 @@ import { JwtService } from '@nestjs/jwt';
 import { VechatService } from '../vechat/vechat.service';
 
 @WebSocketGateway({
-  port: 3001,
   cors: {
-    origin: ['http://localhost:4200', 'http://localhost:3000'],
+    origin: [
+      'http://localhost:4200',
+      'http://localhost:3000',
+      'https://localhost:4200',
+      'https://wyselogiquote.com',
+      'https://www.wyselogiquote.com',
+      'http://vps-3b4fd3be.vps.ovh.ca:4200',
+      'https://vps-3b4fd3be.vps.ovh.ca',
+      'https://velosi-front.vercel.app'
+    ],
     credentials: true,
   },
   namespace: '/vechat',
-  transports: ['websocket']
+  transports: ['websocket', 'polling']
 })
 export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
@@ -38,7 +46,7 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   ) {}
 
   afterInit(server: Server) {
-    this.logger.log('VechatGateway initialisé sur le port 3001');
+    this.logger.log('VechatGateway initialisé sur le namespace /vechat');
   }
 
   async handleConnection(socket: Socket) {
