@@ -16,14 +16,14 @@ import { VechatService } from '../vechat/vechat.service';
 @WebSocketGateway({
   cors: {
     origin: [
-      'http://localhost:4200',
-      'http://localhost:3000',
-      'https://localhost:4200',
+      process.env.FRONTEND_URL || 'http://localhost:4200',
+      process.env.BACKEND_URL || 'http://localhost:3000',
       'https://wyselogiquote.com',
       'https://www.wyselogiquote.com',
       'http://vps-3b4fd3be.vps.ovh.ca:4200',
       'https://vps-3b4fd3be.vps.ovh.ca',
-      'https://velosi-front.vercel.app'
+      'https://velosi-front.vercel.app',
+      'https://localhost:4200'
     ],
     credentials: true,
   },

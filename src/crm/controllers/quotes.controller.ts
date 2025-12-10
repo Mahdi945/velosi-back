@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
   SetMetadata,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { QuotesService } from '../services/quotes.service';
 import {
@@ -34,7 +35,29 @@ export class QuotesController {
 
   @Post()
   async create(@Body() createQuoteDto: CreateQuoteDto, @Req() req: any) {
-    const userId = req.user?.userId || req.user?.id || 1;
+    console.log('🔐 [CREATE QUOTE] ========================================');
+    console.log('🔐 [CREATE QUOTE] req.user:', req.user ? 'présent' : 'undefined');
+    console.log('🔐 [CREATE QUOTE] createdBy depuis DTO:', createQuoteDto.createdBy);
+    console.log('🔐 [CREATE QUOTE] ========================================');
+    
+    // ✅ SOLUTION SIMPLIFIÉE: Utiliser directement createdBy du DTO
+    // Si createdBy n'est pas fourni, essayer de récupérer depuis req.user
+    let userId = createQuoteDto.createdBy;
+    
+    if (!userId && req.user) {
+      // Fallback: Utiliser req.user si disponible
+      const rawUserId = req.user.id || req.user.userId;
+      userId = typeof rawUserId === 'string' ? parseInt(rawUserId, 10) : rawUserId;
+      console.log('🔐 [CREATE QUOTE] Utilisation de req.user.id:', userId);
+    }
+    
+    if (!userId) {
+      console.error('❌ [CREATE QUOTE] ERREUR: Aucun utilisateur identifié!');
+      throw new UnauthorizedException('Impossible d\'identifier l\'utilisateur créateur');
+    }
+    
+    console.log('✅ [CREATE QUOTE] User ID final:', userId, 'Type:', typeof userId);
+    
     return this.quotesService.create(createQuoteDto, userId);
   }
 

@@ -19,8 +19,8 @@ import {
 @WebSocketGateway({
   cors: {
     origin: [
-      'http://localhost:4200',
-      'http://localhost:3000',
+      process.env.FRONTEND_URL || 'http://localhost:4200',
+      process.env.BACKEND_URL || 'http://localhost:3000',
       'https://localhost:4200',
       'https://wyselogiquote.com',
       'https://www.wyselogiquote.com',

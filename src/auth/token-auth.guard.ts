@@ -88,8 +88,11 @@ export class TokenAuthGuard implements CanActivate {
                 ? decoded.keycloak_roles[0] 
                 : (user.role || decoded.role);
               
+              // 🔧 FIX: S'assurer que l'ID est un nombre et non une string
+              const userId = typeof user.id === 'string' ? parseInt(user.id, 10) : user.id;
+              
               request.user = {
-                id: user.id,
+                id: userId, // ✅ Toujours un number
                 username: decoded.userType === 'personnel' ? user.nom_utilisateur : user.nom,
                 email: user.email,
                 userType: decoded.userType,
@@ -97,7 +100,7 @@ export class TokenAuthGuard implements CanActivate {
                 keycloak_roles: decoded.keycloak_roles || [],
                 keycloak_id: decoded.keycloak_id
               };
-              console.log('✅ Utilisateur local validé:', request.user.username, 'Rôle:', request.user.role);
+              console.log('✅ Utilisateur local validé:', request.user.username, 'ID:', request.user.id, 'Type ID:', typeof request.user.id, 'Rôle:', request.user.role);
               return true;
             }
           } catch (userError) {
@@ -109,9 +112,12 @@ export class TokenAuthGuard implements CanActivate {
         const keycloakRole = decoded.keycloak_roles && decoded.keycloak_roles.length > 0 
           ? decoded.keycloak_roles[0] 
           : decoded.role;
+        
+        // 🔧 FIX: S'assurer que l'ID est un nombre et non une string
+        const keycloakUserId = typeof decoded.sub === 'string' ? parseInt(decoded.sub, 10) : decoded.sub;
           
         request.user = {
-          id: decoded.sub,
+          id: keycloakUserId, // ✅ Toujours un number
           username: decoded.username,
           userType: decoded.userType,
           role: keycloakRole,
@@ -119,7 +125,7 @@ export class TokenAuthGuard implements CanActivate {
           keycloak_id: decoded.keycloak_id
         };
         
-        console.log('✅ Utilisateur Keycloak validé:', request.user.username, 'Rôle:', request.user.role);
+        console.log('✅ Utilisateur Keycloak validé:', request.user.username, 'ID:', request.user.id, 'Type ID:', typeof request.user.id, 'Rôle:', request.user.role);
         return true;
         
       } catch (verifyError) {

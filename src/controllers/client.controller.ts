@@ -29,6 +29,55 @@ export class ClientController {
     return await this.clientService.create(createClientDto);
   }
 
+  @Post('bulk-create')
+  @HttpCode(HttpStatus.CREATED)
+  async bulkCreate(@Body('clients') clients: CreateClientDto[]): Promise<{
+    success: boolean;
+    message: string;
+    data: {
+      successCount: number;
+      failedCount: number;
+      createdClients: Client[];
+      errors: Array<{ index: number; email: string; error: string }>;
+    };
+  }> {
+    if (!clients || !Array.isArray(clients) || clients.length === 0) {
+      throw new BadRequestException('Le tableau de clients ne peut pas être vide');
+    }
+
+    if (clients.length > 1000) {
+      throw new BadRequestException('Vous ne pouvez pas importer plus de 1000 clients à la fois');
+    }
+
+    const createdClients: Client[] = [];
+    const errors: Array<{ index: number; email: string; error: string }> = [];
+
+    for (let i = 0; i < clients.length; i++) {
+      try {
+        const client = await this.clientService.create(clients[i]);
+        createdClients.push(client);
+      } catch (error) {
+        console.error(`Erreur lors de la création du client à l'index ${i}:`, error);
+        errors.push({
+          index: i + 2, // +2 car ligne 1 = en-têtes Excel, ligne 2 = premier client
+          email: clients[i]?.['email'] || 'Email non fourni',
+          error: error.message || 'Erreur inconnue'
+        });
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      message: `${createdClients.length} client(s) créé(s) avec succès${errors.length > 0 ? `, ${errors.length} échec(s)` : ''}`,
+      data: {
+        successCount: createdClients.length,
+        failedCount: errors.length,
+        createdClients,
+        errors
+      }
+    };
+  }
+
   @Get()
   async findAll(): Promise<any> {
     const clients = await this.clientService.findAll();

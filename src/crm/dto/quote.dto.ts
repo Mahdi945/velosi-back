@@ -382,6 +382,11 @@ export class CreateQuoteDto {
   @IsString()
   exchangeNotes?: string;
 
+  // 🔧 FIX: Champ createdBy pour enregistrer qui a créé la cotation
+  @IsOptional()
+  @IsNumber()
+  createdBy?: number;
+
   @IsOptional()
   @IsNumber()
   commercialId?: number; // 🔴 Ancien - compatibilité

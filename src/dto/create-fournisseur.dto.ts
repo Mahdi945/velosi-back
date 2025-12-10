@@ -90,7 +90,7 @@ export class CreateFournisseurDto {
   fax?: string;
 
   @IsOptional()
-  @IsEmail()
+  @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(50)
   email?: string;
 

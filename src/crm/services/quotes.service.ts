@@ -253,6 +253,11 @@ export class QuotesService {
    */
   async create(createQuoteDto: CreateQuoteDto, userId: number): Promise<Quote> {
     try {
+      console.log('📝 [QuotesService.create] ========================================');
+      console.log('📝 [QuotesService.create] userId reçu:', userId, 'Type:', typeof userId);
+      console.log('📝 [QuotesService.create] DTO createdBy:', createQuoteDto.createdBy);
+      console.log('📝 [QuotesService.create] ========================================');
+      
       // Générer le numéro de devis
       const quoteNumber = await this.generateQuoteNumber();
 
@@ -269,7 +274,7 @@ export class QuotesService {
       const quote = this.quoteRepository.create({
         ...createQuoteDto,
         quoteNumber,
-        createdBy: userId,
+        createdBy: userId, // ✅ Utiliser le userId passé en paramètre (prioritaire)
         status: QuoteStatus.DRAFT,
         type: 'cotation', // ✅ Type par défaut: cotation
         taxRate: createQuoteDto.taxRate || 19.0,
@@ -277,6 +282,8 @@ export class QuotesService {
         // Garder aussi commercialId pour compatibilité (premier commercial)
         commercialId: commercialIds.length > 0 ? commercialIds[0] : undefined,
       });
+      
+      console.log('📝 [QuotesService.create] Quote créé avec createdBy:', quote.createdBy);
 
       // Créer les lignes
       if (createQuoteDto.items && createQuoteDto.items.length > 0) {
@@ -296,6 +303,14 @@ export class QuotesService {
 
       // Sauvegarder
       const savedQuote = await this.quoteRepository.save(quote);
+      
+      console.log('💾 [QuotesService.create] Quote sauvegardée avec succès:', {
+        id: savedQuote.id,
+        quoteNumber: savedQuote.quoteNumber,
+        createdBy: savedQuote.createdBy,
+        commercialId: savedQuote.commercialId,
+        commercialIds: savedQuote.commercialIds
+      });
 
       // 🎯 Générer le QR code après la sauvegarde (on a besoin de l'ID)
       const qrCode = await this.generateQRCode(savedQuote);

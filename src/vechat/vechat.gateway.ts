@@ -23,7 +23,11 @@ interface ConnectedUser {
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:4200', 'http://localhost:3000'],
+    origin: [
+      process.env.FRONTEND_URL || 'http://localhost:4200',
+      process.env.BACKEND_URL || 'http://localhost:3000',
+      'https://wyselogiquote.com'
+    ],
     credentials: true,
   },
   namespace: '/vechat',

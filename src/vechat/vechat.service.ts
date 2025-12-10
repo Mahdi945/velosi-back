@@ -808,7 +808,8 @@ export class VechatService {
     }
 
     // URL d'accès au fichier via l'endpoint sécurisé
-    const fileUrl = `http://localhost:3000/api/vechat/files/${subFolder}/${fileName}`;
+    const backendUrl = process.env.BACKEND_URL || process.env.API_BASE_URL || 'http://localhost:3000';
+    const fileUrl = `${backendUrl}/api/vechat/files/${subFolder}/${fileName}`;
 
     // Créer le message avec le fichier
     const messageData: CreateMessageDto = {
