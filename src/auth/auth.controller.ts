@@ -77,6 +77,7 @@ export class AuthController {
     @Request() req,
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) response: Response,
+    @Req() expressReq: ExpressRequest,
   ) {
     // IMPORTANT: Nettoyer TOUS les cookies d'authentification avant la nouvelle connexion
     console.log('🧹 Nettoyage forcé des cookies avant nouvelle connexion');
@@ -93,7 +94,7 @@ export class AuthController {
       path: '/'
     });
 
-    const result = await this.authService.login(loginDto);
+    const result = await this.authService.login(loginDto, expressReq);
     console.log('🔑 Nouvelle connexion pour:', result.user.username, 'Rôle:', result.user.role);
 
     // SOLUTION ALTERNATIVE : Cookies NON httpOnly pour permettre l'accès JavaScript
@@ -305,8 +306,12 @@ export class AuthController {
       if (user && user.id && user.userType) {
         this.logger.log(`🔄 Appel authService.logout pour user ${user.id} (${user.userType})`);
         
+        // 🔑 Récupérer le sessionId depuis le JWT si disponible
+        const sessionId = (user as any).sessionId;
+        this.logger.log(`🔑 SessionId du JWT: ${sessionId || 'non disponible'}`);
+        
         // Mettre à jour le statut en ligne dans la base de données
-        const result = await this.authService.logout(user.id.toString(), user.userType);
+        const result = await this.authService.logout(user.id.toString(), user.userType, sessionId);
         
         this.logger.log(`✅ Déconnexion de ${user.userType} ${user.username} (ID: ${user.id}) - Result: ${JSON.stringify(result)}`);
       } else {

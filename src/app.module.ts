@@ -20,9 +20,11 @@ import { DiagnosticController } from './controllers/diagnostic.controller';
 import { CleanupController } from './controllers/cleanup.controller';
 import { StatsController } from './controllers/stats.controller';
 import { DashboardController } from './controllers/dashboard.controller';
+import { LoginHistoryController } from './controllers/login-history.controller';
 import { typeOrmConfig } from './config/database.config';
 import { SchedulerService } from './services/scheduler.service';
 import { DashboardService } from './services/dashboard.service';
+import { LoginHistoryService } from './services/login-history.service';
 import { Personnel } from './entities/personnel.entity';
 import { Client } from './entities/client.entity';
 import { AutorisationTVA } from './entities/autorisation-tva.entity';
@@ -33,6 +35,7 @@ import { Quote } from './crm/entities/quote.entity';
 import { ObjectifCom } from './entities/objectif-com.entity';
 import { Navire } from './entities/navire.entity';
 import { BiometricCredential } from './entities/biometric-credential.entity';
+import { LoginHistory } from './entities/login-history.entity';
 import { KeycloakService } from './auth/keycloak.service';
 import { EmailService } from './services/email.service';
 import { PersonnelService } from './services/personnel.service';
@@ -74,9 +77,9 @@ import { ImportDataModule } from './modules/import-data.module';
     VechatModule, // Module VelosiChat
     ClientTVAModule, // Module de gestion des clients et autorisations TVA
     ImportDataModule, // Module d'importation de données (ports et aéroports)
-  TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire, BiometricCredential]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService et BiometricCredential pour l'authentification biométrique
+  TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire, BiometricCredential, LoginHistory]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService et BiometricCredential pour l'authentification biométrique et LoginHistory pour l'historique de connexion
   ],
-  controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController],
-  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService],
+  controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController, LoginHistoryController],
+  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService, LoginHistoryService],
 })
 export class AppModule {}

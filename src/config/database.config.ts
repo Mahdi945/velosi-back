@@ -7,6 +7,7 @@ import { ObjectifCom } from '../entities/objectif-com.entity';
 import { AutorisationTVA } from '../entities/autorisation-tva.entity';
 import { BCsusTVA } from '../entities/bcsus-tva.entity';
 import { BiometricCredential } from '../entities/biometric-credential.entity';
+import { LoginHistory } from '../entities/login-history.entity';
 import { VechatMessage } from '../vechat/entities/vechat-message.entity';
 import { VechatConversation } from '../vechat/entities/vechat-conversation.entity';
 import { VechatPresence } from '../vechat/entities/vechat-presence.entity';
@@ -59,6 +60,7 @@ export const typeOrmConfig = (
       ContactClient,
       ObjectifCom,
       BiometricCredential,
+      LoginHistory,
       VechatMessage,
       VechatConversation,
       VechatPresence,

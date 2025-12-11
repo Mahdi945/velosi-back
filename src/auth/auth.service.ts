@@ -21,6 +21,8 @@ import { CreatePersonnelDto, CreateClientDto } from '../dto/register.dto';
 import { ContactClientService } from '../services/contact-client.service';
 import { EmailService } from '../services/email.service';
 import { OtpService } from '../services/otp.service';
+import { LoginHistoryService } from '../services/login-history.service';
+import { UserType, LoginMethod, LoginStatus } from '../entities/login-history.entity';
 
 export interface LoginDto {
   usernameOrEmail: string;
@@ -34,6 +36,7 @@ export interface JwtPayload {
   role: string;
   userType: 'client' | 'personnel';
   is_superviseur?: boolean; // Ajouter le champ superviseur
+  sessionId?: number; // ID de la session login_history pour logout spécifique
   iat?: number;
   exp?: number;
 }
@@ -79,6 +82,7 @@ export class AuthService {
     private contactClientService: ContactClientService,
     private emailService: EmailService,
     private otpService: OtpService,
+    @Optional() private loginHistoryService: LoginHistoryService,
   ) {
     this.clientRepository = clientRepository;
     this.personnelRepository = personnelRepository;
@@ -168,7 +172,7 @@ export class AuthService {
     return null;
   }
 
-  async login(loginDto: LoginDto): Promise<AuthResult> {
+  async login(loginDto: LoginDto, req?: any): Promise<AuthResult> {
     const user = await this.validateUser(
       loginDto.usernameOrEmail,
       loginDto.password,
@@ -214,6 +218,32 @@ export class AuthService {
       this.logger.log(`Client ${user.nom} marqué comme en ligne`);
     }
 
+    // 🔥 ENREGISTRER LA CONNEXION DANS L'HISTORIQUE
+    let sessionId: number | undefined;
+    if (this.loginHistoryService && req) {
+      try {
+        const userType = user.userType === 'personnel' ? UserType.PERSONNEL : UserType.CLIENT;
+        const username = user.userType === 'personnel' ? user.nom_utilisateur : user.nom;
+        const fullName = user.userType === 'personnel' ? `${user.prenom} ${user.nom}` : user.nom;
+        
+        const loginEntry = await this.loginHistoryService.createLoginFromRequest(
+          req,
+          user.id,
+          userType,
+          username,
+          fullName,
+          LoginMethod.PASSWORD,
+          LoginStatus.SUCCESS
+        );
+        
+        sessionId = loginEntry.id; // 🔑 STOCKER L'ID DE SESSION
+        this.logger.log(`✅ Connexion enregistrée dans l'historique pour ${username} (Session #${sessionId})`);
+      } catch (error) {
+        this.logger.warn(`⚠️ Erreur lors de l'enregistrement de la connexion dans l'historique:`, error);
+        // Ne pas bloquer la connexion si l'historique échoue
+      }
+    }
+
     const payload: JwtPayload = {
       sub: user.id.toString(),
       username: user.userType === 'personnel' ? user.nom_utilisateur : user.nom,
@@ -221,6 +251,7 @@ export class AuthService {
       role: user.userType === 'personnel' ? user.role : 'client',
       userType: user.userType,
       is_superviseur: user.userType === 'personnel' ? (user.is_superviseur || false) : false,
+      sessionId: sessionId, // 🔑 INCLURE L'ID DE SESSION DANS LE JWT
     };
 
     const access_token = this.jwtService.sign(payload);
@@ -2136,7 +2167,7 @@ export class AuthService {
   /**
    * ✅ Déconnexion d'un utilisateur - Marque le statut comme hors ligne
    */
-  async logout(userId: string, userType: 'personnel' | 'client'): Promise<{ success: boolean; message: string }> {
+  async logout(userId: string, userType: 'personnel' | 'client', sessionId?: number): Promise<{ success: boolean; message: string }> {
     try {
       const id = parseInt(userId);
       this.logger.log(`🔴 DÉBUT LOGOUT - userId: ${userId}, userType: ${userType}, id: ${id}`);
@@ -2171,6 +2202,32 @@ export class AuthService {
           this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
         } else {
           this.logger.log(`✅ SUCCÈS: Personnel ${personnel.nom_utilisateur} marqué comme hors ligne`);
+        }
+
+        // 🔥 ENREGISTRER LA DÉCONNEXION DANS LE JOURNAL
+        if (this.loginHistoryService) {
+          try {
+            // 🔑 Utiliser le sessionId passé en paramètre pour fermer UNIQUEMENT cette session spécifique
+            if (sessionId) {
+              await this.loginHistoryService.recordLogout(sessionId);
+              this.logger.log(`✅ Déconnexion enregistrée pour session spécifique #${sessionId}`);
+            } else {
+              // Fallback: Si pas de sessionId, fermer la dernière session active
+              this.logger.warn(`⚠️ Pas de sessionId fourni, utilisation du fallback`);
+              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.PERSONNEL);
+              if (activeSessions && activeSessions.length > 0) {
+                // Fermer uniquement la DERNIÈRE session active (la plus récente)
+                const lastSession = activeSessions[0];
+                await this.loginHistoryService.recordLogout(lastSession.id);
+                this.logger.log(`✅ Déconnexion enregistrée pour dernière session #${lastSession.id}`);
+              } else {
+                this.logger.warn(`⚠️ Aucune session active trouvée pour le personnel #${id}`);
+              }
+            }
+          } catch (error) {
+            this.logger.warn(`⚠️ Erreur lors de l'enregistrement de la déconnexion:`, error);
+            // Ne pas bloquer la déconnexion si l'historique échoue
+          }
         }
 
         // Fermer les sessions Keycloak si disponible
@@ -2217,6 +2274,32 @@ export class AuthService {
           this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
         } else {
           this.logger.log(`✅ SUCCÈS: Client ${client.nom} marqué comme hors ligne`);
+        }
+
+        // 🔥 ENREGISTRER LA DÉCONNEXION DANS LE JOURNAL
+        if (this.loginHistoryService) {
+          try {
+            // 🔑 Utiliser le sessionId passé en paramètre pour fermer UNIQUEMENT cette session spécifique
+            if (sessionId) {
+              await this.loginHistoryService.recordLogout(sessionId);
+              this.logger.log(`✅ Déconnexion client enregistrée pour session spécifique #${sessionId}`);
+            } else {
+              // Fallback: Si pas de sessionId, fermer la dernière session active
+              this.logger.warn(`⚠️ Pas de sessionId fourni pour client, utilisation du fallback`);
+              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.CLIENT);
+              if (activeSessions && activeSessions.length > 0) {
+                // Fermer uniquement la DERNIÈRE session active (la plus récente)
+                const lastSession = activeSessions[0];
+                await this.loginHistoryService.recordLogout(lastSession.id);
+                this.logger.log(`✅ Déconnexion client enregistrée pour dernière session #${lastSession.id}`);
+              } else {
+                this.logger.warn(`⚠️ Aucune session active trouvée pour le client #${id}`);
+              }
+            }
+          } catch (error) {
+            this.logger.warn(`⚠️ Erreur lors de l'enregistrement de la déconnexion dans le journal:`, error);
+            // Ne pas bloquer la déconnexion si l'historique échoue
+          }
         }
 
         // Fermer les sessions Keycloak si disponible

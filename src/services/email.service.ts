@@ -138,12 +138,15 @@ export class EmailService {
         margin-top: 30px;
         color: #6c757d;
         font-size: 12px;
-        line-height: 1.4;
+        line-height: 1.5;
       ">
-        <p style="margin: 0 0 8px 0; font-weight: 500;">
-          © ${new Date().getFullYear()} Velosi ERP - Tous droits réservés
+        <p style="margin: 0 0 10px 0; font-weight: 500; color: #495057;">
+          © ${new Date().getFullYear()} Velosi - Tous droits réservés
         </p>
-        <p style="margin: 0; font-size: 11px;">
+        <p style="margin: 0 0 5px 0; font-size: 11px; color: #6c757d;">
+          Propulsé par <strong>LogiMaster ERP</strong>
+        </p>
+        <p style="margin: 0; font-size: 10px; color: #868e96;">
           Cet email a été envoyé automatiquement. Merci de ne pas répondre à cette adresse.
         </p>
       </div>
@@ -2157,14 +2160,6 @@ export class EmailService {
                         <li>Découvrez tous nos services disponibles !</li>
                     </ol>
                 </div>
-                
-                <div class="contact-section">
-                    <h3>💬 Support client</h3>
-                    <p><strong>Service Client Velosi</strong></p>
-                    <p>📧 Email: support.client@velosi.com</p>
-                    <p>📞 Téléphone: +33 (0)1 23 45 67 89</p>
-                    <p>🕒 Disponible du lundi au vendredi, 8h30 - 18h00</p>
-                </div>
             </div>
             
             ${this.getSimpleEmailFooter()}
@@ -2659,14 +2654,6 @@ export class EmailService {
                     <p style="color: #4a5568;">Votre compte est maintenant pleinement opérationnel. Vous pouvez de nouveau accéder à tous les services Velosi ERP.</p>
                     <p style="color: #4a5568; margin-top: 10px;">Nous vous remercions de votre confiance et sommes ravis de vous accompagner à nouveau dans votre activité.</p>
                 </div>
-                
-                <div class="contact-info">
-                    <h3>📞 Support Client</h3>
-                    <p>Notre équipe reste à votre disposition pour tout accompagnement :</p>
-                    <p><strong>📧 Email :</strong> service.client@velosi.com</p>
-                    <p><strong>📞 Téléphone :</strong> +33 (0)1 23 45 67 89</p>
-                    <p><strong>🕒 Horaires :</strong> Lundi - Vendredi, 8h30 - 18h00</p>
-                </div>
             </div>
             
             <div class="footer">
@@ -2747,7 +2734,7 @@ export class EmailService {
       'general': 'Demande générale',
       'technical': 'Problème technique',
       'bug': 'Signalement de bug',
-      'support': 'Support client',
+      'support': 'Demande d\'assistance',
       'feature': 'Demande de fonctionnalité'
     };
     
