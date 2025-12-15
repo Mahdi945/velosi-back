@@ -17,7 +17,7 @@ export class EmailService {
    * Obtenir l'email expéditeur depuis les variables d'environnement
    */
   private getFromEmail(): string {
-    return this.configService.get<string>('SMTP_FROM_EMAIL', this.configService.get<string>('SMTP_USER'));
+    return this.configService.get<string>('SMTP_FROM', this.configService.get<string>('SMTP_USER'));
   }
 
   /**
@@ -144,7 +144,7 @@ export class EmailService {
           © ${new Date().getFullYear()} Velosi - Tous droits réservés
         </p>
         <p style="margin: 0 0 5px 0; font-size: 11px; color: #6c757d;">
-          Propulsé par <strong>LogiMaster ERP</strong>
+          Propulsé par <strong>Shipnology</strong>
         </p>
         <p style="margin: 0; font-size: 10px; color: #868e96;">
           Cet email a été envoyé automatiquement. Merci de ne pas répondre à cette adresse.
@@ -268,6 +268,50 @@ export class EmailService {
       return true;
     } catch (error) {
       this.logger.error(`Erreur envoi email confirmation à ${email}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Envoyer notification de réinitialisation de mot de passe par administrateur
+   */
+  async sendPasswordResetByAdminEmail(email: string, userName: string, userType: 'personnel' | 'client', newPassword: string): Promise<boolean> {
+    try {
+      if (!this.transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer la notification à ${email}: Service email non configuré`);
+        return false;
+      }
+
+      const htmlTemplate = this.getAdminResetEmailTemplate(userName, userType, newPassword);
+      
+      const logoPath = this.getLogoPath();
+      const attachments = [];
+      
+      if (logoPath && fs.existsSync(logoPath)) {
+        attachments.push({
+          filename: 'logo_velosi.png',
+          path: logoPath,
+          cid: 'logo_velosi'
+        });
+      }
+      
+      const mailOptions = {
+        from: {
+          name: `${this.getFromName()} - Sécurité`,
+          address: this.getFromEmail()
+        },
+        to: email,
+        subject: '🔐 Réinitialisation de votre mot de passe - Velosi ERP',
+        html: htmlTemplate,
+        text: `Votre mot de passe Velosi ERP a été réinitialisé par un administrateur. Votre nouveau mot de passe temporaire est: ${newPassword}. Veuillez le changer lors de votre première connexion.`,
+        attachments: attachments
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email notification admin reset envoyé à ${email} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`❌ Erreur envoi email notification admin reset à ${email}:`, error);
       return false;
     }
   }
@@ -707,6 +751,280 @@ export class EmailService {
             </div>
             
             ${this.getSimpleEmailFooter()}
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  /**
+   * Template HTML pour notification de réinitialisation par admin
+   */
+  private getAdminResetEmailTemplate(userName: string, userType: 'personnel' | 'client', newPassword: string): string {
+    const userTypeLabel = userType === 'personnel' ? 'Personnel' : 'Client';
+    
+    return `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Réinitialisation Mot de Passe - Velosi ERP</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+            
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Inter', Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 20px;
+            }
+            
+            .container {
+                max-width: 600px;
+                margin: 0 auto;
+                background-color: #ffffff;
+                border-radius: 12px;
+                overflow: hidden;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+            }
+            
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 40px 30px;
+                text-align: center;
+                position: relative;
+            }
+            
+            .logo {
+                max-width: 180px;
+                height: auto;
+                margin-bottom: 15px;
+            }
+            
+            .header h1 {
+                color: #ffffff;
+                font-size: 28px;
+                font-weight: 700;
+                margin: 0;
+                text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+            
+            .header p {
+                color: rgba(255, 255, 255, 0.9);
+                font-size: 14px;
+                margin: 5px 0 0 0;
+            }
+            
+            .content {
+                padding: 40px 30px;
+            }
+            
+            .title {
+                color: #f59e0b;
+                font-size: 24px;
+                font-weight: 600;
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            .greeting {
+                font-size: 16px;
+                color: #4b5563;
+                margin-bottom: 25px;
+            }
+            
+            .alert-box {
+                background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                border-left: 4px solid #f59e0b;
+                padding: 20px;
+                margin: 25px 0;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(245, 158, 11, 0.1);
+            }
+            
+            .alert-box p {
+                color: #92400e;
+                font-weight: 500;
+                margin: 0;
+            }
+            
+            .password-box {
+                background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+                border: 2px solid #3b82f6;
+                padding: 25px;
+                margin: 25px 0;
+                border-radius: 8px;
+                text-align: center;
+                box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1);
+            }
+            
+            .password-box h3 {
+                color: #1e40af;
+                font-size: 16px;
+                margin-bottom: 15px;
+                font-weight: 600;
+            }
+            
+            .password-code {
+                background-color: #ffffff;
+                color: #1e3a8a;
+                font-size: 24px;
+                font-weight: 700;
+                padding: 15px 25px;
+                border-radius: 8px;
+                letter-spacing: 2px;
+                font-family: 'Courier New', monospace;
+                display: inline-block;
+                border: 2px dashed #3b82f6;
+                margin: 10px 0;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            }
+            
+            .instructions {
+                background-color: #f9fafb;
+                padding: 25px;
+                margin: 25px 0;
+                border-radius: 8px;
+                border: 1px solid #e5e7eb;
+            }
+            
+            .instructions h3 {
+                color: #1e40af;
+                font-size: 18px;
+                margin-bottom: 15px;
+                font-weight: 600;
+            }
+            
+            .instructions ol {
+                margin-left: 20px;
+                line-height: 1.8;
+                color: #4b5563;
+            }
+            
+            .instructions li {
+                margin-bottom: 10px;
+            }
+            
+            .security-warning {
+                background-color: #fef2f2;
+                border-left: 4px solid #dc2626;
+                padding: 20px;
+                margin: 25px 0;
+                border-radius: 8px;
+            }
+            
+            .security-warning h3 {
+                color: #dc2626;
+                font-size: 16px;
+                margin-bottom: 12px;
+                font-weight: 600;
+            }
+            
+            .security-warning ul {
+                margin-left: 20px;
+                line-height: 1.8;
+                color: #7f1d1d;
+            }
+            
+            .info-footer {
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 2px solid #e5e7eb;
+                color: #6b7280;
+                font-size: 14px;
+            }
+            
+            .footer {
+                background-color: #f9fafb;
+                padding: 30px;
+                text-align: center;
+                color: #6b7280;
+                font-size: 13px;
+                line-height: 1.6;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <img src="cid:logo_velosi" alt="Velosi" class="logo" />
+                <h1>🔐 Velosi ERP</h1>
+                <p>Système de Gestion d'Entreprise</p>
+            </div>
+            
+            <div class="content">
+                <h2 class="title">
+                    🔐 Réinitialisation de Mot de Passe
+                </h2>
+                
+                <p class="greeting">Bonjour <strong>${userName}</strong>,</p>
+                
+                <div class="alert-box">
+                    <p>
+                        <strong>⚠️ Important:</strong> Votre mot de passe a été réinitialisé par un administrateur.
+                    </p>
+                </div>
+                
+                <p style="margin: 20px 0;">Pour des raisons de sécurité, un administrateur a réinitialisé votre mot de passe Velosi ERP.</p>
+                
+                <div class="password-box">
+                    <h3>🔑 Votre Nouveau Mot de Passe Temporaire</h3>
+                    <div class="password-code">${newPassword}</div>
+                    <p style="color: #1e40af; font-size: 13px; margin-top: 10px;">
+                        ⚠️ Ce mot de passe est temporaire et doit être changé lors de votre première connexion
+                    </p>
+                </div>
+                
+                <div class="instructions">
+                    <h3>📋 Prochaines Étapes</h3>
+                    <ol>
+                        <li><strong>Copiez</strong> le mot de passe temporaire ci-dessus</li>
+                        <li><strong>Connectez-vous</strong> à Velosi ERP avec ce mot de passe</li>
+                        <li><strong>Changez immédiatement</strong> votre mot de passe lors de votre première connexion</li>
+                        <li><strong>Choisissez</strong> un mot de passe fort et unique (minimum 8 caractères avec majuscules, minuscules, chiffres et symboles)</li>
+                    </ol>
+                </div>
+                
+                <div class="security-warning">
+                    <h3>🛡️ Recommandations de Sécurité</h3>
+                    <ul>
+                        <li>Ne partagez jamais votre mot de passe avec qui que ce soit</li>
+                        <li>N'utilisez pas ce mot de passe temporaire pour d'autres services</li>
+                        <li>Changez votre mot de passe régulièrement</li>
+                        <li>Si vous n'avez pas demandé cette réinitialisation, contactez immédiatement votre administrateur</li>
+                    </ul>
+                </div>
+                
+                <div class="info-footer">
+                    <p style="margin: 0;">
+                        <strong>Type de compte:</strong> ${userTypeLabel}<br>
+                        <strong>Date de réinitialisation:</strong> ${new Date().toLocaleString('fr-FR', {
+                          dateStyle: 'full',
+                          timeStyle: 'short'
+                        })}
+                    </p>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p style="margin: 0 0 10px 0;">
+                    <strong>Velosi ERP</strong> - Système de Gestion d'Entreprise
+                </p>
+                <p style="margin: 0; color: #9ca3af;">
+                    Cet email a été envoyé automatiquement, merci de ne pas y répondre.<br>
+                    Pour toute question, contactez votre administrateur système.
+                </p>
+            </div>
         </div>
     </body>
     </html>

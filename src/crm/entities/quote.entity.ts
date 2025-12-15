@@ -288,6 +288,13 @@ export class Quote extends BaseEntityWithSoftDelete {
   @JoinColumn({ name: 'created_by' })
   creator: Personnel;
 
+  @Column({ name: 'updated_by', nullable: true })
+  updatedBy: number;
+
+  @ManyToOne(() => Personnel, { nullable: true })
+  @JoinColumn({ name: 'updated_by' })
+  updater: Personnel;
+
   @Column({ name: 'approved_by', nullable: true })
   approvedBy: number;
 

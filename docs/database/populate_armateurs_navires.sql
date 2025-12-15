@@ -12,7 +12,7 @@
 
 -- Supprimer d'abord les navires (dépendent des armateurs)
 TRUNCATE TABLE navires CASCADE;
-
+pouvez vous poru gagener le temps
 -- Ensuite supprimer les armateurs
 TRUNCATE TABLE armateurs CASCADE;
 

@@ -14,7 +14,9 @@ import {
   HttpStatus,
   SetMetadata,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { QuotesService } from '../services/quotes.service';
 import {
   CreateQuoteDto,
@@ -127,7 +129,31 @@ export class QuotesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateQuoteDto: UpdateQuoteDto,
+    @Req() req: any,
   ) {
+    console.log('🔐 [UPDATE QUOTE] ========================================');
+    console.log('🔐 [UPDATE QUOTE] req.user:', req.user ? 'présent' : 'undefined');
+    console.log('🔐 [UPDATE QUOTE] updatedBy depuis DTO:', updateQuoteDto.updatedBy);
+    console.log('🔐 [UPDATE QUOTE] ========================================');
+    
+    // ✅ SOLUTION IDENTIQUE À CREATE: Utiliser directement updatedBy du DTO
+    // Si updatedBy n'est pas fourni, essayer de récupérer depuis req.user
+    let userId = updateQuoteDto.updatedBy;
+    
+    if (!userId && req.user) {
+      // Fallback: Utiliser req.user si disponible
+      const rawUserId = req.user.id || req.user.userId;
+      userId = typeof rawUserId === 'string' ? parseInt(rawUserId, 10) : rawUserId;
+      console.log('🔐 [UPDATE QUOTE] Utilisation de req.user.id:', userId);
+    }
+    
+    if (userId) {
+      console.log('✅ [UPDATE QUOTE] User ID final:', userId, 'Type:', typeof userId);
+      updateQuoteDto.updatedBy = userId;
+    } else {
+      console.warn('⚠️ [UPDATE QUOTE] Aucun utilisateur identifié pour updatedBy');
+    }
+    
     return this.quotesService.update(id, updateQuoteDto);
   }
 

@@ -1886,4 +1886,74 @@ export class AuthController {
   // ==========================================
   // NOTE: Les endpoints biométriques ont été déplacés vers BiometricController
   // pour supporter multi-appareils et Resident Keys (Passkeys)
+
+  // ==========================================
+  // RÉINITIALISATION MOT DE PASSE PAR ADMIN
+  // ==========================================
+
+  /**
+   * Réinitialiser le mot de passe d'un personnel (Admin seulement)
+   */
+  @Post('admin/reset-password/personnel/:id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async adminResetPersonnelPassword(
+    @Param('id') personnelId: string,
+    @Body() body: { newPassword: string },
+    @Request() req
+  ) {
+    // Vérifier que l'utilisateur est admin ou administratif
+    const allowedRoles = ['admin', 'administratif'];
+    if (!allowedRoles.includes(req.user.role?.toLowerCase())) {
+      throw new UnauthorizedException('Seuls les administrateurs peuvent réinitialiser les mots de passe');
+    }
+
+    try {
+      const result = await this.authService.adminResetPersonnelPassword(
+        parseInt(personnelId),
+        body.newPassword,
+        req.user.id
+      );
+      return {
+        success: true,
+        message: 'Mot de passe du personnel réinitialisé avec succès',
+        ...result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur réinitialisation mot de passe: ${error.message}`);
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe d'un client (Admin seulement)
+   */
+  @Post('admin/reset-password/client/:id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async adminResetClientPassword(
+    @Param('id') clientId: string,
+    @Body() body: { newPassword: string },
+    @Request() req
+  ) {
+    // Vérifier que l'utilisateur est admin ou administratif
+    const allowedRoles = ['admin', 'administratif'];
+    if (!allowedRoles.includes(req.user.role?.toLowerCase())) {
+      throw new UnauthorizedException('Seuls les administrateurs peuvent réinitialiser les mots de passe');
+    }
+
+    try {
+      const result = await this.authService.adminResetClientPassword(
+        parseInt(clientId),
+        body.newPassword,
+        req.user.id
+      );
+      return {
+        success: true,
+        message: 'Mot de passe du client réinitialisé avec succès',
+        ...result,
+      };
+    } catch (error) {
+      throw new BadRequestException(`Erreur réinitialisation mot de passe: ${error.message}`);
+    }
+  }
 }

@@ -371,6 +371,7 @@ export class QuotesService {
     queryBuilder
       .leftJoinAndSelect('quote.items', 'items')
       .leftJoinAndSelect('quote.creator', 'creator')
+      .leftJoinAndSelect('quote.updater', 'updater')
       .leftJoinAndSelect('quote.commercial', 'commercial')
       .leftJoinAndSelect('quote.opportunity', 'opportunity')
       .leftJoinAndSelect('quote.lead', 'lead')
@@ -501,6 +502,7 @@ export class QuotesService {
       .leftJoinAndSelect('quote.opportunity', 'opportunity')
       .leftJoinAndSelect('quote.client', 'client')
       .leftJoinAndSelect('quote.creator', 'creator')
+      .leftJoinAndSelect('quote.updater', 'updater')
       .leftJoinAndSelect('quote.commercial', 'commercial')
       .leftJoinAndSelect('quote.items', 'items')
       .withDeleted() // ✅ Inclure les soft-deleted
@@ -585,6 +587,7 @@ export class QuotesService {
       relations: [
         'items',
         'creator',
+        'updater',
         'commercial',
         'opportunity',
         'lead',
@@ -646,6 +649,7 @@ export class QuotesService {
       relations: [
         'items',
         'creator',
+        'updater',
         'commercial',
         'opportunity',
         'lead',
@@ -693,6 +697,7 @@ export class QuotesService {
       clientId: updateQuoteDto.clientId,
       commercialIds: updateQuoteDto.commercialIds,
       commercialId: updateQuoteDto.commercialId,
+      updatedBy: updateQuoteDto.updatedBy, // 🆕 LOG pour debug
       armateurId: updateQuoteDto.armateurId,
       navireId: updateQuoteDto.navireId,
       portEnlevementId: updateQuoteDto.portEnlevementId,
@@ -744,6 +749,13 @@ export class QuotesService {
       console.log('🔧 [UPDATE] Déchargement relation client + assignation clientId:', updateQuoteDto.clientId);
     }
 
+    // 🆕 FIX CRITIQUE: Décharger la relation updater pour éviter les conflits avec updatedBy
+    if ('updatedBy' in updateQuoteDto) {
+      quote.updater = undefined;
+      quote.updatedBy = updateQuoteDto.updatedBy;
+      console.log('🔧 [UPDATE] Déchargement relation updater + assignation updatedBy:', updateQuoteDto.updatedBy);
+    }
+
     // 🆕 FIX: Décharger les relations de transport (armateur, navire, ports, aéroports)
     if ('armateurId' in updateQuoteDto) {
       quote.armateur = undefined;
@@ -787,6 +799,7 @@ export class QuotesService {
       portLivraisonId, 
       aeroportEnlevementId, 
       aeroportLivraisonId,
+      updatedBy, // Exclure updatedBy qui est déjà géré plus haut
       ...otherFields 
     } = updateQuoteDto;
     Object.assign(quote, otherFields);
@@ -843,6 +856,7 @@ export class QuotesService {
       hbl: quote.hbl,
       mbl: quote.mbl,
       condition: quote.condition,
+      updatedBy: quote.updatedBy,
     });
 
     // Sauvegarder
@@ -852,6 +866,12 @@ export class QuotesService {
     // TypeORM ne détecte pas toujours les changements sur ces colonnes quand les relations sont chargées
     // ✅ IMPORTANT: On force la mise à jour MÊME si la valeur est null pour réinitialiser correctement
     const updateData: any = {};
+    
+    // 🆕 Forcer la mise à jour de updatedBy AVANT les autres champs
+    if ('updatedBy' in updateQuoteDto) {
+      updateData.updatedBy = updateQuoteDto.updatedBy;
+      console.log('🔧 [UPDATE] Forçage updatedBy dans updateData:', updateData.updatedBy, '(type:', typeof updateData.updatedBy, ')');
+    }
     
     // ✅ CORRECTION: Vérifier si la propriété existe dans le DTO (même si null/undefined)
     // On ne peut pas utiliser hasOwnProperty car class-transformer modifie l'objet

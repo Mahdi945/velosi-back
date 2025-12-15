@@ -12,7 +12,7 @@ import {
   IsBoolean,
   IsInt,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type, Transform, Exclude } from 'class-transformer';
 
 // Enums
 export enum QuoteStatus {
@@ -625,6 +625,11 @@ export class UpdateQuoteDto {
   @IsOptional()
   @IsString()
   condition?: string;
+
+  // 🔧 FIX: Champ updatedBy pour enregistrer qui a modifié la cotation
+  @IsOptional()
+  @IsNumber()
+  updatedBy?: number;
 
   @IsOptional()
   @IsArray()

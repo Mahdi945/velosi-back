@@ -2328,5 +2328,171 @@ export class AuthService {
       };
     }
   }
+
+  // ==========================================
+  // RÉINITIALISATION MOT DE PASSE PAR ADMIN
+  // ==========================================
+
+  /**
+   * Réinitialiser le mot de passe d'un personnel (Admin uniquement)
+   */
+  async adminResetPersonnelPassword(
+    personnelId: number,
+    newPassword: string,
+    adminId: number
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      this.logger.log(`🔐 Admin #${adminId} réinitialise le mot de passe du personnel #${personnelId}`);
+
+      // Récupérer le personnel
+      const personnel = await this.personnelRepository.findOne({
+        where: { id: personnelId },
+      });
+
+      if (!personnel) {
+        throw new NotFoundException('Personnel introuvable');
+      }
+
+      // Hasher le nouveau mot de passe
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Mettre à jour en base de données
+      await this.personnelRepository.update(
+        { id: personnelId },
+        { 
+          mot_de_passe: hashedPassword
+        }
+      );
+
+      // Mettre à jour dans Keycloak si disponible
+      if (this.keycloakService && personnel.keycloak_id) {
+        try {
+          await this.keycloakService.resetUserPassword(personnel.keycloak_id, newPassword);
+          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${personnel.email}`);
+        } catch (keycloakError) {
+          this.logger.warn(`⚠️ Erreur mise à jour Keycloak: ${keycloakError.message}`);
+        }
+      }
+
+      // Envoyer email de notification au personnel
+      try {
+        await this.emailService.sendPasswordResetByAdminEmail(
+          personnel.email,
+          personnel.nom_utilisateur || `${personnel.prenom} ${personnel.nom}`,
+          'personnel',
+          newPassword
+        );
+      } catch (emailError) {
+        this.logger.warn(`⚠️ Erreur envoi email notification: ${emailError.message}`);
+      }
+
+      this.logger.log(`✅ Mot de passe personnel #${personnelId} réinitialisé par admin #${adminId}`);
+
+      return {
+        success: true,
+        message: `Mot de passe de ${personnel.prenom} ${personnel.nom} réinitialisé avec succès`,
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Erreur réinitialisation mot de passe personnel:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Réinitialiser le mot de passe d'un client (Admin uniquement)
+   */
+  async adminResetClientPassword(
+    clientId: number,
+    newPassword: string,
+    adminId: number
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      this.logger.log(`🔐 Admin #${adminId} réinitialise le mot de passe du client #${clientId}`);
+
+      // Récupérer le client avec ses contacts pour obtenir l'email réel
+      const client = await this.clientRepository.findOne({
+        where: { id: clientId },
+        relations: ['contacts'],
+      });
+
+      if (!client) {
+        throw new NotFoundException('Client introuvable');
+      }
+
+      // Hasher le nouveau mot de passe
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      // Mettre à jour en base de données
+      await this.clientRepository.update(
+        { id: clientId },
+        { 
+          mot_de_passe: hashedPassword
+        }
+      );
+
+      // Mettre à jour dans Keycloak si disponible
+      if (this.keycloakService && client.keycloak_id) {
+        try {
+          await this.keycloakService.resetUserPassword(client.keycloak_id, newPassword);
+          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${client.nom}`);
+        } catch (keycloakError) {
+          this.logger.warn(`⚠️ Erreur mise à jour Keycloak: ${keycloakError.message}`);
+        }
+      }
+
+      // Récupérer l'email du client depuis le contact principal (is_principal = true)
+      let clientEmail: string | null = null;
+      
+      // Chercher le contact principal
+      if (client.contacts && client.contacts.length > 0) {
+        const principalContact = client.contacts.find(contact => contact.is_principal === true);
+        
+        if (principalContact) {
+          clientEmail = principalContact.mail1 || principalContact.mail2 || null;
+          this.logger.log(`📧 Email récupéré depuis contact principal: ${clientEmail}`);
+        } else {
+          // Si pas de contact principal, prendre le premier contact
+          const firstContact = client.contacts[0];
+          clientEmail = firstContact.mail1 || firstContact.mail2 || null;
+          this.logger.log(`📧 Email récupéré depuis premier contact: ${clientEmail}`);
+        }
+      }
+      
+      // Si pas d'email dans les contacts, utiliser le getter email de l'entité
+      if (!clientEmail) {
+        clientEmail = client.email;
+        this.logger.log(`📧 Email récupéré depuis client.email: ${clientEmail}`);
+      }
+
+      // Envoyer email de notification au client
+      if (clientEmail && !clientEmail.includes('@client.velosi.com')) {
+        try {
+          await this.emailService.sendPasswordResetByAdminEmail(
+            clientEmail,
+            client.nom,
+            'client',
+            newPassword
+          );
+          this.logger.log(`✅ Email de notification envoyé à ${clientEmail}`);
+        } catch (emailError) {
+          this.logger.warn(`⚠️ Erreur envoi email notification: ${emailError.message}`);
+        }
+      } else {
+        this.logger.warn(`⚠️ Pas d'email valide pour le client ${client.nom} - Email non envoyé`);
+      }
+
+      this.logger.log(`✅ Mot de passe client #${clientId} réinitialisé par admin #${adminId}`);
+
+      return {
+        success: true,
+        message: `Mot de passe de ${client.nom} réinitialisé avec succès`,
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Erreur réinitialisation mot de passe client:`, error);
+      throw error;
+    }
+  }
 }
 
