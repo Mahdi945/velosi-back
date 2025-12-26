@@ -23,6 +23,7 @@ import { EmailService } from '../services/email.service';
 import { OtpService } from '../services/otp.service';
 import { LoginHistoryService } from '../services/login-history.service';
 import { UserType, LoginMethod, LoginStatus } from '../entities/login-history.entity';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 export interface LoginDto {
   usernameOrEmail: string;
@@ -37,6 +38,10 @@ export interface JwtPayload {
   userType: 'client' | 'personnel';
   is_superviseur?: boolean; // Ajouter le champ superviseur
   sessionId?: number; // ID de la session login_history pour logout spécifique
+  // 🏢 Champs multi-tenant
+  organisationId?: number;
+  databaseName?: string;
+  organisationName?: string;
   iat?: number;
   exp?: number;
 }
@@ -53,12 +58,17 @@ export interface AuthResult {
     fullName?: string;
     photo?: string; // Ajouter le champ photo
     first_login?: boolean; // Indiquer si c'est le premier login
+    // 🏢 Champs multi-tenant
+    organisationId?: number;
+    databaseName?: string;
+    organisationName?: string;
   };
+  organisation?: any; // 🏢 Informations complètes de l'organisation (logo, slug, etc.)
   client?: {
     id: number;
     nom: string;
     email: string;
-  };
+  } | any; // Permettre tout type de client pour la compatibilité
 }
 
 @Injectable()
@@ -83,93 +93,220 @@ export class AuthService {
     private emailService: EmailService,
     private otpService: OtpService,
     @Optional() private loginHistoryService: LoginHistoryService,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {
     this.clientRepository = clientRepository;
     this.personnelRepository = personnelRepository;
   }
 
   async validateUser(username: string, password: string): Promise<any> {
-    // Rechercher d'abord dans le personnel (par nom_utilisateur OU email) - insensible à la casse
-    const personnel = await this.personnelRepository
-      .createQueryBuilder('personnel')
-      .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { username })
-      .orWhere('LOWER(personnel.email) = LOWER(:username)', { username })
-      .getOne();
-
-    if (personnel && (await bcrypt.compare(password, personnel.mot_de_passe))) {
-      // Vérifier le statut du personnel
-      if (personnel.statut !== 'actif') {
-        const statusMessages = {
-          'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-          'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-          'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
-        };
-        const message = statusMessages[personnel.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
-        throw new UnauthorizedException(message);
-      }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { mot_de_passe, ...result } = personnel;
-      return { ...result, userType: 'personnel' };
-    }
-
-    // Rechercher ensuite dans les clients (par nom OU interlocuteur) - insensible à la casse
-    const client = await this.clientRepository
-      .createQueryBuilder('client')
-      .where('LOWER(client.nom) = LOWER(:username)', { username })
-      .orWhere('LOWER(client.interlocuteur) = LOWER(:username)', { username })
-      .getOne();
-
-    if (client && (await bcrypt.compare(password, client.mot_de_passe))) {
-      // Vérifier le statut du client
-      if (client.statut !== 'actif') {
-        const statusMessages = {
-          'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-          'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-          'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
-        };
-        const message = statusMessages[client.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
-        throw new UnauthorizedException(message);
-      }
-      // Vérifier également l'ancien champ blocage pour la compatibilité
-      if (client.blocage) {
-        throw new UnauthorizedException('Compte bloqué');
-      }
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { mot_de_passe, ...result } = client;
-      return { ...result, userType: 'client' };
-    }
-
-    // Si pas trouvé par nom/interlocuteur, rechercher client par email dans contact_client
+    this.logger.log(`🔍 MULTI-TENANT LOGIN: Recherche utilisateur "${username}" dans TOUTES les organisations`);
+    
     try {
-      const contactResult = await this.contactClientService.findByEmail(username);
-      if (contactResult && contactResult.client) {
-        const clientByEmail = contactResult.client;
-        if (await bcrypt.compare(password, clientByEmail.mot_de_passe)) {
-          // Vérifier le statut du client
-          if (clientByEmail.statut !== 'actif') {
-            const statusMessages = {
-              'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-              'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
-              'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
-            };
-            const message = statusMessages[clientByEmail.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
-            throw new UnauthorizedException(message);
+      // 🏢 ÉTAPE 1: Récupérer TOUTES les organisations depuis shipnology
+      const mainConnection = await this.databaseConnectionService.getMainConnection();
+      const organisations = await mainConnection.query(
+        'SELECT id, nom, database_name FROM organisations WHERE database_name IS NOT NULL ORDER BY id'
+      );
+      
+      this.logger.log(`📊 ${organisations.length} organisation(s) trouvée(s) à scanner`);
+      
+      // 🚨 Stocker l'erreur d'organisation inactive pour la relancer après la boucle
+      let organisationInactiveError: Error | null = null;
+      
+      // 🏢 ÉTAPE 2: Chercher dans chaque base de données d'organisation
+      for (const org of organisations) {
+        const { id: orgId, nom: orgName, database_name: dbName } = org;
+        this.logger.log(`🔎 Recherche dans organisation: ${orgName} (ID: ${orgId}, DB: ${dbName})`);
+        
+        try {
+          const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
+          
+          // Rechercher dans le personnel
+          const personnelResult = await connection.query(
+            `SELECT * FROM personnel 
+             WHERE (LOWER(nom_utilisateur) = LOWER($1) OR LOWER(email) = LOWER($1))
+             AND organisation_id = $2
+             LIMIT 1`,
+            [username, orgId]
+          );
+          
+          if (personnelResult && personnelResult.length > 0) {
+            const personnel = personnelResult[0];
+            this.logger.log(`✅ Personnel trouvé dans ${orgName}: ${personnel.nom_utilisateur} (ID: ${personnel.id})`);
+            
+            // Vérifier le mot de passe
+            if (await bcrypt.compare(password, personnel.mot_de_passe)) {
+              // 🏢 VÉRIFIER LE STATUT DE L'ORGANISATION AVANT TOUT
+              const orgStatusResult = await mainConnection.query(
+                'SELECT statut FROM organisations WHERE id = $1',
+                [orgId]
+              );
+              
+              if (orgStatusResult && orgStatusResult.length > 0) {
+                const organisationStatut = orgStatusResult[0].statut;
+                if (organisationStatut === 'inactif') {
+                  this.logger.warn(`❌ Organisation ${orgName} est inactive`);
+                  // Stocker l'erreur au lieu de la lancer immédiatement
+                  organisationInactiveError = new UnauthorizedException('Votre organisation est désactivée. Veuillez contacter l\'administration.');
+                  continue; // Continuer pour éviter le catch
+                }
+              }
+              
+              // Vérifier le statut de l'utilisateur
+              if (personnel.statut !== 'actif') {
+                const statusMessages = {
+                  'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                  'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                  'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+                };
+                const message = statusMessages[personnel.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+                throw new UnauthorizedException(message);
+              }
+              
+              this.logger.log(`🎉 CONNEXION RÉUSSIE: Personnel ${personnel.nom_utilisateur} de l'organisation ${orgName}`);
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { mot_de_passe, ...result } = personnel;
+              return { ...result, userType: 'personnel' };
+            } else {
+              this.logger.warn(`❌ Mot de passe incorrect pour ${personnel.nom_utilisateur} dans ${orgName}`);
+            }
           }
-          // Vérifier également l'ancien champ blocage pour la compatibilité
-          if (clientByEmail.blocage) {
-            throw new UnauthorizedException('Compte bloqué');
+          
+          // Rechercher dans les clients
+          const clientResult = await connection.query(
+            `SELECT * FROM client 
+             WHERE (LOWER(nom) = LOWER($1) OR LOWER(interlocuteur) = LOWER($1))
+             AND organisation_id = $2
+             LIMIT 1`,
+            [username, orgId]
+          );
+          
+          if (clientResult && clientResult.length > 0) {
+            const client = clientResult[0];
+            this.logger.log(`✅ Client trouvé dans ${orgName}: ${client.nom} (ID: ${client.id})`);
+            
+            // Vérifier le mot de passe
+            if (await bcrypt.compare(password, client.mot_de_passe)) {
+              // 🏢 VÉRIFIER LE STATUT DE L'ORGANISATION AVANT TOUT
+              const orgStatusResult = await mainConnection.query(
+                'SELECT statut FROM organisations WHERE id = $1',
+                [orgId]
+              );
+              
+              if (orgStatusResult && orgStatusResult.length > 0) {
+                const organisationStatut = orgStatusResult[0].statut;
+                if (organisationStatut === 'inactif') {
+                  this.logger.warn(`❌ Organisation ${orgName} est inactive`);
+                  // Stocker l'erreur au lieu de la lancer immédiatement
+                  organisationInactiveError = new UnauthorizedException('Votre organisation est désactivée. Veuillez contacter l\'administration.');
+                  continue; // Continuer pour éviter le catch
+                }
+              }
+              
+              // Vérifier le statut de l'utilisateur
+              if (client.statut !== 'actif') {
+                const statusMessages = {
+                  'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                  'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                  'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+                };
+                const message = statusMessages[client.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+                throw new UnauthorizedException(message);
+              }
+              
+              // Vérifier le blocage
+              if (client.blocage) {
+                throw new UnauthorizedException('Compte bloqué');
+              }
+              
+              this.logger.log(`🎉 CONNEXION RÉUSSIE: Client ${client.nom} de l'organisation ${orgName}`);
+              // eslint-disable-next-line @typescript-eslint/no-unused-vars
+              const { mot_de_passe, ...result } = client;
+              return { ...result, userType: 'client' };
+            } else {
+              this.logger.warn(`❌ Mot de passe incorrect pour ${client.nom} dans ${orgName}`);
+            }
           }
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { mot_de_passe, ...result } = clientByEmail;
-          return { ...result, userType: 'client' };
+          
+          // Rechercher par email dans contact_client
+          try {
+            const contactResult = await connection.query(
+              `SELECT cc.*, c.* FROM contact_client cc 
+               INNER JOIN client c ON cc.id_client = c.id 
+               WHERE LOWER(cc.mail1) = LOWER($1) AND c.organisation_id = $2
+               LIMIT 1`,
+              [username, orgId]
+            );
+            
+            if (contactResult && contactResult.length > 0) {
+              const clientByEmail = contactResult[0];
+              this.logger.log(`✅ Client trouvé par email dans ${orgName}: ${clientByEmail.nom} (ID: ${clientByEmail.id})`);
+              
+              if (await bcrypt.compare(password, clientByEmail.mot_de_passe)) {
+                // 🏢 VÉRIFIER LE STATUT DE L'ORGANISATION AVANT TOUT
+                const orgStatusResult = await mainConnection.query(
+                  'SELECT statut FROM organisations WHERE id = $1',
+                  [orgId]
+                );
+                
+                if (orgStatusResult && orgStatusResult.length > 0) {
+                  const organisationStatut = orgStatusResult[0].statut;
+                  if (organisationStatut === 'inactif') {
+                    this.logger.warn(`❌ Organisation ${orgName} est inactive`);
+                    // Stocker l'erreur au lieu de la lancer immédiatement
+                    organisationInactiveError = new UnauthorizedException('Votre organisation est désactivée. Veuillez contacter l\'administration.');
+                    continue; // Continuer pour éviter le catch
+                  }
+                }
+                
+                // Vérifier le statut de l'utilisateur
+                if (clientByEmail.statut !== 'actif') {
+                  const statusMessages = {
+                    'inactif': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                    'suspendu': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus',
+                    'desactive': 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus'
+                  };
+                  const message = statusMessages[clientByEmail.statut] || 'Vous êtes suspendu ou désactivé, contactez l\'administration de Velosi pour en savoir plus';
+                  throw new UnauthorizedException(message);
+                }
+                
+                if (clientByEmail.blocage) {
+                  throw new UnauthorizedException('Compte bloqué');
+                }
+                
+                this.logger.log(`🎉 CONNEXION RÉUSSIE: Client ${clientByEmail.nom} (par email) de l'organisation ${orgName}`);
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const { mot_de_passe, ...result } = clientByEmail;
+                return { ...result, userType: 'client' };
+              } else {
+                this.logger.warn(`❌ Mot de passe incorrect pour ${clientByEmail.nom} (email) dans ${orgName}`);
+              }
+            }
+          } catch (contactError) {
+            this.logger.debug(`Aucun contact trouvé pour ${username} dans ${orgName}`);
+          }
+          
+        } catch (orgError) {
+          this.logger.error(`❌ Erreur lors de la recherche dans ${orgName}:`, orgError.message);
+          continue; // Continuer avec l'organisation suivante
         }
       }
+      
+      // 🚨 Si on a détecté une organisation inactive, relancer l'erreur maintenant
+      if (organisationInactiveError) {
+        this.logger.error(`🚫 Organisation inactive détectée - rejet de la connexion`);
+        throw organisationInactiveError;
+      }
+      
+      // Si aucun utilisateur trouvé dans aucune organisation
+      this.logger.warn(`❌ ÉCHEC: Utilisateur "${username}" non trouvé dans aucune organisation`);
+      return null;
+      
     } catch (error) {
-      // Si l'email n'est pas trouvé dans contact_client, on continue sans erreur
-      this.logger.debug(`Email ${username} not found in contact_client`);
+      this.logger.error(`❌ Erreur critique lors de la validation multi-tenant:`, error);
+      throw error;
     }
-
-    return null;
   }
 
   async login(loginDto: LoginDto, req?: any): Promise<AuthResult> {
@@ -193,7 +330,7 @@ export class AuthService {
     let userEmail = user.email || '';
     if (user.userType === 'client') {
       try {
-        const contactClient = await this.contactClientService.findByClient(user.id);
+        const contactClient = await this.contactClientService.findByClient('velosi', user.id);
         if (contactClient && contactClient.length > 0) {
           userEmail = contactClient[0].mail1 || contactClient[0].mail2 || '';
           this.logger.log(`Email récupéré depuis contact_client pour ${user.nom}: ${userEmail}`);
@@ -204,19 +341,71 @@ export class AuthService {
     }
 
     // ✅ Mettre à jour le statut en ligne et l'activité lors du login
-    if (user.userType === 'personnel') {
-      await this.personnelRepository.update(user.id, {
-        statut_en_ligne: true,
-        last_activity: new Date(),
-      });
-      this.logger.log(`Personnel ${user.nom_utilisateur} marqué comme en ligne`);
-    } else if (user.userType === 'client') {
-      await this.clientRepository.update(user.id, {
-        statut_en_ligne: true,
-        last_activity: new Date(),
-      });
-      this.logger.log(`Client ${user.nom} marqué comme en ligne`);
+    // 🏢 MULTI-TENANT: Utiliser la connexion de l'organisation de l'utilisateur
+    const userOrgId = user.organisation_id;
+    
+    if (userOrgId) {
+      try {
+        // Récupérer la base de données de l'organisation
+        const mainConnection = await this.databaseConnectionService.getMainConnection();
+        const orgResult = await mainConnection.query(
+          'SELECT database_name FROM organisations WHERE id = $1',
+          [userOrgId]
+        );
+        
+        if (orgResult && orgResult.length > 0 && orgResult[0].database_name) {
+          const userDbConnection = await this.databaseConnectionService.getOrganisationConnection(orgResult[0].database_name);
+          
+          if (user.userType === 'personnel') {
+            await userDbConnection.query(
+              `UPDATE personnel SET statut_en_ligne = $1, last_activity = $2 WHERE id = $3 AND organisation_id = $4`,
+              [true, new Date(), user.id, userOrgId]
+            );
+            this.logger.log(`Personnel ${user.nom_utilisateur} marqué comme en ligne dans ${orgResult[0].database_name}`);
+          } else if (user.userType === 'client') {
+            await userDbConnection.query(
+              `UPDATE client SET statut_en_ligne = $1, last_activity = $2 WHERE id = $3 AND organisation_id = $4`,
+              [true, new Date(), user.id, userOrgId]
+            );
+            this.logger.log(`Client ${user.nom} marqué comme en ligne dans ${orgResult[0].database_name}`);
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`⚠️ Erreur mise à jour statut en ligne:`, error.message);
+        // Ne pas bloquer la connexion si la mise à jour échoue
+      }
     }
+
+    // 🏢 RÉCUPÉRER L'ORGANISATION DE L'UTILISATEUR (MULTI-TENANT)
+    const organisationId = user.organisation_id;
+    let databaseName: string;
+    let organisationName: string;
+    
+    // ✅ SÉCURITÉ CRITIQUE : Récupérer les infos depuis shipnology SANS FALLBACK
+    const mainConnection = await this.databaseConnectionService.getMainConnection();
+    const orgResult = await mainConnection.query(
+      'SELECT id, nom, database_name FROM organisations WHERE id = $1',
+      [organisationId]
+    );
+    
+    if (!orgResult || orgResult.length === 0) {
+      this.logger.error(`🚨 ERREUR CRITIQUE : Organisation ${organisationId} INTROUVABLE dans la base shipnology`);
+      throw new UnauthorizedException(
+        `Organisation ${organisationId} non configurée. Contactez l'administrateur système.`
+      );
+    }
+    
+    databaseName = orgResult[0].database_name;
+    organisationName = orgResult[0].nom;
+    
+    if (!databaseName) {
+      this.logger.error(`🚨 ERREUR CRITIQUE : Organisation ${organisationName} (ID: ${organisationId}) n'a pas de database_name configuré`);
+      throw new UnauthorizedException(
+        `La base de données pour l'organisation ${organisationName} n'est pas configurée. Contactez l'administrateur.`
+      );
+    }
+    
+    this.logger.log(`✅ Organisation trouvée: ${organisationName} (ID: ${organisationId}) → Base de données: ${databaseName}`);
 
     // 🔥 ENREGISTRER LA CONNEXION DANS L'HISTORIQUE
     let sessionId: number | undefined;
@@ -233,7 +422,10 @@ export class AuthService {
           username,
           fullName,
           LoginMethod.PASSWORD,
-          LoginStatus.SUCCESS
+          LoginStatus.SUCCESS,
+          undefined, // failureReason
+          databaseName,
+          organisationId,
         );
         
         sessionId = loginEntry.id; // 🔑 STOCKER L'ID DE SESSION
@@ -252,12 +444,27 @@ export class AuthService {
       userType: user.userType,
       is_superviseur: user.userType === 'personnel' ? (user.is_superviseur || false) : false,
       sessionId: sessionId, // 🔑 INCLURE L'ID DE SESSION DANS LE JWT
+      // 🏢 MULTI-TENANT (CRUCIAL pour router vers la bonne base)
+      organisationId: organisationId,
+      databaseName: databaseName,
+      organisationName: organisationName,
     };
 
     const access_token = this.jwtService.sign(payload);
     const refresh_token = this.jwtService.sign(payload, {
       expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
     });
+
+    // 🔍 LOG IMPORTANT pour déboguer le multi-tenant
+    this.logger.log(`🎫 JWT créé avec: organisation=${organisationName}, database=${databaseName}, user=${payload.username}`);
+
+    // 🏢 Récupérer les informations complètes de l'organisation
+    const mainOrgConnection = await this.databaseConnectionService.getMainConnection();
+    const orgDetailsResult = await mainOrgConnection.query(
+      `SELECT nom, nom_affichage, logo_url, slug, telephone, adresse, email_contact FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+    const organisationDetails = orgDetailsResult && orgDetailsResult.length > 0 ? orgDetailsResult[0] : null;
 
     return {
       access_token,
@@ -272,6 +479,7 @@ export class AuthService {
         photo: user.photo || null, // Inclure le champ photo pour les deux types d'utilisateurs
         first_login: user.first_login || false, // Inclure l'information du premier login
       },
+      organisation: organisationDetails, // 🏢 Ajouter les informations de l'organisation
     };
   }
 
@@ -280,15 +488,36 @@ export class AuthService {
       const payload = this.jwtService.verify(refresh_token);
 
       // Vérifier que l'utilisateur existe toujours
+      // 🏢 MULTI-TENANT: Utiliser la connexion de l'organisation depuis le JWT
       let user;
-      if (payload.userType === 'personnel') {
-        user = await this.personnelRepository.findOne({
-          where: { id: parseInt(payload.sub) },
-        });
+      
+      if (payload.databaseName && payload.organisationId) {
+        const connection = await this.databaseConnectionService.getOrganisationConnection(payload.databaseName);
+        
+        if (payload.userType === 'personnel') {
+          const result = await connection.query(
+            `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+            [parseInt(payload.sub), payload.organisationId]
+          );
+          user = result && result.length > 0 ? result[0] : null;
+        } else {
+          const result = await connection.query(
+            `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+            [parseInt(payload.sub), payload.organisationId]
+          );
+          user = result && result.length > 0 ? result[0] : null;
+        }
       } else {
-        user = await this.clientRepository.findOne({
-          where: { id: parseInt(payload.sub) },
-        });
+        // Fallback si pas d'infos multi-tenant dans le token (ancien token)
+        if (payload.userType === 'personnel') {
+          user = await this.personnelRepository.findOne({
+            where: { id: parseInt(payload.sub) },
+          });
+        } else {
+          user = await this.clientRepository.findOne({
+            where: { id: parseInt(payload.sub) },
+          });
+        }
       }
 
       if (!user) {
@@ -302,6 +531,10 @@ export class AuthService {
         role: payload.role,
         userType: payload.userType,
         is_superviseur: payload.userType === 'personnel' ? (user.is_superviseur || false) : false,
+        // 🏢 MULTI-TENANT: Conserver les infos d'organisation
+        organisationId: payload.organisationId,
+        databaseName: payload.databaseName,
+        organisationName: payload.organisationName,
       };
 
       const access_token = this.jwtService.sign(newPayload);
@@ -369,11 +602,29 @@ export class AuthService {
         // Mettre à jour l'ID Keycloak dans la base de données
         if (keycloakId) {
           if (user.userType === 'personnel') {
-            await this.personnelRepository.update(user.id, { keycloak_id: keycloakId });
+            // 🏢 MULTI-TENANT: Mettre à jour dans la bonne base
+            if (user.organisation_id && user.databaseName) {
+              const connection = await this.databaseConnectionService.getOrganisationConnection(user.databaseName);
+              await connection.query(
+                `UPDATE personnel SET keycloak_id = $1 WHERE id = $2 AND organisation_id = $3`,
+                [keycloakId, user.id, user.organisation_id]
+              );
+            } else {
+              await this.personnelRepository.update(user.id, { keycloak_id: keycloakId });
+            }
             // Assigner le rôle dans Keycloak
             await this.keycloakService.updateUserRole(keycloakId, user.role);
           } else {
-            await this.clientRepository.update(user.id, { keycloak_id: keycloakId });
+            // 🏢 MULTI-TENANT: Mettre à jour dans la bonne base
+            if (user.organisation_id && user.databaseName) {
+              const connection = await this.databaseConnectionService.getOrganisationConnection(user.databaseName);
+              await connection.query(
+                `UPDATE client SET keycloak_id = $1 WHERE id = $2 AND organisation_id = $3`,
+                [keycloakId, user.id, user.organisation_id]
+              );
+            } else {
+              await this.clientRepository.update(user.id, { keycloak_id: keycloakId });
+            }
             // Assigner le rôle client dans Keycloak
             await this.keycloakService.updateUserRole(keycloakId, 'client');
           }
@@ -418,129 +669,165 @@ export class AuthService {
   async validateJwtPayload(payload: JwtPayload): Promise<any> {
     console.log('validateJwtPayload - Payload:', payload);
     
+    // 🏢 Récupérer le nom de la base de données depuis le payload JWT
+    const databaseName = payload.databaseName || 'velosi'; // Fallback à 'velosi' si pas spécifié
+    const organisationId = payload.organisationId || 1;
+    
+    console.log(`🏢 Validation JWT multi-tenant: database=${databaseName}, organisationId=${organisationId}`);
+    
     let user;
-    if (payload.userType === 'personnel') {
-      console.log('validateJwtPayload - Recherche personnel avec ID:', payload.sub);
-      user = await this.personnelRepository.findOne({
-        where: { 
-          id: parseInt(payload.sub),
-          statut: 'actif' // IMPORTANT: Vérifier explicitement le statut
-        },
-      });
-      console.log('validateJwtPayload - Personnel trouvé:', user ? `${user.nom} (statut: ${user.statut})` : 'null');
+    
+    try {
+      // 🏢 Utiliser DatabaseConnectionService pour se connecter à la bonne base
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
       
-      // Si l'utilisateur n'est pas trouvé, vérifier s'il existe mais avec un autre statut
-      if (!user) {
-        const userAnyStatus = await this.personnelRepository.findOne({
-          where: { id: parseInt(payload.sub) },
-        });
-        if (userAnyStatus) {
-          console.error(`validateJwtPayload - Personnel trouvé mais statut invalide: ${userAnyStatus.statut}`);
-          throw new UnauthorizedException(`Compte ${userAnyStatus.statut} - contactez l'administration`);
-        }
-      }
-
-      // ✅ Vérifier l'expiration de session (24h max)
-      if (user && user.last_activity) {
-        const now = new Date();
-        const sessionDuration = now.getTime() - user.last_activity.getTime();
-        const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+      if (payload.userType === 'personnel') {
+        console.log('validateJwtPayload - Recherche personnel avec ID:', payload.sub, 'dans', databaseName);
         
-        if (sessionDuration > maxSessionDuration) {
-          // Session expirée - marquer comme hors ligne
-          await this.personnelRepository.update(user.id, {
-            statut_en_ligne: false,
-          });
-          this.logger.warn(`Session expirée pour personnel ${user.nom_utilisateur} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
-          throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
-        }
-      }
-
-      // ✅ Mettre à jour last_activity à chaque validation
-      if (user) {
-        await this.personnelRepository.update(user.id, {
-          last_activity: new Date(),
-        });
-      }
-    } else {
-      console.log('validateJwtPayload - Recherche client avec ID:', payload.sub);
-      user = await this.clientRepository.findOne({
-        where: { id: parseInt(payload.sub) },
-      });
-
-      // ✅ Vérifier l'expiration de session pour les clients aussi
-      if (user && user.last_activity) {
-        const now = new Date();
-        const sessionDuration = now.getTime() - user.last_activity.getTime();
-        const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+        // Requête SQL directe dans la bonne base de données avec organisation_id
+        const personnel = await connection.query(
+          `SELECT * FROM personnel 
+           WHERE id = $1 AND statut = 'actif' AND organisation_id = $2
+           LIMIT 1`,
+          [parseInt(payload.sub), organisationId]
+        );
         
-        if (sessionDuration > maxSessionDuration) {
-          await this.clientRepository.update(user.id, {
-            statut_en_ligne: false,
-          });
-          this.logger.warn(`Session expirée pour client ${user.nom} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
-          throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
-        }
-      }
-
-      // ✅ Mettre à jour last_activity
-      if (user) {
-        await this.clientRepository.update(user.id, {
-          last_activity: new Date(),
-        });
-      }
-      
-      // Pour les clients, récupérer l'email depuis contact_client si pas dans le payload
-      if (user && (!payload.email || payload.email === '')) {
-        try {
-          const contactClient = await this.contactClientService.findByClient(user.id);
-          if (contactClient && contactClient.length > 0) {
-            const email = contactClient[0].mail1 || contactClient[0].mail2 || '';
-            payload.email = email;
-            this.logger.debug(`Email mis à jour pour le client ${user.nom}: ${email}`);
+        user = personnel && personnel.length > 0 ? personnel[0] : null;
+        console.log('validateJwtPayload - Personnel trouvé:', user ? `${user.nom} (statut: ${user.statut})` : 'null');
+        
+        // Si l'utilisateur n'est pas trouvé, vérifier s'il existe mais avec un autre statut
+        if (!user) {
+          const userAnyStatus = await connection.query(
+            `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+            [parseInt(payload.sub), organisationId]
+          );
+          
+          if (userAnyStatus && userAnyStatus.length > 0) {
+            const foundUser = userAnyStatus[0];
+            console.error(`validateJwtPayload - Personnel trouvé mais statut invalide: ${foundUser.statut}`);
+            throw new UnauthorizedException(`Compte ${foundUser.statut} - contactez l'administration`);
           }
-        } catch (error) {
-          this.logger.warn(`Erreur récupération email pour validation JWT du client ${user.nom}:`, error.message);
+        }
+
+        // ✅ Vérifier l'expiration de session (24h max)
+        if (user && user.last_activity) {
+          const now = new Date();
+          const lastActivity = new Date(user.last_activity);
+          const sessionDuration = now.getTime() - lastActivity.getTime();
+          const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+          
+          // 🔒 SÉCURITÉ: Vérifier aussi l'âge du token JWT (iat = issued at)
+          const tokenAge = payload.iat ? (Math.floor(Date.now() / 1000) - payload.iat) : 0;
+          const tokenIsRecent = tokenAge < 60; // Token créé il y a moins de 60 secondes
+          
+          if (sessionDuration > maxSessionDuration && !tokenIsRecent) {
+            // Session expirée - marquer comme hors ligne
+            await connection.query(
+              `UPDATE personnel SET statut_en_ligne = false WHERE id = $1`,
+              [user.id]
+            );
+            this.logger.warn(`Session expirée pour personnel ${user.nom_utilisateur} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
+            throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+          }
+          
+          if (tokenIsRecent) {
+            this.logger.debug(`✅ Token récent détecté (${tokenAge}s), validation bypass pour ${user.nom_utilisateur}`);
+          }
+        }
+
+        // ✅ Mettre à jour last_activity à chaque validation
+        if (user) {
+          await connection.query(
+            `UPDATE personnel SET last_activity = NOW() WHERE id = $1`,
+            [user.id]
+          );
+        }
+        
+      } else {
+        console.log('validateJwtPayload - Recherche client avec ID:', payload.sub, 'dans', databaseName);
+        
+        // Requête SQL directe pour les clients avec organisation_id
+        const client = await connection.query(
+          `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [parseInt(payload.sub), organisationId]
+        );
+        
+        user = client && client.length > 0 ? client[0] : null;
+
+        // ✅ Vérifier l'expiration de session pour les clients aussi
+        if (user && user.last_activity) {
+          const now = new Date();
+          const lastActivity = new Date(user.last_activity);
+          const sessionDuration = now.getTime() - lastActivity.getTime();
+          const maxSessionDuration = 24 * 60 * 60 * 1000; // 24 heures
+          
+          // 🔒 SÉCURITÉ: Vérifier aussi l'âge du token JWT
+          const tokenAge = payload.iat ? (Math.floor(Date.now() / 1000) - payload.iat) : 0;
+          const tokenIsRecent = tokenAge < 60; // Token créé il y a moins de 60 secondes
+          
+          if (sessionDuration > maxSessionDuration && !tokenIsRecent) {
+            await connection.query(
+              `UPDATE client SET statut_en_ligne = false WHERE id = $1`,
+              [user.id]
+            );
+            this.logger.warn(`Session expirée pour client ${user.nom} (durée: ${Math.floor(sessionDuration / 1000 / 60)} minutes)`);
+            throw new UnauthorizedException('Session expirée. Veuillez vous reconnecter.');
+          }
+          
+          if (tokenIsRecent) {
+            this.logger.debug(`✅ Token récent détecté (${tokenAge}s), validation bypass pour client ${user.nom}`);
+          }
+        }
+
+        // ✅ Mettre à jour last_activity
+        if (user) {
+          await connection.query(
+            `UPDATE client SET last_activity = NOW() WHERE id = $1`,
+            [user.id]
+          );
+        }
+        
+        // Pour les clients, récupérer l'email depuis contact_client si pas dans le payload
+        if (user && (!payload.email || payload.email === '')) {
+          try {
+            const contactClient = await connection.query(
+              `SELECT mail1 FROM contact_client WHERE id_client = $1 LIMIT 1`,
+              [user.id]
+            );
+            if (contactClient && contactClient.length > 0) {
+              payload.email = contactClient[0].mail1;
+            }
+          } catch (error) {
+            console.warn('validateJwtPayload - Erreur récupération email contact:', error.message);
+          }
         }
       }
+      
+    } catch (error) {
+      this.logger.error(`Erreur validation JWT multi-tenant: ${error.message}`);
+      throw error;
     }
 
     if (!user) {
-      console.log('validateJwtPayload - Aucun utilisateur trouvé, throwing UnauthorizedException');
-      throw new UnauthorizedException('Utilisateur non trouvé');
+      console.error('validateJwtPayload - Utilisateur non trouvé dans', databaseName);
+      return null;
     }
 
-    console.log('validateJwtPayload - Utilisateur trouvé, construction de la réponse');
-
-    // Construire l'objet utilisateur avec le champ photo
-    const userResponse = {
-      id: user.id,
-      username: payload.userType === 'personnel' ? user.nom_utilisateur : user.nom,
-      email: payload.email || user.email || '',
-      role: payload.role,
+    // Ajouter les informations multi-tenant au user retourné
+    return {
+      ...user,
+      username: payload.username, // ✅ CORRECTION: Ajouter username depuis payload
+      email: payload.email,
       userType: payload.userType,
-      fullName: payload.userType === 'personnel' 
-        ? `${user.prenom} ${user.nom}`
-        : user.nom,
-      photo: user.photo || null, // Inclure le champ photo
-      // Informations spécifiques au type d'utilisateur
-      ...(payload.userType === 'personnel' && {
-        prenom: user.prenom,
-        nom: user.nom,
-        telephone: user.telephone,
-        genre: user.genre,
-        statut: user.statut
-      }),
-      ...(payload.userType === 'client' && {
-        interlocuteur: user.interlocuteur,
-        adresse: user.adresse,
-        ville: user.ville,
-        pays: user.pays
-      })
+      role: payload.role,
+      roles: [payload.role], // ✅ CORRECTION CRITIQUE: Transformer role en array pour les contrôleurs
+      is_superviseur: payload.is_superviseur || false,
+      sessionId: payload.sessionId || null,
+      // 🏢 MULTI-TENANT - Informations cruciales pour router vers la bonne base
+      organisationId: payload.organisationId,
+      databaseName: payload.databaseName,
+      organisationName: payload.organisationName,
     };
-
-    console.log('validateJwtPayload - Réponse construite:', userResponse);
-    return userResponse;
   }
 
   async registerPersonnel(
@@ -663,159 +950,140 @@ export class AuthService {
     };
   }
 
-  async registerClient(createClientDto: CreateClientDto): Promise<AuthResult> {
-    // Vérifier si le client existe déjà
-    const existingClient = await this.clientRepository.findOne({
-      where: { nom: createClientDto.nom },
-    });
-
-    if (existingClient) {
+  async registerClient(createClientDto: CreateClientDto, databaseName: string = 'velosi', organisationId: number = 1): Promise<AuthResult> {
+    this.logger.log(`📥 [registerClient] Création client - DB: ${databaseName}, Org: ${organisationId}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    // Vérifier l'unicité du nom
+    const existingClients = await connection.query(
+      `SELECT * FROM client WHERE nom = $1 LIMIT 1`,
+      [createClientDto.nom]
+    );
+    
+    if (existingClients && existingClients.length > 0) {
       throw new ConflictException('Ce nom de client existe déjà');
     }
-
-    // Hasher le mot de passe seulement s'il est fourni (clients permanents)
+    
+    // Hasher le mot de passe seulement pour les clients permanents
     let hashedPassword: string | null = null;
-    if (createClientDto.mot_de_passe) {
+    if (createClientDto.is_permanent && createClientDto.mot_de_passe) {
       hashedPassword = await this.hashPassword(createClientDto.mot_de_passe);
     }
-
-    // Créer le client (sans email - l'email sera dans contact_client)
-    const client = this.clientRepository.create({
-      ...createClientDto,
-      mot_de_passe: hashedPassword,
-      blocage: false,
-      maj_web: true,
-      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
-    });
-
-    const savedClients = await this.clientRepository.save(client);
-    const savedClient = Array.isArray(savedClients) ? savedClients[0] : savedClients;
-
-    this.logger.log(`Nouveau client créé: ${savedClient.nom}`);
-    // Log des données reçues pour le debug
-    this.logger.log(`Données reçues - Tel1: ${createClientDto.contact_tel1}, Mail1: ${createClientDto.contact_mail1}`);
-    this.logger.log(`Contact tel2: ${createClientDto.contact_tel2}, Mail2: ${createClientDto.contact_mail2}`);
-
-    // Créer le contact client (toujours créer si on a au moins un email ou téléphone)
+    
+    // Créer le client avec organisation_id
+    const insertResult = await connection.query(
+      `INSERT INTO client (
+        organisation_id, nom, interlocuteur, mot_de_passe, adresse, ville, pays, code_postal,
+        type_client, is_permanent, photo, blocage, maj_web
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *`,
+      [
+        organisationId, // 🆕 Ajouter l'organisation_id
+        createClientDto.nom,
+        createClientDto.interlocuteur,
+        hashedPassword,
+        createClientDto.adresse,
+        createClientDto.ville,
+        createClientDto.pays,
+        createClientDto.code_postal,
+        createClientDto.type_client,
+        createClientDto.is_permanent || false,
+        'uploads/profiles/default-avatar.png',
+        false,
+        true
+      ]
+    );
+    
+    const savedClient = insertResult[0];
+    this.logger.log(`✅ Client créé avec ID: ${savedClient.id} - ${savedClient.nom}`);
+    
+    // Créer le contact principal
     let contactEmail = '';
-    if (createClientDto.contact_tel1 || createClientDto.contact_tel2 || 
-        createClientDto.contact_tel3 || createClientDto.contact_fax || 
-        createClientDto.contact_mail1 || createClientDto.contact_mail2 || 
-        createClientDto.contact_fonction) {
-      
+    if (savedClient.id) {
       try {
-        const contactData = {
-          clientId: savedClient.id,
-          tel1: createClientDto.contact_tel1,
-          tel2: createClientDto.contact_tel2,
-          tel3: createClientDto.contact_tel3,
-          fax: createClientDto.contact_fax,
-          mail1: createClientDto.contact_mail1, // Utiliser l'email de contact comme mail1
-          mail2: createClientDto.contact_mail2,
-          fonction: createClientDto.contact_fonction,
+        await connection.query(
+          `INSERT INTO contact_client (
+            id_client, nom, prenom, tel1, tel2, tel3, fax, mail1, mail2, fonction, is_principal
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            savedClient.id,
+            createClientDto.nom,
+            createClientDto.interlocuteur || '',
+            createClientDto.contact_tel1 || null,
+            createClientDto.contact_tel2 || null,
+            createClientDto.contact_tel3 || null,
+            createClientDto.contact_fax || null,
+            createClientDto.contact_mail1 || null,
+            createClientDto.contact_mail2 || null,
+            createClientDto.contact_fonction || 'Contact principal',
+            true
+          ]
+        );
+        contactEmail = createClientDto.contact_mail1 || '';
+        this.logger.log(`✅ Contact principal créé pour client ${savedClient.id}`);
+      } catch (error) {
+        this.logger.warn(`Erreur création contact: ${error.message}`);
+      }
+    }
+    
+    // Synchroniser avec Keycloak pour les clients permanents
+    if (createClientDto.is_permanent === true && this.keycloakService) {
+      try {
+        const keycloakUser = {
+          username: savedClient.nom,
+          email: contactEmail || '',
+          firstName: savedClient.interlocuteur || savedClient.nom,
+          lastName: '',
+          enabled: true,
         };
-
-        this.logger.log(`Tentative de création de contact avec données:`, JSON.stringify(contactData));
-        const createdContact = await this.contactClientService.create(contactData);
-        contactEmail = createdContact.mail1 || '';
-        this.logger.log(`Contact créé avec succès pour le client: ${savedClient.nom} - ID contact: ${createdContact.id_client} - Email: ${createdContact.mail1}`);
-      } catch (error) {
-        this.logger.error(`Erreur lors de la création du contact pour le client ${savedClient.nom}:`, error);
-        // Ne pas faire échouer l'inscription si la création du contact échoue
-      }
-    } else {
-      this.logger.warn(`Aucune donnée de contact fournie pour le client ${savedClient.nom}`);
-    }
-
-    // Synchroniser avec Keycloak SEULEMENT pour les clients permanents
-    if (createClientDto.is_permanent === true) {
-      this.logger.log(`🔑 Client permanent détecté - Tentative de création compte Keycloak...`);
-      
-      try {
-        if (this.keycloakService) {
-          try {
-            // Créer l'utilisateur Keycloak directement
-            const keycloakUser = {
-              username: savedClient.nom,
-              email: contactEmail || '',
-              firstName: savedClient.interlocuteur || savedClient.nom,
-              lastName: '',
-              enabled: true,
-            };
-            
-            const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
-            if (keycloakUserId) {
-              // ✅ Assigner le rôle "client" dans Keycloak
-              await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
-              
-              // Sauvegarder l'ID Keycloak dans la base
-              savedClient.keycloak_id = keycloakUserId;
-              await this.clientRepository.save(savedClient);
-              this.logger.log(`✅ Client permanent synchronisé avec Keycloak (ID: ${keycloakUserId})`);
-            } else {
-              this.logger.warn('⚠️ Keycloak n\'a pas retourné d\'ID utilisateur');
-            }
-          } catch (keycloakError) {
-            this.logger.warn('⚠️ Keycloak non disponible:', keycloakError.message);
-            this.logger.log('✅ Client permanent créé sans Keycloak (connexion locale uniquement)');
-            // Le client reste permanent, mais sans keycloak_id
-          }
-        }
-      } catch (error) {
-        this.logger.warn('⚠️ Erreur lors de la tentative Keycloak:', error.message);
-        // Ne pas faire échouer l'inscription si la synchronisation Keycloak échoue
-      }
-    } else {
-      this.logger.log(`🕘 Client temporaire - AUCUNE création Keycloak (comportement voulu)`);
-      // S'assurer que keycloak_id est null pour les clients temporaires
-      savedClient.keycloak_id = null;
-      await this.clientRepository.save(savedClient);
-    }
-
-    // Envoyer l'email avec les informations de connexion SEULEMENT si explicitement demandé
-    if (createClientDto.is_permanent === true && createClientDto.send_email === true) {
-      try {
-        if (contactEmail && this.emailService && createClientDto.mot_de_passe) {
-          await this.emailService.sendClientCredentialsEmail(
-            contactEmail,
-            savedClient.nom,
-            createClientDto.mot_de_passe, // Mot de passe original non hashé
-            savedClient.nom,
-            savedClient.interlocuteur
+        
+        const keycloakUserId = await this.keycloakService.createUser(keycloakUser);
+        if (keycloakUserId) {
+          await this.keycloakService.assignRoleToUser(keycloakUserId, 'client');
+          await connection.query(
+            `UPDATE client SET keycloak_id = $1 WHERE id = $2`,
+            [keycloakUserId, savedClient.id]
           );
-          this.logger.log(`📧 Email d'informations client permanent envoyé à ${contactEmail}`);
-        } else if (!contactEmail) {
-          this.logger.warn(`📧 Envoi email demandé mais aucun email de contact disponible`);
+          savedClient.keycloak_id = keycloakUserId;
+          this.logger.log(`✅ Client permanent synchronisé avec Keycloak`);
         }
-      } catch (emailError) {
-        this.logger.warn('Erreur envoi email informations client permanent:', emailError);
-        // Ne pas faire échouer l'inscription si l'envoi d'email échoue
+      } catch (error) {
+        this.logger.warn(`⚠️ Erreur Keycloak: ${error.message}`);
       }
-    } else if (createClientDto.is_permanent === true && createClientDto.send_email !== true) {
-      this.logger.log(`📧 Client permanent - Envoi email NON demandé (send_email: ${createClientDto.send_email})`);
-    } else {
-      this.logger.log(`📧 Client temporaire - Aucun email de credentials envoyé (comportement voulu)`);
     }
-
-    // Générer les tokens
+    
+    // Envoyer l'email si demandé
+    if (createClientDto.is_permanent === true && createClientDto.send_email === true && contactEmail && this.emailService) {
+      try {
+        await this.emailService.sendClientCredentialsEmail(
+          contactEmail,
+          savedClient.nom,
+          createClientDto.mot_de_passe,
+          savedClient.nom,
+          savedClient.interlocuteur
+        );
+        this.logger.log(`📧 Email envoyé à ${contactEmail}`);
+      } catch (error) {
+        this.logger.warn(`Erreur envoi email: ${error.message}`);
+      }
+    }
+    
+    // Générer les tokens JWT avec les informations multi-tenant
     const payload: JwtPayload = {
       sub: savedClient.id.toString(),
       username: savedClient.nom,
       email: contactEmail || '',
       role: 'client',
       userType: 'client',
-      is_superviseur: false, // Les clients ne sont jamais superviseurs
+      is_superviseur: false,
+      organisationId: organisationId,
+      databaseName: databaseName,
     };
 
     const access_token = this.jwtService.sign(payload);
     const refresh_token = this.jwtService.sign(payload, {
       expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
-    });
-
-    // 🔧 CORRECTION: Recharger le client avec toutes les relations pour avoir les données complètes
-    const fullClient = await this.clientRepository.findOne({
-      where: { id: savedClient.id },
-      relations: ['contacts'], // Charger aussi les contacts si besoin
     });
 
     return {
@@ -828,8 +1096,10 @@ export class AuthService {
         role: 'client',
         userType: 'client',
         fullName: savedClient.nom,
+        organisationId: organisationId,
+        databaseName: databaseName,
       },
-      client: fullClient || savedClient, // 🔧 Retourner le client complet au lieu de seulement 3 champs
+      client: savedClient,
     };
   }
 
@@ -894,10 +1164,12 @@ export class AuthService {
       const otpCode = this.otpService.generateOtp(email, 'password-reset');
       const userName = user.userType === 'personnel' ? user.nom_utilisateur : user.nom;
       
+      // 🏢 MULTI-TENANT: Passer l'organisationId pour récupérer logo et nom de l'organisation
       const emailSent = await this.emailService.sendOtpEmail(
         email,
         otpCode,
-        userName
+        userName,
+        user.organisationId  // Utiliser l'organisation_id du personnel/client
       );
 
       if (!emailSent) {
@@ -1020,7 +1292,7 @@ export class AuthService {
         }
       }
 
-      // Rechercher l'utilisateur
+      // Rechercher l'utilisateur dans toutes les organisations
       const user = await this.findUserByEmail(email);
       
       if (!user) {
@@ -1030,18 +1302,26 @@ export class AuthService {
         };
       }
 
+      this.logger.log(`🔐 Reset password pour ${user.userType} dans organisation: ${user.organisationName} (DB: ${user.databaseName})`);
+
       // Hasher le nouveau mot de passe
       const hashedPassword = await this.hashPassword(newPassword);
 
-      // Mettre à jour le mot de passe dans la base de données
+      // 🏢 MULTI-TENANT: Mettre à jour dans la bonne base de données
+      const connection = await this.databaseConnectionService.getOrganisationConnection(user.databaseName);
+      
       if (user.userType === 'personnel') {
-        await this.personnelRepository.update(user.id, {
-          mot_de_passe: hashedPassword,
-        });
+        await connection.query(
+          `UPDATE personnel SET mot_de_passe = $1 WHERE id = $2 AND organisation_id = $3`,
+          [hashedPassword, user.id, user.organisationId]
+        );
+        this.logger.log(`✅ Mot de passe personnel mis à jour dans ${user.databaseName}`);
       } else {
-        await this.clientRepository.update(user.id, {
-          mot_de_passe: hashedPassword,
-        });
+        await connection.query(
+          `UPDATE client SET mot_de_passe = $1 WHERE id = $2 AND organisation_id = $3`,
+          [hashedPassword, user.id, user.organisationId]
+        );
+        this.logger.log(`✅ Mot de passe client mis à jour dans ${user.databaseName}`);
       }
 
       // Mettre à jour dans Keycloak si disponible
@@ -1085,29 +1365,90 @@ export class AuthService {
   }
 
   /**
-   * Rechercher un utilisateur par email dans toutes les tables
+   * Rechercher un utilisateur par email dans toutes les organisations (MULTI-TENANT)
    */
   private async findUserByEmail(email: string): Promise<any> {
-    // Rechercher dans le personnel
-    const personnel = await this.personnelRepository.findOne({
-      where: { email: email },
-    });
-
-    if (personnel) {
-      return { ...personnel, userType: 'personnel' };
-    }
-
-    // Rechercher dans les clients via contact_client
+    this.logger.log(`🔍 MULTI-TENANT: Recherche email "${email}" dans TOUTES les organisations`);
+    
     try {
-      const contactResult = await this.contactClientService.findByEmail(email);
-      if (contactResult && contactResult.client) {
-        return { ...contactResult.client, userType: 'client' };
+      // 🏢 ÉTAPE 1: Récupérer TOUTES les organisations depuis shipnology
+      const mainConnection = await this.databaseConnectionService.getMainConnection();
+      const organisations = await mainConnection.query(
+        'SELECT id, nom, database_name FROM organisations WHERE database_name IS NOT NULL ORDER BY id'
+      );
+      
+      this.logger.log(`📊 ${organisations.length} organisation(s) à scanner pour l'email ${email}`);
+      
+      // 🏢 ÉTAPE 2: Chercher dans chaque base de données d'organisation
+      for (const org of organisations) {
+        const { id: orgId, nom: orgName, database_name: dbName } = org;
+        this.logger.log(`🔎 Recherche email "${email}" dans organisation: ${orgName} (ID: ${orgId}, DB: ${dbName})`);
+        
+        try {
+          const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
+          
+          // Rechercher dans le personnel
+          const personnelResult = await connection.query(
+            `SELECT * FROM personnel 
+             WHERE LOWER(email) = LOWER($1) AND organisation_id = $2
+             LIMIT 1`,
+            [email, orgId]
+          );
+          
+          this.logger.log(`   📋 Personnel trouvés: ${personnelResult?.length || 0}`);
+          
+          if (personnelResult && personnelResult.length > 0) {
+            const personnel = personnelResult[0];
+            this.logger.log(`✅ Personnel trouvé dans ${orgName}: ${personnel.nom_utilisateur} (ID: ${personnel.id}, OrgID: ${personnel.organisation_id})`);
+            return { 
+              ...personnel, 
+              userType: 'personnel',
+              // 🏢 IMPORTANT: Ajouter les infos multi-tenant pour le reset password
+              organisationId: orgId,
+              databaseName: dbName,
+              organisationName: orgName
+            };
+          }
+          
+          // Rechercher dans les clients via contact_client
+          const contactResult = await connection.query(
+            `SELECT cc.*, c.* FROM contact_client cc 
+             INNER JOIN client c ON cc.id_client = c.id 
+             WHERE (LOWER(cc.mail1) = LOWER($1) OR LOWER(cc.mail2) = LOWER($1)) 
+             AND c.organisation_id = $2
+             LIMIT 1`,
+            [email, orgId]
+          );
+          
+          this.logger.log(`   📋 Clients trouvés: ${contactResult?.length || 0}`);
+          
+          if (contactResult && contactResult.length > 0) {
+            const client = contactResult[0];
+            this.logger.log(`✅ Client trouvé dans ${orgName}: ${client.nom} (ID: ${client.id}, OrgID: ${client.organisation_id})`);
+            return { 
+              ...client, 
+              userType: 'client',
+              // 🏢 IMPORTANT: Ajouter les infos multi-tenant pour le reset password
+              organisationId: orgId,
+              databaseName: dbName,
+              organisationName: orgName
+            };
+          }
+          
+        } catch (orgError) {
+          this.logger.error(`❌ Erreur recherche dans ${orgName}:`, orgError.message);
+          continue; // Continuer avec l'organisation suivante
+        }
       }
+      
+      // Si aucun utilisateur trouvé dans aucune organisation
+      this.logger.warn(`❌ Email "${email}" non trouvé dans aucune organisation`);
+      return null;
+      
     } catch (error) {
-      this.logger.debug(`Email ${email} non trouvé dans contact_client`);
+      this.logger.error(`❌ Erreur critique lors de la recherche multi-tenant de l'email:`, error);
+      return null;
     }
-
-    return null;
   }
 
   /**
@@ -1157,24 +1498,49 @@ export class AuthService {
 
   /**
    * Met à jour l'image de profil d'un utilisateur
+   * ✅ MULTI-TENANT: Utilise la base de données de l'organisation de l'utilisateur
    */
   async updateUserProfileImage(
     userId: string,
     userType: 'personnel' | 'client',
     imagePath: string,
+    databaseName?: string,
+    organisationId?: number
   ): Promise<boolean> {
     try {
-      if (userType === 'personnel') {
-        await this.personnelRepository.update(parseInt(userId), {
-          photo: imagePath,
-        });
+      const numericUserId = parseInt(userId);
+      
+      // 🏢 MULTI-TENANT: Si databaseName fourni, utiliser la connexion spécifique
+      if (databaseName && organisationId) {
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+        
+        if (userType === 'personnel') {
+          await connection.query(
+            `UPDATE personnel SET photo = $1 WHERE id = $2 AND organisation_id = $3`,
+            [imagePath, numericUserId, organisationId]
+          );
+          this.logger.log(`✅ Image de profil personnel ${userId} mise à jour dans ${databaseName}`);
+        } else {
+          await connection.query(
+            `UPDATE client SET photo = $1 WHERE id = $2 AND organisation_id = $3`,
+            [imagePath, numericUserId, organisationId]
+          );
+          this.logger.log(`✅ Image de profil client ${userId} mise à jour dans ${databaseName}`);
+        }
       } else {
-        await this.clientRepository.update(parseInt(userId), {
-          photo: imagePath,
-        });
+        // Fallback: utiliser les repositories par défaut
+        if (userType === 'personnel') {
+          await this.personnelRepository.update(numericUserId, {
+            photo: imagePath,
+          });
+        } else {
+          await this.clientRepository.update(numericUserId, {
+            photo: imagePath,
+          });
+        }
+        this.logger.log(`Image de profil mise à jour pour ${userType} ID: ${userId} (default DB)`);
       }
 
-      this.logger.log(`Image de profil mise à jour pour ${userType} ID: ${userId}`);
       return true;
     } catch (error) {
       this.logger.error(`Erreur mise à jour image profil pour ${userType} ${userId}:`, error);
@@ -1188,32 +1554,69 @@ export class AuthService {
   async deleteUserProfileImage(
     userId: string,
     userType: 'personnel' | 'client',
+    databaseName?: string,
+    organisationId?: number
   ): Promise<boolean> {
     try {
-      // Récupérer l'ancienne image pour la supprimer du système de fichiers
+      const numericUserId = parseInt(userId);
       let oldImage: string | null = null;
       
-      if (userType === 'personnel') {
-        const user = await this.personnelRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
-        oldImage = user?.photo || null;
+      // 🏢 MULTI-TENANT: Si databaseName fourni, utiliser la connexion spécifique
+      if (databaseName && organisationId) {
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
         
-        await this.personnelRepository.update(parseInt(userId), {
-          photo: null,
-        });
+        // Récupérer l'ancienne image
+        if (userType === 'personnel') {
+          const result = await connection.query(
+            `SELECT photo FROM personnel WHERE id = $1 AND organisation_id = $2`,
+            [numericUserId, organisationId]
+          );
+          oldImage = result[0]?.photo || null;
+          
+          // Supprimer l'image
+          await connection.query(
+            `UPDATE personnel SET photo = NULL WHERE id = $1 AND organisation_id = $2`,
+            [numericUserId, organisationId]
+          );
+          this.logger.log(`✅ Image de profil personnel ${userId} supprimée dans ${databaseName}`);
+        } else {
+          const result = await connection.query(
+            `SELECT photo FROM client WHERE id = $1 AND organisation_id = $2`,
+            [numericUserId, organisationId]
+          );
+          oldImage = result[0]?.photo || null;
+          
+          // Supprimer l'image
+          await connection.query(
+            `UPDATE client SET photo = NULL WHERE id = $1 AND organisation_id = $2`,
+            [numericUserId, organisationId]
+          );
+          this.logger.log(`✅ Image de profil client ${userId} supprimée dans ${databaseName}`);
+        }
       } else {
-        const user = await this.clientRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
-        oldImage = user?.photo || null;
-        
-        await this.clientRepository.update(parseInt(userId), {
-          photo: null,
-        });
+        // Fallback: utiliser les repositories par défaut
+        if (userType === 'personnel') {
+          const user = await this.personnelRepository.findOne({
+            where: { id: numericUserId },
+          });
+          oldImage = user?.photo || null;
+          
+          await this.personnelRepository.update(numericUserId, {
+            photo: null,
+          });
+        } else {
+          const user = await this.clientRepository.findOne({
+            where: { id: numericUserId },
+          });
+          oldImage = user?.photo || null;
+          
+          await this.clientRepository.update(numericUserId, {
+            photo: null,
+          });
+        }
       }
 
-      // Supprimer le fichier physique si il existe
+      // Supprimer le fichier physique si il existe (uniquement pour les fichiers locaux, pas Cloudinary)
       if (oldImage && !oldImage.startsWith('http')) {
         try {
           const fs = require('fs');
@@ -1285,17 +1688,30 @@ export class AuthService {
 
   /**
    * Récupère le profil complet d'un utilisateur avec toutes les informations
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async getFullUserProfile(userId: string, userType: 'personnel' | 'client'): Promise<any> {
+  async getFullUserProfile(userId: string, userType: 'personnel' | 'client', databaseName: string, organisationId: number): Promise<any> {
     try {
+      // 🏢 Validation des paramètres multi-tenant (OBLIGATOIRES)
+      if (!databaseName || !organisationId) {
+        throw new UnauthorizedException('Informations multi-tenant manquantes pour récupérer le profil');
+      }
+      
+      console.log(`🏢 [getFullUserProfile] Récupération profil ${userType} ID:${userId} depuis DB:${databaseName} Org:${organisationId}`);
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       if (userType === 'personnel') {
-        const personnel = await this.personnelRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
+        const personnelResult = await connection.query(
+          `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [parseInt(userId), organisationId]
+        );
 
-        if (!personnel) {
+        if (!personnelResult || personnelResult.length === 0) {
           throw new UnauthorizedException('Personnel non trouvé');
         }
+
+        const personnel = personnelResult[0];
 
         // ✅ Construire le profil avec TOUS les champs attendus par le frontend
         const role = personnel.role || 'personnel';
@@ -1317,26 +1733,32 @@ export class AuthService {
           userType: 'personnel',
           fullName: `${personnel.prenom} ${personnel.nom}`,
           username: personnel.nom_utilisateur,
-          isActive: personnel.isActive,
+          isActive: personnel.isactive,
           // ✅ IMPORTANT: Flags pour les permissions dans la sidebar
           isPersonnel: true,
           isClient: false,
           isAdmin: role === 'admin',
-          created_at: personnel.created_at
+          created_at: personnel.created_at,
+          // ✅ Multi-tenant info
+          organisationId: organisationId,
+          databaseName: databaseName
         };
       } else {
-        const client = await this.clientRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
+        const clientResult = await connection.query(
+          `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [parseInt(userId), organisationId]
+        );
 
-        if (!client) {
+        if (!clientResult || clientResult.length === 0) {
           throw new UnauthorizedException('Client non trouvé');
         }
+
+        const client = clientResult[0];
 
         // Récupérer l'email depuis contact_client
         let email = '';
         try {
-          const contactClient = await this.contactClientService.findByClient(client.id);
+          const contactClient = await this.contactClientService.findByClient(databaseName, client.id);
           if (contactClient && contactClient.length > 0) {
             email = contactClient[0].mail1 || contactClient[0].mail2 || '';
           }
@@ -1374,7 +1796,10 @@ export class AuthService {
           blocage: client.blocage,
           devise: client.devise,
           timbre: client.timbre,
-          solde: client.solde
+          solde: client.solde,
+          // ✅ Multi-tenant info
+          organisationId: organisationId,
+          databaseName: databaseName
         };
       }
     } catch (error) {
@@ -1385,43 +1810,114 @@ export class AuthService {
 
   /**
    * Met à jour le profil d'un utilisateur
+   * ✅ MULTI-TENANT: Utilise la base de données de l'organisation
    */
-  async updateUserProfile(userId: string, userType: 'personnel' | 'client', updateData: any): Promise<any> {
+  async updateUserProfile(
+    userId: string, 
+    userType: 'personnel' | 'client', 
+    updateData: any,
+    databaseName?: string,
+    organisationId?: number
+  ): Promise<any> {
     try {
+      const numericUserId = parseInt(userId);
+      
       if (userType === 'personnel') {
-        // Mise à jour personnel
-        const personnel = await this.personnelRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
-
-        if (!personnel) {
-          throw new UnauthorizedException('Personnel non trouvé');
-        }
-
-        // Valider les champs modifiables pour le personnel
-        const allowedFields = ['nom', 'prenom', 'telephone', 'email', 'genre', 'photo'];
-        const filteredData = {};
-        
-        allowedFields.forEach(field => {
-          if (updateData[field] !== undefined) {
-            filteredData[field] = updateData[field];
+        // 🏢 MULTI-TENANT: Si databaseName fourni, utiliser la connexion spécifique
+        if (databaseName && organisationId) {
+          const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+          
+          // Vérifier que le personnel existe
+          const checkResult = await connection.query(
+            `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+            [numericUserId, organisationId]
+          );
+          
+          if (!checkResult || checkResult.length === 0) {
+            throw new UnauthorizedException('Personnel non trouvé dans cette organisation');
           }
-        });
-
-        // Vérifier l'unicité de l'email si modifié
-        if (filteredData['email'] && filteredData['email'] !== personnel.email) {
-          const existingEmail = await this.personnelRepository.findOne({
-            where: { email: filteredData['email'] },
+          
+          const personnel = checkResult[0];
+          
+          // Valider les champs modifiables
+          const allowedFields = ['nom', 'prenom', 'telephone', 'email', 'genre', 'photo'];
+          const updateFields: string[] = [];
+          const updateValues: any[] = [];
+          let paramIndex = 1;
+          
+          for (const field of allowedFields) {
+            if (updateData[field] !== undefined) {
+              // Vérifier l'unicité de l'email si modifié
+              if (field === 'email' && updateData[field] !== personnel.email) {
+                const emailCheck = await connection.query(
+                  `SELECT id FROM personnel WHERE email = $1 AND organisation_id = $2 AND id != $3 LIMIT 1`,
+                  [updateData[field], organisationId, numericUserId]
+                );
+                if (emailCheck && emailCheck.length > 0) {
+                  throw new ConflictException('Cet email est déjà utilisé');
+                }
+              }
+              
+              updateFields.push(`${field} = $${paramIndex++}`);
+              updateValues.push(updateData[field]);
+            }
+          }
+          
+          if (updateFields.length > 0) {
+            // Ajouter les conditions WHERE
+            updateValues.push(numericUserId);
+            updateValues.push(organisationId);
+            
+            const updateQuery = `
+              UPDATE personnel 
+              SET ${updateFields.join(', ')}
+              WHERE id = $${paramIndex++} AND organisation_id = $${paramIndex++}
+              RETURNING *
+            `;
+            
+            await connection.query(updateQuery, updateValues);
+            this.logger.log(`✅ Profil personnel ${userId} mis à jour dans ${databaseName}`);
+          }
+          
+          // Retourner le profil mis à jour
+          return await this.getFullUserProfile(userId, userType, databaseName, organisationId);
+          
+        } else {
+          // Fallback: utiliser le repository par défaut
+          const personnel = await this.personnelRepository.findOne({
+            where: { id: numericUserId },
           });
-          if (existingEmail && existingEmail.id !== personnel.id) {
-            throw new ConflictException('Cet email est déjà utilisé');
-          }
-        }
 
-        await this.personnelRepository.update(personnel.id, filteredData);
-        
-        // Retourner le profil mis à jour
-        return await this.getFullUserProfile(userId, userType);
+          if (!personnel) {
+            throw new UnauthorizedException('Personnel non trouvé');
+          }
+
+          // Valider les champs modifiables pour le personnel
+          const allowedFields = ['nom', 'prenom', 'telephone', 'email', 'genre', 'photo'];
+          const filteredData = {};
+          
+          allowedFields.forEach(field => {
+            if (updateData[field] !== undefined) {
+              filteredData[field] = updateData[field];
+            }
+          });
+
+          // Vérifier l'unicité de l'email si modifié
+          if (filteredData['email'] && filteredData['email'] !== personnel.email) {
+            const existingEmail = await this.personnelRepository.findOne({
+              where: { email: filteredData['email'] },
+            });
+            if (existingEmail && existingEmail.id !== personnel.id) {
+              throw new ConflictException('Cet email est déjà utilisé');
+            }
+          }
+
+          await this.personnelRepository.update(personnel.id, filteredData);
+          
+          // ⚠️ FALLBACK: Si pas d'info multi-tenant, utiliser les données du JWT depuis req.user
+          this.logger.warn(`⚠️ Mise à jour profil sans info multi-tenant pour personnel ${userId}`);
+          throw new UnauthorizedException('Informations multi-tenant manquantes - reconnectez-vous');
+        }
 
       } else {
         // Mise à jour client
@@ -1445,8 +1941,9 @@ export class AuthService {
 
         await this.clientRepository.update(client.id, filteredData);
         
-        // Retourner le profil mis à jour
-        return await this.getFullUserProfile(userId, userType);
+        // ⚠️ FALLBACK: Si pas d'info multi-tenant, lever une erreur
+        this.logger.warn(`⚠️ Mise à jour profil sans info multi-tenant pour client ${userId}`);
+        throw new UnauthorizedException('Informations multi-tenant manquantes - reconnectez-vous');
       }
     } catch (error) {
       this.logger.error(`Erreur mise à jour profil pour ${userType} ${userId}:`, error);
@@ -1547,113 +2044,248 @@ export class AuthService {
 
   /**
    * Changer le mot de passe lors du premier login (sans vérifier l'ancien mot de passe)
+   * ✅ MULTI-TENANT: Cherche l'utilisateur dans TOUTES les organisations et retourne un JWT valide
    */
-  async changePasswordFirstLogin(userId: string, userType: 'personnel' | 'client', newPassword: string): Promise<any> {
+  async changePasswordFirstLogin(userId: string, userType: 'personnel' | 'client', newPassword: string, databaseName?: string, organisationId?: number): Promise<any> {
     try {
+      this.logger.log(`🔐 FIRST-LOGIN MULTI-TENANT: Changement mot de passe pour ${userType} #${userId}`);
+      
+      // 🏢 ÉTAPE 1: Si pas de databaseName fourni, chercher l'utilisateur dans TOUTES les organisations
+      if (!databaseName || !organisationId) {
+        this.logger.log(`🔍 Recherche de l'utilisateur dans toutes les organisations...`);
+        
+        const mainConnection = await this.databaseConnectionService.getMainConnection();
+        const organisations = await mainConnection.query(
+          'SELECT id, nom, database_name FROM organisations WHERE database_name IS NOT NULL ORDER BY id'
+        );
+        
+        for (const org of organisations) {
+          const { id: orgId, nom: orgName, database_name: dbName } = org;
+          
+          try {
+            const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
+            
+            if (userType === 'personnel') {
+              const personnelResult = await connection.query(
+                `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+                [parseInt(userId), orgId]
+              );
+              
+              if (personnelResult && personnelResult.length > 0) {
+                databaseName = dbName;
+                organisationId = orgId;
+                this.logger.log(`✅ Personnel trouvé dans ${orgName} (${dbName})`);
+                break;
+              }
+            } else {
+              const clientResult = await connection.query(
+                `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+                [parseInt(userId), orgId]
+              );
+              
+              if (clientResult && clientResult.length > 0) {
+                databaseName = dbName;
+                organisationId = orgId;
+                this.logger.log(`✅ Client trouvé dans ${orgName} (${dbName})`);
+                break;
+              }
+            }
+          } catch (error) {
+            continue;
+          }
+        }
+        
+        if (!databaseName || !organisationId) {
+          throw new UnauthorizedException('Utilisateur non trouvé dans aucune organisation');
+        }
+      }
+      
+      // 🏢 ÉTAPE 2: Utiliser la bonne connexion pour mettre à jour le mot de passe
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      this.logger.log(`🔗 Connexion à la base ${databaseName} pour organisation #${organisationId}`);
+      
       if (userType === 'personnel') {
-        const personnel = await this.personnelRepository.findOne({
-          where: { id: parseInt(userId) },
-        });
-
-        if (!personnel) {
-          this.logger.error(`Personnel non trouvé avec l'ID: ${userId}`);
+        // Récupérer le personnel
+        const personnelResult = await connection.query(
+          `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [parseInt(userId), organisationId]
+        );
+        
+        if (!personnelResult || personnelResult.length === 0) {
           throw new UnauthorizedException('Personnel non trouvé');
         }
-
-        // LOG DETAILLÉ pour debugging
-        this.logger.debug(`Tentative de changement de mot de passe first-login pour personnel:`, {
-          id: personnel.id,
-          nom_utilisateur: personnel.nom_utilisateur,
-          first_login: personnel.first_login,
-          userType
-        });
-
-        // Vérifier que c'est vraiment le premier login
+        
+        const personnel = personnelResult[0];
+        
+        // Vérifier que c'est le premier login
         if (!personnel.first_login) {
-          this.logger.warn(`Tentative d'utilisation de changePasswordFirstLogin pour personnel non first-login:`, {
-            id: personnel.id,
-            nom_utilisateur: personnel.nom_utilisateur,
-            first_login: personnel.first_login
-          });
+          this.logger.warn(`⚠️ Tentative changePasswordFirstLogin pour personnel déjà connecté: ${personnel.nom_utilisateur}`);
           throw new UnauthorizedException('Cette méthode est réservée au premier login');
         }
-
+        
         // Hasher le nouveau mot de passe
         const hashedNewPassword = await this.hashPassword(newPassword);
-
-        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
-        await this.personnelRepository.update(personnel.id, {
-          mot_de_passe: hashedNewPassword,
-          first_login: false
-        });
-
+        
+        // Mettre à jour dans la bonne base
+        await connection.query(
+          `UPDATE personnel SET mot_de_passe = $1, first_login = false WHERE id = $2 AND organisation_id = $3`,
+          [hashedNewPassword, parseInt(userId), organisationId]
+        );
+        
         // Synchroniser avec Keycloak si disponible
         if (this.keycloakService && personnel.keycloak_id) {
           try {
             await this.keycloakService.updateUserPassword(personnel.keycloak_id, newPassword);
-            this.logger.log(`Mot de passe first-login synchronisé avec Keycloak pour le personnel: ${personnel.nom_utilisateur}`);
+            this.logger.log(`✅ Keycloak synchronisé pour ${personnel.nom_utilisateur}`);
           } catch (keycloakError) {
-            this.logger.warn(`Erreur synchronisation Keycloak first-login pour ${personnel.nom_utilisateur}:`, keycloakError);
-            // Ne pas faire échouer le changement si Keycloak échoue
+            this.logger.warn(`⚠️ Erreur Keycloak pour ${personnel.nom_utilisateur}:`, keycloakError);
           }
         }
-
-        this.logger.log(`Mot de passe changé lors du premier login pour le personnel: ${personnel.nom_utilisateur}`);
-        return { message: 'Mot de passe modifié avec succès lors du premier login' };
-
-      } else {
-        const client = await this.clientRepository.findOne({
-          where: { id: parseInt(userId) },
+        
+        // 🏢 RÉCUPÉRER LES INFOS DE L'ORGANISATION
+        const mainConnection = await this.databaseConnectionService.getMainConnection();
+        const orgResult = await mainConnection.query(
+          'SELECT nom FROM organisations WHERE id = $1',
+          [organisationId]
+        );
+        const organisationName = orgResult[0]?.nom || 'Organisation';
+        
+        // ✅ GÉNÉRER UN NOUVEAU JWT AVEC LES INFOS MULTI-TENANT
+        const payload: JwtPayload = {
+          sub: personnel.id.toString(),
+          username: personnel.nom_utilisateur,
+          email: personnel.email || '',
+          role: personnel.role,
+          userType: 'personnel',
+          is_superviseur: personnel.is_superviseur || false,
+          organisationId: organisationId,
+          databaseName: databaseName,
+          organisationName: organisationName,
+        };
+        
+        const access_token = this.jwtService.sign(payload);
+        const refresh_token = this.jwtService.sign(payload, {
+          expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
         });
-
-        if (!client) {
-          this.logger.error(`Client non trouvé avec l'ID: ${userId}`);
+        
+        this.logger.log(`🎉 First-login réussi pour ${personnel.nom_utilisateur} (${organisationName})`);
+        
+        return {
+          success: true,
+          message: 'Mot de passe modifié avec succès',
+          access_token,
+          refresh_token,
+          user: {
+            id: personnel.id.toString(),
+            username: personnel.nom_utilisateur,
+            email: personnel.email || '',
+            role: personnel.role,
+            userType: 'personnel',
+            fullName: `${personnel.prenom} ${personnel.nom}`,
+            photo: personnel.photo || null,
+            first_login: false,
+          },
+        };
+        
+      } else {
+        // CLIENT
+        const clientResult = await connection.query(
+          `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [parseInt(userId), organisationId]
+        );
+        
+        if (!clientResult || clientResult.length === 0) {
           throw new UnauthorizedException('Client non trouvé');
         }
-
-        // LOG DETAILLÉ pour debugging
-        this.logger.debug(`Tentative de changement de mot de passe first-login pour client:`, {
-          id: client.id,
-          nom: client.nom,
-          first_login: client.first_login,
-          userType
-        });
-
-        // Vérifier que c'est vraiment le premier login
+        
+        const client = clientResult[0];
+        
+        // Vérifier que c'est le premier login
         if (!client.first_login) {
-          this.logger.warn(`Tentative d'utilisation de changePasswordFirstLogin pour client non first-login:`, {
-            id: client.id,
-            nom: client.nom,
-            first_login: client.first_login
-          });
+          this.logger.warn(`⚠️ Tentative changePasswordFirstLogin pour client déjà connecté: ${client.nom}`);
           throw new UnauthorizedException('Cette méthode est réservée au premier login');
         }
-
+        
         // Hasher le nouveau mot de passe
         const hashedNewPassword = await this.hashPassword(newPassword);
-
-        // Mettre à jour le mot de passe et marquer que ce n'est plus le premier login
-        await this.clientRepository.update(client.id, {
-          mot_de_passe: hashedNewPassword,
-          first_login: false
-        });
-
+        
+        // Mettre à jour dans la bonne base
+        await connection.query(
+          `UPDATE client SET mot_de_passe = $1, first_login = false WHERE id = $2 AND organisation_id = $3`,
+          [hashedNewPassword, parseInt(userId), organisationId]
+        );
+        
         // Synchroniser avec Keycloak si disponible
         if (this.keycloakService && client.keycloak_id) {
           try {
             await this.keycloakService.updateUserPassword(client.keycloak_id, newPassword);
-            this.logger.log(`Mot de passe first-login synchronisé avec Keycloak pour le client: ${client.nom}`);
+            this.logger.log(`✅ Keycloak synchronisé pour ${client.nom}`);
           } catch (keycloakError) {
-            this.logger.warn(`Erreur synchronisation Keycloak first-login pour ${client.nom}:`, keycloakError);
-            // Ne pas faire échouer le changement si Keycloak échoue
+            this.logger.warn(`⚠️ Erreur Keycloak pour ${client.nom}:`, keycloakError);
           }
         }
-
-        this.logger.log(`Mot de passe changé lors du premier login pour le client: ${client.nom}`);
-        return { message: 'Mot de passe modifié avec succès lors du premier login' };
+        
+        // Récupérer l'email depuis contact_client
+        let clientEmail = '';
+        try {
+          const contactResult = await connection.query(
+            `SELECT mail1 FROM contact_client WHERE id_client = $1 ORDER BY id LIMIT 1`,
+            [parseInt(userId)]
+          );
+          if (contactResult && contactResult.length > 0) {
+            clientEmail = contactResult[0].mail1 || '';
+          }
+        } catch (error) {
+          this.logger.warn(`Impossible de récupérer l'email du client ${client.nom}`);
+        }
+        
+        // 🏢 RÉCUPÉRER LES INFOS DE L'ORGANISATION
+        const mainConnection = await this.databaseConnectionService.getMainConnection();
+        const orgResult = await mainConnection.query(
+          'SELECT nom FROM organisations WHERE id = $1',
+          [organisationId]
+        );
+        const organisationName = orgResult[0]?.nom || 'Organisation';
+        
+        // ✅ GÉNÉRER UN NOUVEAU JWT AVEC LES INFOS MULTI-TENANT
+        const payload: JwtPayload = {
+          sub: client.id.toString(),
+          username: client.nom,
+          email: clientEmail,
+          role: 'client',
+          userType: 'client',
+          is_superviseur: false,
+          organisationId: organisationId,
+          databaseName: databaseName,
+          organisationName: organisationName,
+        };
+        
+        const access_token = this.jwtService.sign(payload);
+        const refresh_token = this.jwtService.sign(payload, {
+          expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d'),
+        });
+        
+        this.logger.log(`🎉 First-login réussi pour client ${client.nom} (${organisationName})`);
+        
+        return {
+          success: true,
+          message: 'Mot de passe modifié avec succès',
+          access_token,
+          refresh_token,
+          user: {
+            id: client.id.toString(),
+            username: client.nom,
+            email: clientEmail,
+            role: 'client',
+            userType: 'client',
+            fullName: client.nom,
+            photo: client.photo || null,
+            first_login: false,
+          },
+        };
       }
     } catch (error) {
-      this.logger.error(`Erreur changement mot de passe premier login pour ${userType} ${userId}:`, error);
+      this.logger.error(`❌ Erreur changement mot de passe premier login pour ${userType} ${userId}:`, error);
       if (error instanceof UnauthorizedException) {
         throw error;
       }
@@ -2129,6 +2761,25 @@ export class AuthService {
         throw new UnauthorizedException('Utilisateur non trouvé');
       }
 
+      // 🏢 Récupérer les informations multi-tenant
+      const organisationId = user.organisation_id || 1;
+      let databaseName = 'velosi';
+      let organisationName = 'Velosi';
+      
+      try {
+        const orgConnection = await this.databaseConnectionService.getOrganisationConnection('shipnology');
+        const org = await orgConnection.query(
+          'SELECT * FROM organisations WHERE id = $1 LIMIT 1',
+          [organisationId]
+        );
+        if (org && org.length > 0) {
+          databaseName = org[0].database_name || 'velosi';
+          organisationName = org[0].name || 'Velosi';
+        }
+      } catch (error) {
+        this.logger.warn(`⚠️ Erreur récupération organisation ${organisationId}:`, error.message);
+      }
+
       const payload: JwtPayload = {
         username: userType === 'personnel' ? (user as Personnel).nom_utilisateur : user.nom,
         sub: user.id.toString(),
@@ -2136,6 +2787,10 @@ export class AuthService {
         role: userType === 'personnel' ? (user as Personnel).role : 'client',
         userType,
         is_superviseur: userType === 'personnel' ? ((user as Personnel).is_superviseur || false) : false,
+        // 🏢 MULTI-TENANT (CRUCIAL)
+        organisationId: organisationId,
+        databaseName: databaseName,
+        organisationName: organisationName,
       };
 
       const access_token = this.jwtService.sign(payload, {
@@ -2166,77 +2821,85 @@ export class AuthService {
 
   /**
    * ✅ Déconnexion d'un utilisateur - Marque le statut comme hors ligne
+   * 🏢 Multi-tenant: Utilise databaseName et organisationId depuis le token JWT
    */
-  async logout(userId: string, userType: 'personnel' | 'client', sessionId?: number): Promise<{ success: boolean; message: string }> {
+  async logout(userId: string, userType: 'personnel' | 'client', sessionId?: number, databaseName?: string, organisationId?: number): Promise<{ success: boolean; message: string }> {
     try {
       const id = parseInt(userId);
-      this.logger.log(`🔴 DÉBUT LOGOUT - userId: ${userId}, userType: ${userType}, id: ${id}`);
+      this.logger.log(`🔴 DÉBUT LOGOUT MULTI-TENANT - userId: ${userId}, userType: ${userType}, database: ${databaseName}, orgId: ${organisationId}`);
+
+      // 🏢 Utiliser la base de données spécifiée ou fallback sur velosi
+      const dbName = databaseName || 'velosi';
+      const orgId = organisationId || 1;
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
 
       if (userType === 'personnel') {
-        const personnel = await this.personnelRepository.findOne({
-          where: { id },
-        });
+        // Requête SQL directe dans la bonne base
+        const personnel = await connection.query(
+          `SELECT * FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [id, orgId]
+        );
 
-        if (!personnel) {
-          this.logger.error(`❌ Personnel ID ${id} non trouvé`);
+        if (!personnel || personnel.length === 0) {
+          this.logger.error(`❌ Personnel ID ${id} non trouvé dans ${dbName}`);
           throw new UnauthorizedException('Personnel non trouvé');
         }
 
-        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${personnel.statut_en_ligne}`);
+        const user = personnel[0];
+        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${user.statut_en_ligne}`);
 
-        // Mettre à jour le statut en ligne à false avec query builder pour garantir la persistence
-        const updateResult = await this.personnelRepository
-          .createQueryBuilder()
-          .update()
-          .set({ statut_en_ligne: false })
-          .where('id = :id', { id })
-          .execute();
+        // Mettre à jour le statut en ligne à false
+        await connection.query(
+          `UPDATE personnel SET statut_en_ligne = false, last_activity = NOW() WHERE id = $1`,
+          [id]
+        );
 
-        this.logger.log(`✅ UPDATE RESULT - affected: ${updateResult.affected}`);
+        this.logger.log(`✅ UPDATE EXÉCUTÉ - Personnel ${user.nom_utilisateur} marqué comme hors ligne dans ${dbName}`);
 
         // Vérification post-update
-        const personnelUpdated = await this.personnelRepository.findOne({ where: { id } });
-        this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${personnelUpdated?.statut_en_ligne}`);
-
-        if (personnelUpdated?.statut_en_ligne === true) {
-          this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
-        } else {
-          this.logger.log(`✅ SUCCÈS: Personnel ${personnel.nom_utilisateur} marqué comme hors ligne`);
+        const personnelUpdated = await connection.query(
+          `SELECT statut_en_ligne FROM personnel WHERE id = $1 LIMIT 1`,
+          [id]
+        );
+        
+        if (personnelUpdated && personnelUpdated.length > 0) {
+          this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${personnelUpdated[0].statut_en_ligne}`);
+          
+          if (personnelUpdated[0].statut_en_ligne === true) {
+            this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
+          } else {
+            this.logger.log(`✅ SUCCÈS: Personnel ${user.nom_utilisateur} correctement hors ligne`);
+          }
         }
 
         // 🔥 ENREGISTRER LA DÉCONNEXION DANS LE JOURNAL
         if (this.loginHistoryService) {
           try {
-            // 🔑 Utiliser le sessionId passé en paramètre pour fermer UNIQUEMENT cette session spécifique
             if (sessionId) {
-              await this.loginHistoryService.recordLogout(sessionId);
+              await this.loginHistoryService.recordLogout(sessionId, databaseName, organisationId);
               this.logger.log(`✅ Déconnexion enregistrée pour session spécifique #${sessionId}`);
             } else {
-              // Fallback: Si pas de sessionId, fermer la dernière session active
               this.logger.warn(`⚠️ Pas de sessionId fourni, utilisation du fallback`);
-              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.PERSONNEL);
+              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.PERSONNEL, databaseName, organisationId);
               if (activeSessions && activeSessions.length > 0) {
-                // Fermer uniquement la DERNIÈRE session active (la plus récente)
                 const lastSession = activeSessions[0];
-                await this.loginHistoryService.recordLogout(lastSession.id);
+                await this.loginHistoryService.recordLogout(lastSession.id, databaseName, organisationId);
                 this.logger.log(`✅ Déconnexion enregistrée pour dernière session #${lastSession.id}`);
-              } else {
-                this.logger.warn(`⚠️ Aucune session active trouvée pour le personnel #${id}`);
               }
             }
           } catch (error) {
             this.logger.warn(`⚠️ Erreur lors de l'enregistrement de la déconnexion:`, error);
-            // Ne pas bloquer la déconnexion si l'historique échoue
           }
         }
 
         // Fermer les sessions Keycloak si disponible
-        if (this.keycloakService && personnel.keycloak_id) {
+        if (this.keycloakService && user.keycloak_id) {
           try {
-            await this.keycloakService.logoutAllUserSessions(personnel.keycloak_id);
-            this.logger.log(`Sessions Keycloak fermées pour ${personnel.nom_utilisateur}`);
+            await this.keycloakService.logoutAllUserSessions(user.keycloak_id);
+            this.logger.log(`✅ Sessions Keycloak fermées pour ${user.nom_utilisateur}`);
           } catch (keycloakError) {
-            this.logger.warn(`Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
+            this.logger.warn(`⚠️ Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
           }
         }
 
@@ -2244,71 +2907,73 @@ export class AuthService {
           success: true,
           message: 'Déconnexion réussie',
         };
+        
       } else {
-        const client = await this.clientRepository.findOne({
-          where: { id },
-        });
+        // Client logout
+        const client = await connection.query(
+          `SELECT * FROM client WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+          [id, orgId]
+        );
 
-        if (!client) {
-          this.logger.error(`❌ Client ID ${id} non trouvé`);
+        if (!client || client.length === 0) {
+          this.logger.error(`❌ Client ID ${id} non trouvé dans ${dbName}`);
           throw new UnauthorizedException('Client non trouvé');
         }
 
-        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${client.statut_en_ligne}`);
+        const user = client[0];
+        this.logger.log(`📊 AVANT UPDATE - statut_en_ligne: ${user.statut_en_ligne}`);
 
-        // Mettre à jour le statut en ligne à false avec query builder
-        const updateResult = await this.clientRepository
-          .createQueryBuilder()
-          .update()
-          .set({ statut_en_ligne: false })
-          .where('id = :id', { id })
-          .execute();
+        // Mettre à jour le statut en ligne à false
+        await connection.query(
+          `UPDATE client SET statut_en_ligne = false, last_activity = NOW() WHERE id = $1`,
+          [id]
+        );
 
-        this.logger.log(`✅ UPDATE RESULT - affected: ${updateResult.affected}`);
+        this.logger.log(`✅ UPDATE EXÉCUTÉ - Client ${user.nom} marqué comme hors ligne dans ${dbName}`);
 
         // Vérification post-update
-        const clientUpdated = await this.clientRepository.findOne({ where: { id } });
-        this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${clientUpdated?.statut_en_ligne}`);
-
-        if (clientUpdated?.statut_en_ligne === true) {
-          this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
-        } else {
-          this.logger.log(`✅ SUCCÈS: Client ${client.nom} marqué comme hors ligne`);
+        const clientUpdated = await connection.query(
+          `SELECT statut_en_ligne FROM client WHERE id = $1 LIMIT 1`,
+          [id]
+        );
+        
+        if (clientUpdated && clientUpdated.length > 0) {
+          this.logger.log(`📊 APRÈS UPDATE - statut_en_ligne: ${clientUpdated[0].statut_en_ligne}`);
+          
+          if (clientUpdated[0].statut_en_ligne === true) {
+            this.logger.error(`⚠️ ALERTE: Le statut est toujours TRUE après l'update!`);
+          } else {
+            this.logger.log(`✅ SUCCÈS: Client ${user.nom} correctement hors ligne`);
+          }
         }
 
         // 🔥 ENREGISTRER LA DÉCONNEXION DANS LE JOURNAL
         if (this.loginHistoryService) {
           try {
-            // 🔑 Utiliser le sessionId passé en paramètre pour fermer UNIQUEMENT cette session spécifique
             if (sessionId) {
-              await this.loginHistoryService.recordLogout(sessionId);
-              this.logger.log(`✅ Déconnexion client enregistrée pour session spécifique #${sessionId}`);
+              await this.loginHistoryService.recordLogout(sessionId, databaseName, organisationId);
+              this.logger.log(`✅ Déconnexion client enregistrée pour session #${sessionId}`);
             } else {
-              // Fallback: Si pas de sessionId, fermer la dernière session active
-              this.logger.warn(`⚠️ Pas de sessionId fourni pour client, utilisation du fallback`);
-              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.CLIENT);
+              this.logger.warn(`⚠️ Pas de sessionId fourni pour client`);
+              const activeSessions = await this.loginHistoryService.getActiveSessions(id, UserType.CLIENT, databaseName, organisationId);
               if (activeSessions && activeSessions.length > 0) {
-                // Fermer uniquement la DERNIÈRE session active (la plus récente)
                 const lastSession = activeSessions[0];
-                await this.loginHistoryService.recordLogout(lastSession.id);
-                this.logger.log(`✅ Déconnexion client enregistrée pour dernière session #${lastSession.id}`);
-              } else {
-                this.logger.warn(`⚠️ Aucune session active trouvée pour le client #${id}`);
+                await this.loginHistoryService.recordLogout(lastSession.id, databaseName, organisationId);
+                this.logger.log(`✅ Déconnexion client enregistrée pour session #${lastSession.id}`);
               }
             }
           } catch (error) {
-            this.logger.warn(`⚠️ Erreur lors de l'enregistrement de la déconnexion dans le journal:`, error);
-            // Ne pas bloquer la déconnexion si l'historique échoue
+            this.logger.warn(`⚠️ Erreur enregistrement déconnexion:`, error);
           }
         }
 
         // Fermer les sessions Keycloak si disponible
-        if (this.keycloakService && client.keycloak_id) {
+        if (this.keycloakService && user.keycloak_id) {
           try {
-            await this.keycloakService.logoutAllUserSessions(client.keycloak_id);
-            this.logger.log(`Sessions Keycloak fermées pour ${client.nom}`);
+            await this.keycloakService.logoutAllUserSessions(user.keycloak_id);
+            this.logger.log(`✅ Sessions Keycloak fermées pour ${user.nom}`);
           } catch (keycloakError) {
-            this.logger.warn(`Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
+            this.logger.warn(`⚠️ Erreur fermeture sessions Keycloak: ${keycloakError.message}`);
           }
         }
 
@@ -2334,165 +2999,199 @@ export class AuthService {
   // ==========================================
 
   /**
-   * Réinitialiser le mot de passe d'un personnel (Admin uniquement)
+   * 🔐 Réinitialiser le mot de passe d'un personnel (Admin uniquement) - Multi-tenant
    */
   async adminResetPersonnelPassword(
+    databaseName: string,
+    organisationId: number,
     personnelId: number,
     newPassword: string,
-    adminId: number
+    adminName?: string
   ): Promise<{ success: boolean; message: string }> {
     try {
-      this.logger.log(`🔐 Admin #${adminId} réinitialise le mot de passe du personnel #${personnelId}`);
+      this.logger.log(`🔐 [adminResetPersonnelPassword] DB: ${databaseName}, Org: ${organisationId}, Personnel: ${personnelId}, Admin: ${adminName || 'non spécifié'}`);
 
-      // Récupérer le personnel
-      const personnel = await this.personnelRepository.findOne({
-        where: { id: personnelId },
-      });
+      // Récupérer la connexion à la base de données de l'organisation
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-      if (!personnel) {
-        throw new NotFoundException('Personnel introuvable');
+      // ✅ CORRECTION MULTI-TENANT: Pas besoin de filtrer par organisation_id
+      // car on est déjà dans la bonne base de données de l'organisation
+      const personnel = await connection.query(
+        'SELECT * FROM personnel WHERE id = $1',
+        [personnelId]
+      );
+      
+      this.logger.log(`🔍 [adminResetPersonnelPassword] Personnel trouvé: ${JSON.stringify(personnel.map(p => ({ id: p.id, nom: p.nom, prenom: p.prenom, organisation_id: p.organisation_id })))}`);
+
+      if (!personnel || personnel.length === 0) {
+        throw new NotFoundException(`Personnel #${personnelId} non trouvé dans la base ${databaseName}`);
       }
+
+      const personnelData = personnel[0];
 
       // Hasher le nouveau mot de passe
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Mettre à jour en base de données
-      await this.personnelRepository.update(
-        { id: personnelId },
-        { 
-          mot_de_passe: hashedPassword
-        }
+      // Mettre à jour le mot de passe
+      await connection.query(
+        'UPDATE personnel SET mot_de_passe = $1 WHERE id = $2',
+        [hashedPassword, personnelId]
       );
 
       // Mettre à jour dans Keycloak si disponible
-      if (this.keycloakService && personnel.keycloak_id) {
+      if (this.keycloakService && personnelData.keycloak_id) {
         try {
-          await this.keycloakService.resetUserPassword(personnel.keycloak_id, newPassword);
-          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${personnel.email}`);
+          await this.keycloakService.resetUserPassword(personnelData.keycloak_id, newPassword);
+          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${personnelData.email}`);
         } catch (keycloakError) {
           this.logger.warn(`⚠️ Erreur mise à jour Keycloak: ${keycloakError.message}`);
         }
       }
 
-      // Envoyer email de notification au personnel
-      try {
-        await this.emailService.sendPasswordResetByAdminEmail(
-          personnel.email,
-          personnel.nom_utilisateur || `${personnel.prenom} ${personnel.nom}`,
-          'personnel',
-          newPassword
-        );
-      } catch (emailError) {
-        this.logger.warn(`⚠️ Erreur envoi email notification: ${emailError.message}`);
+      // Envoyer email de notification au personnel avec le nom de l'admin
+      if (personnelData.email) {
+        try {
+          await this.emailService.sendPasswordResetByAdminEmail(
+            personnelData.email,
+            personnelData.nom_utilisateur || `${personnelData.prenom} ${personnelData.nom}`,
+            'personnel',
+            newPassword,
+            adminName
+          );
+          this.logger.log(`✅ Email de notification envoyé à ${personnelData.email} (action par: ${adminName || 'admin'})`);
+        } catch (emailError) {
+          this.logger.warn(`⚠️ Erreur envoi email notification: ${emailError.message}`);
+        }
       }
 
-      this.logger.log(`✅ Mot de passe personnel #${personnelId} réinitialisé par admin #${adminId}`);
+      this.logger.log(`✅ [adminResetPersonnelPassword] Mot de passe personnel #${personnelId} réinitialisé avec succès`);
 
       return {
         success: true,
-        message: `Mot de passe de ${personnel.prenom} ${personnel.nom} réinitialisé avec succès`,
+        message: `Mot de passe de ${personnelData.prenom} ${personnelData.nom} réinitialisé avec succès`,
       };
-
     } catch (error) {
-      this.logger.error(`❌ Erreur réinitialisation mot de passe personnel:`, error);
+      this.logger.error(`❌ [adminResetPersonnelPassword] Erreur:`, error);
       throw error;
     }
   }
 
   /**
-   * Réinitialiser le mot de passe d'un client (Admin uniquement)
+   * 🔐 Réinitialiser le mot de passe d'un client (Admin uniquement) - Multi-tenant
    */
   async adminResetClientPassword(
+    databaseName: string,
+    organisationId: number,
     clientId: number,
     newPassword: string,
-    adminId: number
+    adminName?: string
   ): Promise<{ success: boolean; message: string }> {
     try {
-      this.logger.log(`🔐 Admin #${adminId} réinitialise le mot de passe du client #${clientId}`);
+      this.logger.log(`🔐 [adminResetClientPassword] DB: ${databaseName}, Org: ${organisationId}, Client: ${clientId}, Admin: ${adminName || 'non spécifié'}`);
 
-      // Récupérer le client avec ses contacts pour obtenir l'email réel
-      const client = await this.clientRepository.findOne({
-        where: { id: clientId },
-        relations: ['contacts'],
-      });
+      // Récupérer la connexion à la base de données de l'organisation
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-      if (!client) {
-        throw new NotFoundException('Client introuvable');
+      // ✅ CORRECTION MULTI-TENANT: Pas besoin de filtrer par organisation_id
+      // car on est déjà dans la bonne base de données de l'organisation
+      const client = await connection.query(
+        'SELECT * FROM clients WHERE id = $1',
+        [clientId]
+      );
+      
+      this.logger.log(`🔍 [adminResetClientPassword] Client trouvé: ${JSON.stringify(client.map(c => ({ id: c.id, nom: c.nom, organisation_id: c.organisation_id })))}`);
+
+      if (!client || client.length === 0) {
+        throw new NotFoundException(`Client #${clientId} non trouvé dans la base ${databaseName}`);
       }
+
+      const clientData = client[0];
+
+      // Récupérer les contacts du client
+      const contacts = await connection.query(
+        'SELECT * FROM contact_client WHERE client_id = $1 ORDER BY is_principal DESC',
+        [clientId]
+      );
 
       // Hasher le nouveau mot de passe
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Mettre à jour en base de données
-      await this.clientRepository.update(
-        { id: clientId },
-        { 
-          mot_de_passe: hashedPassword
-        }
+      // Mettre à jour le mot de passe
+      await connection.query(
+        'UPDATE clients SET mot_de_passe = $1 WHERE id = $2',
+        [hashedPassword, clientId]
       );
 
       // Mettre à jour dans Keycloak si disponible
-      if (this.keycloakService && client.keycloak_id) {
+      if (this.keycloakService && clientData.keycloak_id) {
         try {
-          await this.keycloakService.resetUserPassword(client.keycloak_id, newPassword);
-          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${client.nom}`);
+          await this.keycloakService.resetUserPassword(clientData.keycloak_id, newPassword);
+          this.logger.log(`✅ Mot de passe mis à jour dans Keycloak pour ${clientData.nom}`);
         } catch (keycloakError) {
           this.logger.warn(`⚠️ Erreur mise à jour Keycloak: ${keycloakError.message}`);
         }
       }
 
-      // Récupérer l'email du client depuis le contact principal (is_principal = true)
+      // Récupérer l'email du client depuis le contact principal
       let clientEmail: string | null = null;
       
-      // Chercher le contact principal
-      if (client.contacts && client.contacts.length > 0) {
-        const principalContact = client.contacts.find(contact => contact.is_principal === true);
+      if (contacts && contacts.length > 0) {
+        const principalContact = contacts.find(c => c.is_principal === true);
         
         if (principalContact) {
           clientEmail = principalContact.mail1 || principalContact.mail2 || null;
           this.logger.log(`📧 Email récupéré depuis contact principal: ${clientEmail}`);
         } else {
-          // Si pas de contact principal, prendre le premier contact
-          const firstContact = client.contacts[0];
+          const firstContact = contacts[0];
           clientEmail = firstContact.mail1 || firstContact.mail2 || null;
           this.logger.log(`📧 Email récupéré depuis premier contact: ${clientEmail}`);
         }
       }
-      
-      // Si pas d'email dans les contacts, utiliser le getter email de l'entité
-      if (!clientEmail) {
-        clientEmail = client.email;
-        this.logger.log(`📧 Email récupéré depuis client.email: ${clientEmail}`);
-      }
 
-      // Envoyer email de notification au client
+      // Envoyer email de notification au client avec le nom de l'admin
       if (clientEmail && !clientEmail.includes('@client.velosi.com')) {
         try {
           await this.emailService.sendPasswordResetByAdminEmail(
             clientEmail,
-            client.nom,
+            clientData.nom,
             'client',
-            newPassword
+            newPassword,
+            adminName
           );
-          this.logger.log(`✅ Email de notification envoyé à ${clientEmail}`);
+          this.logger.log(`✅ Email de notification envoyé à ${clientEmail} (action par: ${adminName || 'admin'})`);
         } catch (emailError) {
           this.logger.warn(`⚠️ Erreur envoi email notification: ${emailError.message}`);
         }
       } else {
-        this.logger.warn(`⚠️ Pas d'email valide pour le client ${client.nom} - Email non envoyé`);
+        this.logger.warn(`⚠️ Pas d'email valide pour le client ${clientData.nom} - Email non envoyé`);
       }
 
-      this.logger.log(`✅ Mot de passe client #${clientId} réinitialisé par admin #${adminId}`);
+      this.logger.log(`✅ [adminResetClientPassword] Mot de passe client #${clientId} réinitialisé avec succès`);
 
       return {
         success: true,
-        message: `Mot de passe de ${client.nom} réinitialisé avec succès`,
+        message: `Mot de passe de ${clientData.nom} réinitialisé avec succès`,
       };
-
     } catch (error) {
-      this.logger.error(`❌ Erreur réinitialisation mot de passe client:`, error);
+      this.logger.error(`❌ [adminResetClientPassword] Erreur:`, error);
       throw error;
     }
   }
-}
 
+  /**
+   * 🏢 Récupérer une organisation par son ID
+   */
+  async getOrganisationById(organisationId: number): Promise<any> {
+    const mainConnection = await this.databaseConnectionService.getMainConnection();
+    const result = await mainConnection.query(
+      `SELECT id, nom, nom_affichage, logo_url, slug, telephone, adresse, email_contact FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+    
+    if (!result || result.length === 0) {
+      throw new NotFoundException(`Organisation avec l'ID ${organisationId} introuvable`);
+    }
+    
+    return result[0];
+  }
+}

@@ -1,10 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
 import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
-import { Personnel } from '../../entities/personnel.entity';
-import { Client } from '../../entities/client.entity';
+import { DatabaseConnectionService } from '../../common/database-connection.service';
 
 export interface KanbanData {
   pipeline: {
@@ -93,126 +90,145 @@ export interface PipelineFilters {
 @Injectable()
 export class PipelineService {
   constructor(
-    @InjectRepository(Opportunity)
-    private opportunityRepository: Repository<Opportunity>,
-    @InjectRepository(Lead)
-    private leadRepository: Repository<Lead>,
-    @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
   /**
    * Récupérer les données du pipeline Kanban
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
+   * @param filters Filtres de recherche
+   * @param databaseName Nom de la base de données
    */
-  async getKanbanData(filters: PipelineFilters = {}): Promise<KanbanData> {
+  async getKanbanData(filters: PipelineFilters = {}, databaseName: string): Promise<KanbanData> {
     console.log('📊 PipelineService.getKanbanData - Filters:', filters);
+    console.log('🏛️ Database:', databaseName);
 
     try {
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // 1. Définir les étapes du pipeline avec couleurs et probabilités
       const stages = this.getDefaultStages();
       
-      // 2. Récupérer toutes les opportunités avec leurs relations
-      let query = this.opportunityRepository
-        .createQueryBuilder('opportunity')
-        .leftJoinAndSelect('opportunity.assignedTo', 'assignedTo')
-        .leftJoinAndSelect('opportunity.lead', 'lead')
-        .leftJoinAndSelect('opportunity.client', 'client');
+      // 2. Construire la requête SQL pour les opportunités avec relations
+      let whereConditions = [];
+      let queryParams: any[] = [];
+      let paramIndex = 1;
 
       // 3. Appliquer les filtres
       if (filters.search) {
-        query = query.andWhere(
-          '(opportunity.title ILIKE :search OR opportunity.description ILIKE :search)',
-          { search: `%${filters.search}%` }
-        );
+        whereConditions.push(`(o.title ILIKE $${paramIndex} OR o.description ILIKE $${paramIndex})`);
+        queryParams.push(`%${filters.search}%`);
+        paramIndex++;
       }
 
       if (filters.assignedToId) {
-        query = query.andWhere('opportunity.assignedToId = :assignedToId', {
-          assignedToId: filters.assignedToId
-        });
+        // ✅ Filtrer sur assigned_to_ids (array) avec l'opérateur = ANY
+        whereConditions.push(`$${paramIndex} = ANY(o.assigned_to_ids)`);
+        queryParams.push(filters.assignedToId);
+        paramIndex++;
       }
 
       if (filters.priority) {
-        query = query.andWhere('opportunity.priority = :priority', {
-          priority: filters.priority
-        });
+        whereConditions.push(`o.priority = $${paramIndex}`);
+        queryParams.push(filters.priority);
+        paramIndex++;
       }
 
       if (filters.minValue) {
-        query = query.andWhere('opportunity.value >= :minValue', {
-          minValue: filters.minValue
-        });
+        whereConditions.push(`o.value >= $${paramIndex}`);
+        queryParams.push(filters.minValue);
+        paramIndex++;
       }
 
       if (filters.maxValue) {
-        query = query.andWhere('opportunity.value <= :maxValue', {
-          maxValue: filters.maxValue
-        });
+        whereConditions.push(`o.value <= $${paramIndex}`);
+        queryParams.push(filters.maxValue);
+        paramIndex++;
       }
 
       if (filters.dateFrom) {
-        query = query.andWhere('opportunity.expectedCloseDate >= :dateFrom', {
-          dateFrom: filters.dateFrom
-        });
+        whereConditions.push(`o.expected_close_date >= $${paramIndex}`);
+        queryParams.push(filters.dateFrom);
+        paramIndex++;
       }
 
       if (filters.dateTo) {
-        query = query.andWhere('opportunity.expectedCloseDate <= :dateTo', {
-          dateTo: filters.dateTo
-        });
+        whereConditions.push(`o.expected_close_date <= $${paramIndex}`);
+        queryParams.push(filters.dateTo);
+        paramIndex++;
       }
 
-      // 4. Ordonner par date de création
-      query = query.orderBy('opportunity.createdAt', 'DESC');
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-      const opportunities = await query.getMany();
+      const opportunitiesQuery = `
+        SELECT 
+          o.*,
+          l.id as "lead_id", l.company as "lead_company", l.full_name as "lead_fullName",
+          l.email as "lead_email", l.phone as "lead_phone", l.position as "lead_position",
+          l.website as "lead_website", l.industry as "lead_industry", l.employee_count as "lead_employeeCount",
+          c.id as "client_id", c.nom as "client_nom"
+        FROM crm_opportunities o
+        LEFT JOIN crm_leads l ON o.lead_id = l.id
+        LEFT JOIN client c ON o.client_id = c.id
+        ${whereClause}
+        ORDER BY o.created_at DESC
+      `;
+
+      const opportunities = await connection.query(opportunitiesQuery, queryParams);
 
       console.log(`📈 Trouvé ${opportunities.length} opportunités`);
 
       // 5. Charger les leads/prospects pour la colonne "prospecting"
       // 🎯 Afficher TOUS les prospects SAUF converted, lost et client
-      let leads: Lead[] = [];
-      let leadQueryBuilder = this.leadRepository
-        .createQueryBuilder('lead')
-        .leftJoinAndSelect('lead.assignedTo', 'assignedTo')
-        .where('lead.status != :convertedStatus', { convertedStatus: LeadStatus.CONVERTED })
-        .andWhere('lead.status != :lostStatus', { lostStatus: LeadStatus.LOST })
-        .andWhere('lead.status != :clientStatus', { clientStatus: LeadStatus.CLIENT });
+      let leadWhereConditions = [
+        "l.status != 'converted'",
+        "l.status != 'lost'",
+        "l.status != 'client'"
+      ];
+      let leadQueryParams: any[] = [];
+      let leadParamIndex = 1;
 
       // Appliquer les mêmes filtres aux prospects
       if (filters.search) {
-        leadQueryBuilder = leadQueryBuilder.andWhere(
-          '(lead.company ILIKE :search OR lead.fullName ILIKE :search OR lead.email ILIKE :search)',
-          { search: `%${filters.search}%` }
-        );
+        leadWhereConditions.push(`(l.company ILIKE $${leadParamIndex} OR l.full_name ILIKE $${leadParamIndex} OR l.email ILIKE $${leadParamIndex})`);
+        leadQueryParams.push(`%${filters.search}%`);
+        leadParamIndex++;
       }
 
       if (filters.assignedToId) {
-        leadQueryBuilder = leadQueryBuilder.andWhere('lead.assignedToId = :assignedToId', {
-          assignedToId: filters.assignedToId
-        });
+        // ✅ Filtrer sur assigned_to_ids (array) avec l'opérateur = ANY
+        leadWhereConditions.push(`$${leadParamIndex} = ANY(l.assigned_to_ids)`);
+        leadQueryParams.push(filters.assignedToId);
+        leadParamIndex++;
       }
 
       if (filters.priority) {
-        leadQueryBuilder = leadQueryBuilder.andWhere('lead.priority = :priority', {
-          priority: filters.priority
-        });
+        leadWhereConditions.push(`l.priority = $${leadParamIndex}`);
+        leadQueryParams.push(filters.priority);
+        leadParamIndex++;
       }
 
-      leads = await leadQueryBuilder.orderBy('lead.createdAt', 'DESC').getMany();
+      const leadWhereClause = `WHERE ${leadWhereConditions.join(' AND ')}`;
+
+      const leadsQuery = `
+        SELECT l.*
+        FROM crm_leads l
+        ${leadWhereClause}
+        ORDER BY l.created_at DESC
+      `;
+
+      const leads = await connection.query(leadsQuery, leadQueryParams);
       
       console.log(`📋 Trouvé ${leads.length} prospects (leads) actifs pour la colonne prospecting`);
 
       // ✅ Charger les commerciaux assignés pour toutes les opportunités
       const opportunitiesWithCommercials = await Promise.all(
-        opportunities.map(opp => this.loadAssignedCommercialsForOpportunity(opp))
+        opportunities.map(opp => this.loadAssignedCommercialsForOpportunity(opp, databaseName))
       );
 
       // ✅ Charger les commerciaux assignés pour tous les leads
       const leadsWithCommercials = await Promise.all(
-        leads.map(lead => this.loadAssignedCommercialsForLead(lead))
+        leads.map(lead => this.loadAssignedCommercialsForLead(lead, databaseName))
       );
 
       // 6. Grouper les opportunités par étape et ajouter les prospects
@@ -277,31 +293,48 @@ export class PipelineService {
 
   /**
    * Déplacer une opportunité vers une autre étape
+   * ✅ MULTI-TENANT: Utilise SQL pur avec placeholders PostgreSQL ($1, $2...)
    */
-  async moveOpportunity(opportunityId: number, toStage: string): Promise<KanbanOpportunity> {
+  async moveOpportunity(opportunityId: number, toStage: string, databaseName: string): Promise<KanbanOpportunity> {
     console.log(`🔄 Déplacement opportunité ${opportunityId} vers ${toStage}`);
 
     try {
-      const opportunity = await this.opportunityRepository.findOne({
-        where: { id: opportunityId },
-        relations: ['assignedTo', 'lead', 'client']
-      });
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-      if (!opportunity) {
+      // Récupérer l'opportunité (sans JOIN sur personnel, on charge les commerciaux séparément)
+      const opportunities = await connection.query(`
+        SELECT 
+          o.*,
+          l.company as lead_company, l.full_name as lead_fullName,
+          c.nom as client_nom
+        FROM crm_opportunities o
+        LEFT JOIN crm_leads l ON o.lead_id = l.id
+        LEFT JOIN client c ON o.client_id = c.id
+        WHERE o.id = $1
+      `, [opportunityId]);
+
+      if (!opportunities || opportunities.length === 0) {
         throw new NotFoundException(`Opportunité avec l'ID ${opportunityId} non trouvée`);
       }
 
+      const opportunity = opportunities[0];
       const fromStage = opportunity.stage;
       
       // Mettre à jour l'étape
-      opportunity.stage = toStage as any;
-      opportunity.updatedAt = new Date();
-
-      const savedOpportunity = await this.opportunityRepository.save(opportunity);
+      await connection.query(
+        'UPDATE crm_opportunities SET stage = $1, updated_at = NOW() WHERE id = $2',
+        [toStage, opportunityId]
+      );
       
       console.log(`✅ Opportunité déplacée de ${fromStage} vers ${toStage}`);
 
-      return this.transformToKanbanOpportunity(savedOpportunity);
+      // Charger les commerciaux assignés
+      await this.loadAssignedCommercialsForOpportunity(opportunity, databaseName);
+
+      // Recharger pour retourner
+      opportunity.stage = toStage;
+      opportunity.updated_at = new Date();
+      return this.transformToKanbanOpportunity(opportunity);
 
     } catch (error) {
       console.error('❌ Erreur lors du déplacement:', error);
@@ -314,12 +347,15 @@ export class PipelineService {
 
   /**
    * Récupérer les statistiques du pipeline
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
+   * @param filters Filtres de recherche
+   * @param databaseName Nom de la base de données
    */
-  async getPipelineStats(filters: PipelineFilters = {}) {
+  async getPipelineStats(filters: PipelineFilters = {}, databaseName: string) {
     console.log('📊 Calcul des statistiques du pipeline');
 
     try {
-      const kanbanData = await this.getKanbanData(filters);
+      const kanbanData = await this.getKanbanData(filters, databaseName);
       
       const stageStats = kanbanData.stages.map(stage => ({
         stage: stage.stageEnum,
@@ -356,11 +392,16 @@ export class PipelineService {
   /**
    * Transformer une opportunité en KanbanOpportunity
    */
-  private transformToKanbanOpportunity(opportunity: Opportunity): KanbanOpportunity {
-    const daysInStage = this.calculateDaysInStage(opportunity.updatedAt);
+  private transformToKanbanOpportunity(opportunity: any): KanbanOpportunity {
+    const daysInStage = this.calculateDaysInStage(opportunity.updated_at || opportunity.updatedAt);
     
     // ✅ Préparer les commerciaux assignés
     const assignedCommercials = opportunity.assignedCommercials || [];
+    const assignedToIds = opportunity.assigned_to_ids || [];
+    
+    // Déterminer le commercial principal (premier de la liste ou 0)
+    const primaryCommercialId = assignedToIds.length > 0 ? assignedToIds[0] : 0;
+    const primaryCommercial = assignedCommercials.find(c => c.id === primaryCommercialId);
     
     return {
       id: opportunity.id,
@@ -368,76 +409,81 @@ export class PipelineService {
       description: opportunity.description || null,
       value: Number(opportunity.value || 0),
       probability: opportunity.probability || 0,
-      expectedCloseDate: opportunity.expectedCloseDate,
-      assignedTo: opportunity.assignedTo?.id || 0,
-      assignedToName: opportunity.assignedTo 
-        ? `${opportunity.assignedTo.prenom} ${opportunity.assignedTo.nom}`.trim()
-        : 'Non assigné',
+      expectedCloseDate: opportunity.expected_close_date || opportunity.expectedCloseDate,
+      assignedTo: primaryCommercialId,
+      assignedToName: primaryCommercial
+        ? `${primaryCommercial.prenom} ${primaryCommercial.nom}`.trim()
+        : (assignedCommercials.length > 0 ? `${assignedCommercials[0].prenom} ${assignedCommercials[0].nom}`.trim() : 'Non assigné'),
       // ✅ NOUVEAU: Ajout des commerciaux assignés
-      assignedToIds: opportunity.assignedToIds || [],
+      assignedToIds: assignedToIds,
       assignedCommercials: assignedCommercials.map(c => ({
         id: c.id,
         prenom: c.prenom,
         nom: c.nom
       })),
-      client: opportunity.client?.nom || null,
+      client: opportunity.client_nom || null,
       priority: opportunity.priority || 'medium',
       stage: opportunity.stage,
       daysInStage,
       tags: opportunity.tags || [],
-      leadId: opportunity.lead?.id || null,
-      leadName: opportunity.lead?.fullName || null,
-      email: opportunity.lead?.email || null,
-      phone: opportunity.lead?.phone || null,
+      leadId: opportunity.lead_id || null,
+      leadName: opportunity.lead_fullName || null,
+      email: opportunity.lead_email || null,
+      phone: opportunity.lead_phone || null,
       // Ajouter l'objet lead complet pour accès aux détails de l'entreprise
-      lead: opportunity.lead ? {
-        id: opportunity.lead.id,
-        company: opportunity.lead.company,
-        fullName: opportunity.lead.fullName,
-        email: opportunity.lead.email,
-        phone: opportunity.lead.phone,
-        position: opportunity.lead.position,
-        website: opportunity.lead.website,
-        industry: opportunity.lead.industry,
-        employeeCount: opportunity.lead.employeeCount
+      lead: opportunity.lead_id ? {
+        id: opportunity.lead_id,
+        company: opportunity.lead_company,
+        fullName: opportunity.lead_fullName,
+        email: opportunity.lead_email,
+        phone: opportunity.lead_phone,
+        position: opportunity.lead_position,
+        website: opportunity.lead_website,
+        industry: opportunity.lead_industry,
+        employeeCount: opportunity.lead_employeeCount
       } : null,
-      transportType: opportunity.transportType || null,
+      transportType: opportunity.transport_type || opportunity.transportType || null,
       traffic: opportunity.traffic || null,
-      serviceFrequency: opportunity.serviceFrequency || null,
-      originAddress: opportunity.originAddress || null,
-      destinationAddress: opportunity.destinationAddress || null,
-      specialRequirements: opportunity.specialRequirements || null,
+      serviceFrequency: opportunity.service_frequency || opportunity.serviceFrequency || null,
+      originAddress: opportunity.origin_address || opportunity.originAddress || null,
+      destinationAddress: opportunity.destination_address || opportunity.destinationAddress || null,
+      specialRequirements: opportunity.special_requirements || opportunity.specialRequirements || null,
       competitors: opportunity.competitors || null,
       source: opportunity.source || null,
-      wonDescription: opportunity.wonDescription || null,
-      lostReason: opportunity.lostReason || null,
-      createdAt: opportunity.createdAt,
-      updatedAt: opportunity.updatedAt
+      wonDescription: opportunity.won_description || opportunity.wonDescription || null,
+      lostReason: opportunity.lost_reason || opportunity.lostReason || null,
+      createdAt: opportunity.created_at || opportunity.createdAt,
+      updatedAt: opportunity.updated_at || opportunity.updatedAt
     };
   }
 
   /**
    * 🆕 Transformer un Lead (prospect) en KanbanOpportunity pour l'affichage dans le pipeline
    */
-  private transformLeadToKanbanOpportunity(lead: Lead): KanbanOpportunity {
-    const daysInStage = this.calculateDaysInStage(lead.updatedAt || lead.createdAt);
+  private transformLeadToKanbanOpportunity(lead: any): KanbanOpportunity {
+    const daysInStage = this.calculateDaysInStage(lead.updated_at || lead.updatedAt || lead.created_at || lead.createdAt);
     
     // ✅ Préparer les commerciaux assignés pour les prospects
     const assignedCommercials = lead.assignedCommercials || [];
+    const assignedToIds = lead.assigned_to_ids || [];
+    
+    // Déterminer le commercial principal (premier de la liste ou 0)
+    const primaryCommercialId = assignedToIds.length > 0 ? assignedToIds[0] : 0;
+    const primaryCommercial = assignedCommercials.find(c => c.id === primaryCommercialId);
     
     return {
       id: lead.id,
-      title: `${lead.company} - ${lead.fullName}`, // Titre combiné entreprise + nom
+      title: `${lead.company} - ${lead.full_name || lead.fullName}`, // Titre combiné entreprise + nom
       description: lead.notes || null,
-      value: Number(lead.estimatedValue || 0),
+      value: Number(lead.estimated_value || lead.estimatedValue || 0),
       probability: 10, // Probabilité par défaut pour les prospects
-      expectedCloseDate: lead.nextFollowupDate || null,
-      assignedTo: lead.assignedTo?.id || 0,
-      assignedToName: lead.assignedTo 
-        ? `${lead.assignedTo.prenom} ${lead.assignedTo.nom}`.trim()
-        : 'Non assigné',
+      expectedCloseDate: lead.next_followup_date || lead.nextFollowupDate || null,
+      assignedTo: primaryCommercialId,
+      assignedToName: primaryCommercial
+        ? `${primaryCommercial.prenom} ${primaryCommercial.nom}`.trim()
+        : (assignedCommercials.length > 0 ? `${assignedCommercials[0].prenom} ${assignedCommercials[0].nom}`.trim() : 'Non assigné'),
       // ✅ NOUVEAU: Ajout des commerciaux assignés
-      assignedToIds: lead.assignedToIds || [],
+      assignedToIds: assignedToIds,
       assignedCommercials: assignedCommercials.map(c => ({
         id: c.id,
         prenom: c.prenom,
@@ -449,22 +495,22 @@ export class PipelineService {
       daysInStage,
       tags: lead.tags ? lead.tags : [],
       leadId: lead.id,
-      leadName: lead.fullName,
+      leadName: lead.full_name || lead.fullName,
       email: lead.email,
       phone: lead.phone,
       // Objet lead complet
       lead: {
         id: lead.id,
         company: lead.company,
-        fullName: lead.fullName,
+        fullName: lead.full_name || lead.fullName,
         email: lead.email,
         phone: lead.phone,
         position: lead.position,
         website: lead.website,
         industry: lead.industry,
-        employeeCount: lead.employeeCount
+        employeeCount: lead.employee_count || lead.employeeCount
       },
-      transportType: lead.transportNeeds?.[0] || null, // Premier besoin de transport
+      transportType: (lead.transport_needs || lead.transportNeeds)?.[0] || null, // Premier besoin de transport
       traffic: lead.traffic || null,
       serviceFrequency: null,
       originAddress: null,
@@ -474,20 +520,26 @@ export class PipelineService {
       source: lead.source || null,
       wonDescription: null,
       lostReason: null,
-      createdAt: lead.createdAt,
-      updatedAt: lead.updatedAt || lead.createdAt
+      createdAt: lead.created_at || lead.createdAt,
+      updatedAt: lead.updated_at || lead.updatedAt || lead.created_at || lead.createdAt
     };
   }
 
   /**
    * ✅ Charger les commerciaux assignés pour une opportunité
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  private async loadAssignedCommercialsForOpportunity(opportunity: Opportunity): Promise<Opportunity> {
-    if (opportunity.assignedToIds && opportunity.assignedToIds.length > 0) {
-      opportunity.assignedCommercials = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .where('personnel.id IN (:...ids)', { ids: opportunity.assignedToIds })
-        .getMany();
+  private async loadAssignedCommercialsForOpportunity(opportunity: any, databaseName: string): Promise<any> {
+    if (opportunity.assigned_to_ids && opportunity.assigned_to_ids.length > 0) {
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      const placeholders = opportunity.assigned_to_ids.map((_, i) => `$${i + 1}`).join(',');
+      
+      opportunity.assignedCommercials = await connection.query(
+        `SELECT id, prenom, nom FROM personnel 
+         WHERE id IN (${placeholders}) AND statut = 'actif'
+         ORDER BY prenom, nom`,
+        opportunity.assigned_to_ids
+      );
     } else {
       opportunity.assignedCommercials = [];
     }
@@ -496,13 +548,19 @@ export class PipelineService {
 
   /**
    * ✅ Charger les commerciaux assignés pour un lead (prospect)
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  private async loadAssignedCommercialsForLead(lead: Lead): Promise<Lead> {
-    if (lead.assignedToIds && lead.assignedToIds.length > 0) {
-      lead.assignedCommercials = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .where('personnel.id IN (:...ids)', { ids: lead.assignedToIds })
-        .getMany();
+  private async loadAssignedCommercialsForLead(lead: any, databaseName: string): Promise<any> {
+    if (lead.assigned_to_ids && lead.assigned_to_ids.length > 0) {
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      const placeholders = lead.assigned_to_ids.map((_, i) => `$${i + 1}`).join(',');
+      
+      lead.assignedCommercials = await connection.query(
+        `SELECT id, prenom, nom FROM personnel 
+         WHERE id IN (${placeholders}) AND statut = 'actif'
+         ORDER BY prenom, nom`,
+        lead.assigned_to_ids
+      );
     } else {
       lead.assignedCommercials = [];
     }
@@ -609,95 +667,162 @@ export class PipelineService {
   /**
    * Mettre à jour une opportunité
    */
-  async updateOpportunity(id: number, updateData: Partial<Opportunity>): Promise<Opportunity> {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
+  async updateOpportunity(id: number, updateData: Partial<Opportunity>, databaseName: string): Promise<Opportunity> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+
+    const opportunities = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
     
-    if (!opportunity) {
+    if (!opportunities || opportunities.length === 0) {
       throw new NotFoundException(`Opportunité avec l'ID ${id} non trouvée`);
     }
 
-    // Mettre à jour les champs fournis
-    Object.assign(opportunity, updateData);
+    // Construire la requête UPDATE dynamiquement
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    Object.keys(updateData).forEach((key, index) => {
+      if (updateData[key] !== undefined) {
+        // Convertir camelCase en snake_case
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        fields.push(`${snakeKey} = $${index + 1}`);
+        values.push(updateData[key]);
+      }
+    });
+
+    if (fields.length > 0) {
+      values.push(id);
+      await connection.query(
+        `UPDATE crm_opportunities SET ${fields.join(', ')} WHERE id = $${values.length}`,
+        values
+      );
+    }
     
-    // Sauvegarder les modifications
-    return await this.opportunityRepository.save(opportunity);
+    // Retourner l'opportunité mise à jour
+    const updated = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
+    
+    return updated[0];
   }
 
   /**
    * Supprimer une opportunité
    */
-  async deleteOpportunity(id: number): Promise<void> {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
+  async deleteOpportunity(id: number, databaseName: string): Promise<void> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+
+    const opportunities = await connection.query(
+      'SELECT id FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
     
-    if (!opportunity) {
+    if (!opportunities || opportunities.length === 0) {
       throw new NotFoundException(`Opportunité avec l'ID ${id} non trouvée`);
     }
 
-    await this.opportunityRepository.remove(opportunity);
+    await connection.query('DELETE FROM crm_opportunities WHERE id = $1', [id]);
   }
 
   /**
    * Marquer une opportunité comme gagnée
    */
-  async markAsWon(id: number, comment?: string): Promise<Opportunity> {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
+  async markAsWon(id: number, comment: string | undefined, databaseName: string): Promise<Opportunity> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+
+    const opportunities = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
     
-    if (!opportunity) {
+    if (!opportunities || opportunities.length === 0) {
       throw new NotFoundException(`Opportunité avec l'ID ${id} non trouvée`);
     }
 
-    opportunity.stage = 'closed_won' as any;
-    opportunity.actualCloseDate = new Date();
-    
-    if (comment) {
-      // Utiliser specialRequirements pour stocker le commentaire de victoire
-      opportunity.specialRequirements = comment;
-    }
+    await connection.query(`
+      UPDATE crm_opportunities 
+      SET stage = 'closed_won', 
+          actual_close_date = NOW(),
+          special_requirements = $1
+      WHERE id = $2
+    `, [comment || null, id]);
 
-    return await this.opportunityRepository.save(opportunity);
+    const updated = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
+
+    return updated[0];
   }
 
   /**
    * Marquer une opportunité comme perdue
    */
-  async markAsLost(id: number, reason?: string): Promise<Opportunity> {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
+  async markAsLost(id: number, reason: string | undefined, databaseName: string): Promise<Opportunity> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+
+    const opportunities = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
     
-    if (!opportunity) {
+    if (!opportunities || opportunities.length === 0) {
       throw new NotFoundException(`Opportunité avec l'ID ${id} non trouvée`);
     }
 
-    opportunity.stage = 'closed_lost' as any;
-    opportunity.actualCloseDate = new Date();
-    
-    if (reason) {
-      opportunity.lostReason = reason;
-    }
+    await connection.query(`
+      UPDATE crm_opportunities 
+      SET stage = 'closed_lost', 
+          actual_close_date = NOW(),
+          lost_reason = $1
+      WHERE id = $2
+    `, [reason || null, id]);
 
-    return await this.opportunityRepository.save(opportunity);
+    const updated = await connection.query(
+      'SELECT * FROM crm_opportunities WHERE id = $1',
+      [id]
+    );
+
+    return updated[0];
   }
 
   /**
    * R�cup�rer tous les prospects (leads)
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  async getAllLeads(): Promise<Lead[]> {
-    return await this.leadRepository.find({
-      order: {
-        createdAt: 'DESC'
-      },
-      relations: ['assignedTo']
-    });
+  async getAllLeads(databaseName: string): Promise<Lead[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT 
+        l.*,
+        p.id as "assignedTo_id", p.prenom as "assignedTo_prenom", p.nom as "assignedTo_nom"
+       FROM crm_leads l
+       LEFT JOIN personnel p ON l.assigned_to_id = p.id
+       ORDER BY l.created_at DESC`
+    );
   }
 
   /**
    * R�cup�rer toutes les opportunit�s
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  async getAllOpportunities(): Promise<Opportunity[]> {
-    return await this.opportunityRepository.find({
-      order: {
-        createdAt: 'DESC'
-      },
-      relations: ['lead', 'assignedTo']
-    });
+  async getAllOpportunities(databaseName: string): Promise<Opportunity[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT 
+        o.*,
+        l.id as "lead_id", l.company as "lead_company", l.full_name as "lead_fullName",
+        p.id as "assignedTo_id", p.prenom as "assignedTo_prenom", p.nom as "assignedTo_nom"
+       FROM crm_opportunities o
+       LEFT JOIN crm_leads l ON o.lead_id = l.id
+       LEFT JOIN personnel p ON o.assigned_to_id = p.id
+       ORDER BY o.created_at DESC`
+    );
   }
 }
+

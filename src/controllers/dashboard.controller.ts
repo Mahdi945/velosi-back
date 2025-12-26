@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Request } from 'express';
+import { getDatabaseName } from '../common/helpers/multi-tenant.helper';
 
 @Controller('dashboard')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -13,6 +14,7 @@ export class DashboardController {
   /**
    * Obtenir les statistiques globales du dashboard
    * Accès: Administratif uniquement
+   * ✅ MULTI-TENANT: Utilise databaseName
    */
   @Get('stats')
   @Roles('administratif')
@@ -21,8 +23,11 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
     @Query('transportType') transportType?: string,
     @Query('trafficType') trafficType?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
+      
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
@@ -30,6 +35,7 @@ export class DashboardController {
       if (trafficType) filters.trafficType = trafficType;
       
       const stats = await this.dashboardService.getDashboardStats(
+        databaseName,
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return {
@@ -58,8 +64,11 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
     @Query('transportType') transportType?: string,
     @Query('trafficType') trafficType?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
+      
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
@@ -67,6 +76,7 @@ export class DashboardController {
       if (trafficType) filters.trafficType = trafficType;
       
       const evolution = await this.dashboardService.getSalesEvolution(
+        databaseName,
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return {
@@ -95,8 +105,11 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
     @Query('transportType') transportType?: string,
     @Query('trafficType') trafficType?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
+      
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
@@ -104,6 +117,7 @@ export class DashboardController {
       if (trafficType) filters.trafficType = trafficType;
       
       const stats = await this.dashboardService.getCRMStats(
+        databaseName,
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return {
@@ -132,8 +146,10 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
     @Query('transportType') transportType?: string,
     @Query('trafficType') trafficType?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
       const limitNumber = limit ? parseInt(limit, 10) : 10;
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
@@ -142,6 +158,7 @@ export class DashboardController {
       if (trafficType) filters.trafficType = trafficType;
       
       const activities = await this.dashboardService.getRecentActivities(
+        databaseName,
         limitNumber,
         Object.keys(filters).length > 0 ? filters : undefined
       );
@@ -171,8 +188,11 @@ export class DashboardController {
     @Query('endDate') endDate?: string,
     @Query('transportType') transportType?: string,
     @Query('trafficType') trafficType?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
+      
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
@@ -180,6 +200,7 @@ export class DashboardController {
       if (trafficType) filters.trafficType = trafficType;
       
       const distribution = await this.dashboardService.getTransportDistribution(
+        databaseName,
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return {
@@ -206,13 +227,17 @@ export class DashboardController {
   async getImportExportStats(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Req() req?: any,
   ) {
     try {
+      const databaseName = getDatabaseName(req);
+      
       const filters: any = {};
       if (startDate) filters.startDate = new Date(startDate);
       if (endDate) filters.endDate = new Date(endDate);
       
       const stats = await this.dashboardService.getImportExportStats(
+        databaseName,
         Object.keys(filters).length > 0 ? filters : undefined
       );
       return {
@@ -242,6 +267,7 @@ export class DashboardController {
       console.log('📊 [commercial/stats] Requête reçue');
       console.log('👤 [commercial/stats] User:', (req as any).user);
       
+      const databaseName = getDatabaseName(req);
       const userId = (req as any).user?.id || (req as any).user?.userId;
       if (!userId) {
         console.error('❌ [commercial/stats] Aucun userId trouvé');
@@ -253,7 +279,7 @@ export class DashboardController {
       }
       
       console.log('✅ [commercial/stats] userId:', userId);
-      const stats = await this.dashboardService.getCommercialStats(userId);
+      const stats = await this.dashboardService.getCommercialStats(databaseName, userId);
       return {
         success: true,
         data: stats,
@@ -285,6 +311,7 @@ export class DashboardController {
       console.log('📊 [commercial/performance] Requête reçue');
       console.log('👤 [commercial/performance] User:', (req as any).user);
       
+      const databaseName = getDatabaseName(req);
       const userId = (req as any).user?.id || (req as any).user?.userId;
       if (!userId) {
         console.error('❌ [commercial/performance] Aucun userId trouvé');
@@ -301,6 +328,7 @@ export class DashboardController {
       if (endDate) filters.endDate = new Date(endDate);
       
       const performance = await this.dashboardService.getCommercialPerformance(
+        databaseName,
         userId,
         Object.keys(filters).length > 0 ? filters : undefined
       );

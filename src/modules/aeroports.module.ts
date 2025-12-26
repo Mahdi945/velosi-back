@@ -6,9 +6,13 @@ import { AeroportsService } from '../services/aeroports.service';
 import { AeroportsController } from '../controllers/aeroports.controller';
 import { ImportDataService } from '../services/import-data.service';
 import { ImportDataController } from '../controllers/import-data.controller';
+import { DatabaseModule } from '../common/database.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Aeroport, Port])],
+  imports: [
+    TypeOrmModule.forFeature([Aeroport, Port]),
+    DatabaseModule, // 🏢 Multi-tenant database support
+  ],
   controllers: [AeroportsController, ImportDataController],
   providers: [AeroportsService, ImportDataService],
   exports: [AeroportsService, ImportDataService],

@@ -4,6 +4,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { Fournisseur } from '../entities/fournisseur.entity';
 import { FournisseursService } from '../services/fournisseurs.service';
 import { FournisseursController } from '../controllers/fournisseurs.controller';
+import { DatabaseModule } from '../common/database.module';
 import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'fs';
 
@@ -16,6 +17,7 @@ if (!existsSync(uploadPath)) {
 @Module({
   imports: [
     TypeOrmModule.forFeature([Fournisseur]),
+    DatabaseModule, // 🏢 Multi-tenant database support
     MulterModule.register({
       storage: diskStorage({
         destination: uploadPath,

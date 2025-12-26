@@ -1,12 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In, IsNull } from 'typeorm';
-import { Personnel } from '../entities/personnel.entity';
-import { Client } from '../entities/client.entity';
-import { Lead, LeadStatus } from '../entities/crm/lead.entity';
-import { Opportunity, OpportunityStage, TransportType } from '../entities/crm/opportunity.entity';
-import { Quote } from '../crm/entities/quote.entity';
-import { ObjectifCom } from '../entities/objectif-com.entity';
+import { LeadStatus } from '../entities/crm/lead.entity';
+import { OpportunityStage, TransportType } from '../entities/crm/opportunity.entity';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 export interface DashboardFilters {
   startDate?: Date;
@@ -22,20 +17,20 @@ export interface DashboardStatsResponse {
   totalLeads: number;
   totalOpportunities: number;
   
-  // Statistiques détaillées
+  // Statistiques d�taill�es
   personnelByRole: { role: string; count: number }[];
   clientsByStatus: { statut: string; count: number }[];
   leadsByStatus: { status: string; count: number }[];
   opportunitiesByStage: { stage: string; count: number; totalValue: number }[];
   
-  // Métriques de performance
+  // M�triques de performance
   conversionRate: number;
   avgOpportunityValue: number;
   totalPipelineValue: number;
   wonOpportunitiesValue: number;
   monthlyGrowth: number;
   
-  // Période
+  // P�riode
   periodStart: Date;
   periodEnd: Date;
 }
@@ -107,266 +102,195 @@ export interface RecentActivityResponse {
 @Injectable()
 export class DashboardService {
   constructor(
-    @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
-    @InjectRepository(Lead)
-    private leadRepository: Repository<Lead>,
-    @InjectRepository(Opportunity)
-    private opportunityRepository: Repository<Opportunity>,
-    @InjectRepository(Quote)
-    private quoteRepository: Repository<Quote>,
-    @InjectRepository(ObjectifCom)
-    private objectifRepository: Repository<ObjectifCom>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
   /**
-   * Construire la clause WHERE avec les filtres de période et type de transport
-   */
-  private buildWhereClause(filters?: DashboardFilters): any {
-    const where: any = {};
-    
-    if (filters?.startDate && filters?.endDate) {
-      where.createdAt = Between(filters.startDate, filters.endDate);
-    }
-    
-    if (filters?.transportType) {
-      where.transportType = filters.transportType;
-    }
-    
-    if (filters?.trafficType) {
-      where.traffic = filters.trafficType;
-    }
-    
-    return where;
-  }
-
-  /**
    * Obtenir les statistiques globales du dashboard avec filtres
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getDashboardStats(filters?: DashboardFilters): Promise<DashboardStatsResponse> {
-    console.log('📊 [getDashboardStats] Début avec filtres:', filters);
+  async getDashboardStats(databaseName: string, filters?: DashboardFilters): Promise<DashboardStatsResponse> {
+    console.log('?? [getDashboardStats] D�but avec databaseName:', databaseName, 'filtres:', filters);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    console.log('?? [getDashboardStats] Connexion �tablie � la base:', connection.options.database);
     
     const periodStart = filters?.startDate || new Date(new Date().getFullYear(), 0, 1);
     const periodEnd = filters?.endDate || new Date();
     
-    console.log('📅 [getDashboardStats] Période:', { periodStart, periodEnd });
+    console.log('?? [getDashboardStats] P�riode:', { periodStart, periodEnd });
     
-    // Compter le personnel actif (pas affecté par les filtres de période)
-    const totalPersonnel = await this.personnelRepository.count({
-      where: { statut: 'actif' }
-    });
-    console.log('👥 [getDashboardStats] Personnel actif:', totalPersonnel);
+    // Compter le personnel actif (pas affect� par les filtres de p�riode)
+    const totalPersonnelResult = await connection.query(
+      `SELECT COUNT(*) as count FROM personnel WHERE statut = $1`,
+      ['actif']
+    );
+    const totalPersonnel = parseInt(totalPersonnelResult[0]?.count || '0');
+    console.log('?? [getDashboardStats] Personnel actif:', totalPersonnel);
 
-    // Compter les clients actifs (pas affecté par les filtres de période)
-    const totalClients = await this.clientRepository.count({
-      where: { statut: 'actif' }
-    });
-    console.log('🏢 [getDashboardStats] Clients actifs:', totalClients);
+    // Compter les clients actifs (pas affect� par les filtres de p�riode)
+    const totalClientsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM client WHERE statut = $1`,
+      ['actif']
+    );
+    const totalClients = parseInt(totalClientsResult[0]?.count || '0');
+    console.log('?? [getDashboardStats] Clients actifs:', totalClients);
 
     // Leads avec filtres
-    const leadWhere = this.buildWhereClause(filters);
-    const totalLeads = await this.leadRepository.count({ where: leadWhere });
-    console.log('👤 [getDashboardStats] Total Leads:', totalLeads, 'WHERE:', leadWhere);
-
-    // Opportunités avec filtres
-    const oppWhere = this.buildWhereClause(filters);
-    const activeStages = [
-      OpportunityStage.PROSPECTING,
-      OpportunityStage.QUALIFICATION,
-      OpportunityStage.NEEDS_ANALYSIS,
-      OpportunityStage.PROPOSAL,
-      OpportunityStage.NEGOTIATION
-    ];
-    
-    const totalOpportunities = await this.opportunityRepository.count({
-      where: {
-        ...oppWhere,
-        stage: In(activeStages)
-      }
-    });
-    console.log('💼 [getDashboardStats] Total Opportunités:', totalOpportunities);
-
-    // Personnel par rôle
-    const personnelByRole = await this.personnelRepository
-      .createQueryBuilder('personnel')
-      .select('personnel.role', 'role')
-      .addSelect('COUNT(*)', 'count')
-      .where('personnel.statut = :statut', { statut: 'actif' })
-      .groupBy('personnel.role')
-      .getRawMany();
-
-    // Clients par statut
-    const clientsByStatus = await this.clientRepository
-      .createQueryBuilder('client')
-      .select('client.statut', 'statut')
-      .addSelect('COUNT(*)', 'count')
-      .groupBy('client.statut')
-      .getRawMany();
-
-    // Leads par statut (avec filtres)
-    let leadsByStatusQuery = this.leadRepository
-      .createQueryBuilder('lead')
-      .select('lead.status', 'status')
-      .addSelect('COUNT(*)', 'count');
+    let leadParams: any[] = [];
+    let leadWhere = '';
     
     if (filters?.startDate && filters?.endDate) {
-      leadsByStatusQuery = leadsByStatusQuery.where(
-        'lead.createdAt BETWEEN :start AND :end',
-        { start: filters.startDate, end: filters.endDate }
-      );
+      leadWhere = ` WHERE "created_at" BETWEEN $1 AND $2`;
+      leadParams = [filters.startDate, filters.endDate];
     }
     
-    const leadsByStatus = await leadsByStatusQuery.groupBy('lead.status').getRawMany();
+    const totalLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads${leadWhere}`,
+      leadParams
+    );
+    const totalLeads = parseInt(totalLeadsResult[0]?.count || '0');
+    console.log('?? [getDashboardStats] Total Leads:', totalLeads);
 
-    // Opportunités par stage avec valeur totale (avec filtres)
-    let oppsByStageQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('opp.stage', 'stage')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('SUM(opp.value)', 'totalValue');
+    // Opportunit�s avec filtres (TOUTES les opportunités actives, incluant fermées)
+    let oppParams: any[] = [];
+    let oppWhere = '';
+    let paramIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      oppsByStageQuery = oppsByStageQuery.where(
-        'opp.createdAt BETWEEN :start AND :end',
-        { start: filters.startDate, end: filters.endDate }
-      );
+      oppWhere += (oppWhere ? ' AND' : ' WHERE') + ` "created_at" BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      oppParams.push(filters.startDate, filters.endDate);
+      paramIndex += 2;
     }
     
     if (filters?.transportType) {
-      oppsByStageQuery = oppsByStageQuery.andWhere(
-        'opp.transportType = :type',
-        { type: filters.transportType }
-      );
+      oppWhere += (oppWhere ? ' AND' : ' WHERE') + ` "transport_type" = $${paramIndex}`;
+      oppParams.push(filters.transportType);
+      paramIndex++;
     }
     
-    const opportunitiesByStage = await oppsByStageQuery.groupBy('opp.stage').getRawMany();
+    const totalOpportunitiesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities${oppWhere}`,
+      oppParams
+    );
+    const totalOpportunities = parseInt(totalOpportunitiesResult[0]?.count || '0');
+    console.log('?? [getDashboardStats] Total Opportunit�s:', totalOpportunities);
+
+    // Personnel par r�le
+    const personnelByRole = await connection.query(
+      `SELECT role, COUNT(*) as count FROM personnel WHERE statut = $1 GROUP BY role`,
+      ['actif']
+    );
+
+    // Clients par statut
+    const clientsByStatus = await connection.query(
+      `SELECT statut, COUNT(*) as count FROM client GROUP BY statut`
+    );
+
+    // Leads par statut (avec filtres)
+    const leadsByStatus = await connection.query(
+      `SELECT status, COUNT(*) as count FROM crm_leads${leadWhere} GROUP BY status`,
+      leadParams
+    );
+
+    // Opportunit�s par stage avec valeur totale (avec filtres)
+    const opportunitiesByStage = await connection.query(
+      `SELECT stage, COUNT(*) as count, COALESCE(SUM(value), 0) as "totalValue" 
+       FROM crm_opportunities${oppWhere} 
+       GROUP BY stage`,
+      oppParams
+    );
 
     // Calcul du taux de conversion (avec filtres)
-    const convertedLeads = await this.leadRepository.count({
-      where: {
-        ...leadWhere,
-        status: LeadStatus.CONVERTED
-      }
-    });
+    const convertedLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $1${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [LeadStatus.CONVERTED, ...leadParams]
+    );
+    const convertedLeads = parseInt(convertedLeadsResult[0]?.count || '0');
     const conversionRate = totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0;
-    console.log('📈 [getDashboardStats] Taux de conversion:', {
+    console.log('?? [getDashboardStats] Taux de conversion:', {
       convertedLeads,
       totalLeads,
       conversionRate: `${conversionRate.toFixed(2)}%`
     });
 
-    // Valeur moyenne des opportunités (avec filtres)
-    let avgQuery = this.opportunityRepository.createQueryBuilder('opp');
-    
-    if (filters?.startDate && filters?.endDate) {
-      avgQuery = avgQuery.where(
-        'opp.createdAt BETWEEN :start AND :end',
-        { start: filters.startDate, end: filters.endDate }
-      );
-    }
-    
-    if (filters?.transportType) {
-      avgQuery = avgQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
-    }
-    
-    const avgResult = await avgQuery.select('AVG(opp.value)', 'avg').getRawOne();
-    const avgOpportunityValue = parseFloat(avgResult?.avg || '0');
-    console.log('💰 [getDashboardStats] Valeur moyenne opportunité:', avgOpportunityValue);
+    // Valeur moyenne des opportunit�s (avec filtres)
+    const avgResult = await connection.query(
+      `SELECT AVG(value) as avg FROM crm_opportunities${oppWhere}`,
+      oppParams
+    );
+    const avgOpportunityValue = parseFloat(avgResult[0]?.avg || '0');
+    console.log('?? [getDashboardStats] Valeur moyenne opportunit�:', avgOpportunityValue);
 
     // Valeur totale du pipeline (avec filtres)
-    let pipelineQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('SUM(opp.value)', 'total')
-      .where('opp.stage NOT IN (:...stages)', {
-        stages: [OpportunityStage.CLOSED_WON, OpportunityStage.CLOSED_LOST]
-      });
+    let pipelineParams: any[] = [OpportunityStage.CLOSED_WON, OpportunityStage.CLOSED_LOST];
+    let pipelineWhere = ' WHERE stage NOT IN ($1, $2)';
+    paramIndex = 3;
     
     if (filters?.startDate && filters?.endDate) {
-      pipelineQuery = pipelineQuery.andWhere(
-        'opp.createdAt BETWEEN :start AND :end',
-        { start: filters.startDate, end: filters.endDate }
-      );
+      pipelineWhere += ` AND "created_at" BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      pipelineParams.push(filters.startDate, filters.endDate);
+      paramIndex += 2;
     }
     
     if (filters?.transportType) {
-      pipelineQuery = pipelineQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      pipelineWhere += ` AND "transport_type" = $${paramIndex}`;
+      pipelineParams.push(filters.transportType);
     }
     
-    const pipelineResult = await pipelineQuery.getRawOne();
-    const totalPipelineValue = parseFloat(pipelineResult?.total || '0');
-    console.log('🔢 [getDashboardStats] Valeur pipeline:', totalPipelineValue);
+    const pipelineResult = await connection.query(
+      `SELECT COALESCE(SUM(value), 0) as total FROM crm_opportunities${pipelineWhere}`,
+      pipelineParams
+    );
+    const totalPipelineValue = parseFloat(pipelineResult[0]?.total || '0');
+    console.log('?? [getDashboardStats] Valeur pipeline:', totalPipelineValue);
 
-    // CA basé sur le montant total TTC des cotations acceptées (même logique que les rapports)
-    let wonQuery = this.quoteRepository
-      .createQueryBuilder('quote')
-      .select('SUM(quote.total)', 'total')
-      .where('quote.status = :status', { status: 'accepted' });
+    // CA bas� sur le montant total TTC des cotations accept�es
+    let wonParams: any[] = ['accepted'];
+    let wonWhere = ' WHERE status = $1';
+    paramIndex = 2;
     
     if (filters?.startDate && filters?.endDate) {
-      wonQuery = wonQuery.andWhere(
-        'quote.acceptedAt BETWEEN :start AND :end',
-        { start: filters.startDate, end: filters.endDate }
-      );
+      wonWhere += ` AND "accepted_at" BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      wonParams.push(filters.startDate, filters.endDate);
     }
     
-    const wonResult = await wonQuery.getRawOne();
-    const wonOpportunitiesValue = parseFloat(wonResult?.total || '0');
-    
-    // Debug: Afficher les cotations acceptées
-    console.log('💵 [getDashboardStats] CA Réalisé (cotations acceptées):', wonOpportunitiesValue);
-    if (filters?.startDate && filters?.endDate) {
-      const debugQuotes = await this.quoteRepository
-        .createQueryBuilder('quote')
-        .where('quote.status = :status', { status: 'accepted' })
-        .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-          start: filters.startDate,
-          end: filters.endDate
-        })
-        .getMany();
-      console.log('  → Nombre de cotations acceptées:', debugQuotes.length);
-      if (debugQuotes.length > 0) {
-        console.log('  → Exemples:', debugQuotes.slice(0, 3).map(q => ({
-          number: q.quoteNumber,
-          total: q.total,
-          acceptedAt: q.acceptedAt
-        })));
-      }
-    }
+    const wonResult = await connection.query(
+      `SELECT COALESCE(SUM(total), 0) as total FROM crm_quotes${wonWhere}`,
+      wonParams
+    );
+    const wonOpportunitiesValue = parseFloat(wonResult[0]?.total || '0');
+    console.log('?? [getDashboardStats] CA R�alis� (cotations accept�es):', wonOpportunitiesValue);
 
     // Croissance mensuelle
     const now = new Date();
     const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-    let currentMonthQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-      .andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: currentMonth,
-        end: now
-      });
+    let currentMonthParams: any[] = [OpportunityStage.CLOSED_WON, currentMonth, now];
+    let currentMonthWhere = ' WHERE stage = $1 AND "actual_close_date" BETWEEN $2 AND $3';
     
     if (filters?.transportType) {
-      currentMonthQuery = currentMonthQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      currentMonthWhere += ' AND "transport_type" = $4';
+      currentMonthParams.push(filters.transportType);
     }
     
-    const currentMonthOpps = await currentMonthQuery.getCount();
+    const currentMonthResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities${currentMonthWhere}`,
+      currentMonthParams
+    );
+    const currentMonthOpps = parseInt(currentMonthResult[0]?.count || '0');
 
-    let lastMonthQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-      .andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: lastMonth,
-        end: currentMonth
-      });
-    
+    let lastMonthParams: any[] = [OpportunityStage.CLOSED_WON, lastMonth, currentMonth];
     if (filters?.transportType) {
-      lastMonthQuery = lastMonthQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      lastMonthParams.push(filters.transportType);
     }
     
-    const lastMonthOpps = await lastMonthQuery.getCount();
+    const lastMonthResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities${currentMonthWhere}`,
+      lastMonthParams
+    );
+    const lastMonthOpps = parseInt(lastMonthResult[0]?.count || '0');
 
     const monthlyGrowth = lastMonthOpps > 0 
       ? ((currentMonthOpps - lastMonthOpps) / lastMonthOpps) * 100 
@@ -390,7 +314,7 @@ export class DashboardService {
       periodEnd
     };
     
-    console.log('✅ [getDashboardStats] Réponse finale:', {
+    console.log('? [getDashboardStats] R�ponse finale:', {
       totalPersonnel: response.totalPersonnel,
       totalClients: response.totalClients,
       totalLeads: response.totalLeads,
@@ -403,16 +327,18 @@ export class DashboardService {
   }
 
   /**
-   * Obtenir l'évolution des ventes sur 12 mois avec filtres
+   * Obtenir l'�volution des ventes sur 12 mois avec filtres
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getSalesEvolution(filters?: DashboardFilters): Promise<SalesEvolutionResponse> {
+  async getSalesEvolution(databaseName: string, filters?: DashboardFilters): Promise<SalesEvolutionResponse> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     const now = filters?.endDate || new Date();
     const currentYear = now.getFullYear();
     const lastYear = currentYear - 1;
 
     const monthlyData = [];
 
-    // Récupérer les données pour les 12 derniers mois
+    // R�cup�rer les donn�es pour les 12 derniers mois
     for (let i = 11; i >= 0; i--) {
       const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const nextMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
@@ -420,103 +346,89 @@ export class DashboardService {
       const monthName = monthDate.toLocaleDateString('fr-FR', { month: 'short' });
       const year = monthDate.getFullYear();
 
-      // Opportunités créées ce mois (avec filtres)
-      let oppsQuery = this.opportunityRepository
-        .createQueryBuilder('opp')
-        .where('opp.createdAt BETWEEN :start AND :end', {
-          start: monthDate,
-          end: nextMonth
-        });
+      // Opportunit�s cr��es ce mois (avec filtres)
+      let oppsParams: any[] = [monthDate, nextMonth];
+      let oppsWhere = '';
+      let oppsParamIndex = 3;
       
       if (filters?.transportType) {
-        oppsQuery = oppsQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+        oppsWhere = ` AND "transport_type" = $${oppsParamIndex}`;
+        oppsParams.push(filters.transportType);
+        oppsParamIndex++;
       }
       
-      const opportunities = await oppsQuery.getCount();
+      const opportunitiesResult = await connection.query(
+        `SELECT COUNT(*) as count FROM crm_opportunities 
+         WHERE "created_at" BETWEEN $1 AND $2${oppsWhere}`,
+        oppsParams
+      );
+      const opportunities = parseInt(opportunitiesResult[0]?.count || '0');
 
-      // Opportunités gagnées ce mois (avec filtres)
-      let wonQuery = this.opportunityRepository
-        .createQueryBuilder('opp')
-        .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-        .andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-          start: monthDate,
-          end: nextMonth
-        });
+      // Opportunit�s gagn�es ce mois (avec filtres)
+      let wonParams: any[] = ['CLOSED_WON', monthDate, nextMonth];
+      let wonWhere = '';
+      let wonParamIndex = 4;
       
       if (filters?.transportType) {
-        wonQuery = wonQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+        wonWhere = ` AND "transport_type" = $${wonParamIndex}`;
+        wonParams.push(filters.transportType);
+        wonParamIndex++;
       }
       
-      const wonDeals = await wonQuery.getCount();
+      const wonDealsResult = await connection.query(
+        `SELECT COUNT(*) as count FROM crm_opportunities 
+         WHERE stage = $1 AND "actual_close_date" BETWEEN $2 AND $3${wonWhere}`,
+        wonParams
+      );
+      const wonDeals = parseInt(wonDealsResult[0]?.count || '0');
 
-      // Valeur totale des opportunités créées (avec filtres)
-      let totalValueQuery = this.opportunityRepository
-        .createQueryBuilder('opp')
-        .select('SUM(opp.value)', 'total')
-        .where('opp.createdAt BETWEEN :start AND :end', {
-          start: monthDate,
-          end: nextMonth
-        });
-      
-      if (filters?.transportType) {
-        totalValueQuery = totalValueQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
-      }
-      
-      const totalValueResult = await totalValueQuery.getRawOne();
+      // Valeur totale des opportunit�s cr��es (avec filtres)
+      const totalValueResult = await connection.query(
+        `SELECT COALESCE(SUM(value), 0) as total FROM crm_opportunities 
+         WHERE "created_at" BETWEEN $1 AND $2${oppsWhere}`,
+        oppsParams
+      );
 
-      // CA basé sur le montant total des cotations acceptées
-      let wonValueQuery = this.quoteRepository
-        .createQueryBuilder('quote')
-        .select('SUM(quote.total)', 'total')
-        .where('quote.status = :status', { status: 'accepted' })
-        .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-          start: monthDate,
-          end: nextMonth
-        });
-      
-      const wonValueResult = await wonValueQuery.getRawOne();
+      // CA bas� sur le montant total des cotations accept�es
+      const wonValueResult = await connection.query(
+        `SELECT COALESCE(SUM(total), 0) as total FROM crm_quotes 
+         WHERE status = $1 AND "accepted_at" BETWEEN $2 AND $3`,
+        ['accepted', monthDate, nextMonth]
+      );
 
-      // Marge réelle des cotations acceptées ce mois (avec filtres)
-      let marginQuery = this.quoteRepository
-        .createQueryBuilder('quote')
-        .select('SUM(quote.totalMargin)', 'total')
-        .where('quote.status = :status', { status: 'accepted' })
-        .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-          start: monthDate,
-          end: nextMonth
-        });
+      // Marge r�elle des cotations accept�es ce mois
+      const marginResult = await connection.query(
+        `SELECT COALESCE(SUM("total_margin"), 0) as total FROM crm_quotes 
+         WHERE status = $1 AND "accepted_at" BETWEEN $2 AND $3`,
+        ['accepted', monthDate, nextMonth]
+      );
       
-      const marginResult = await marginQuery.getRawOne();
+      const wonValue = parseFloat(wonValueResult[0]?.total || '0');
+      const totalMargin = parseFloat(marginResult[0]?.total || '0');
       
-      const wonValue = parseFloat(wonValueResult?.total || '0');
-      const totalMargin = parseFloat(marginResult?.total || '0');
-      
-      // Debug: Logger les valeurs pour ce mois avec les requêtes SQL
+      // Debug: Logger les valeurs pour ce mois
       if (wonValue > 0 || totalMargin > 0) {
-        console.log(`📊 ${monthName} ${year}:`, {
+        console.log(`?? ${monthName} ${year}:`, {
           wonValue,
           totalMargin,
-          wonValueRaw: wonValueResult?.total,
-          marginRaw: marginResult?.total,
+          wonValueRaw: wonValueResult[0]?.total,
+          marginRaw: marginResult[0]?.total,
           dateRange: {
             start: monthDate.toISOString(),
             end: nextMonth.toISOString()
           }
         });
         
-        // Requête de debug pour voir les cotations acceptées ce mois
-        const debugQuotes = await this.quoteRepository
-          .createQueryBuilder('quote')
-          .select(['quote.id', 'quote.quoteNumber', 'quote.total', 'quote.totalMargin', 'quote.acceptedAt'])
-          .where('quote.status = :status', { status: 'accepted' })
-          .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-            start: monthDate,
-            end: nextMonth
-          })
-          .getMany();
+        // Requ�te de debug pour voir les cotations accept�es ce mois
+        const debugQuotes = await connection.query(
+          `SELECT id, "quote_number", total, "total_margin", "accepted_at" 
+           FROM crm_quotes 
+           WHERE status = $1 AND "accepted_at" BETWEEN $2 AND $3`,
+          ['accepted', monthDate, nextMonth]
+        );
         
         if (debugQuotes.length > 0) {
-          console.log(`  → ${debugQuotes.length} cotations acceptées:`, debugQuotes.map(q => ({
+          console.log(`  ? ${debugQuotes.length} cotations accept�es:`, debugQuotes.map(q => ({
             number: q.quoteNumber,
             total: q.total,
             margin: q.totalMargin,
@@ -530,7 +442,7 @@ export class DashboardService {
         year,
         opportunities,
         wonDeals,
-        totalValue: parseFloat(totalValueResult?.total || '0'),
+        totalValue: parseFloat(totalValueResult[0]?.total || '0'),
         wonValue,
         totalMargin
       });
@@ -541,88 +453,94 @@ export class DashboardService {
     const lastYearStart = new Date(lastYear, 0, 1);
     const lastYearEnd = new Date(currentYear, 0, 1);
 
-    // Année en cours
-    let currentYearQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.createdAt BETWEEN :start AND :end', {
-        start: currentYearStart,
-        end: now
-      });
+    // Ann�e en cours - opportunit�s cr��es
+    let currentYearParams: any[] = [currentYearStart, now];
+    let currentYearWhere = '';
+    let currentYearParamIndex = 3;
     
     if (filters?.transportType) {
-      currentYearQuery = currentYearQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      currentYearWhere = ` AND "transport_type" = $${currentYearParamIndex}`;
+      currentYearParams.push(filters.transportType);
+      currentYearParamIndex++;
     }
     
-    const currentYearTotal = await currentYearQuery.getCount();
+    const currentYearTotalResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE "created_at" BETWEEN $1 AND $2${currentYearWhere}`,
+      currentYearParams
+    );
+    const currentYearTotal = parseInt(currentYearTotalResult[0]?.count || '0');
 
-    let currentYearWonQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-      .andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: currentYearStart,
-        end: now
-      });
+    // Ann�e en cours - opportunit�s gagn�es
+    let currentYearWonParams: any[] = ['CLOSED_WON', currentYearStart, now];
+    let currentYearWonWhere = '';
+    let currentYearWonParamIndex = 4;
     
     if (filters?.transportType) {
-      currentYearWonQuery = currentYearWonQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      currentYearWonWhere = ` AND "transport_type" = $${currentYearWonParamIndex}`;
+      currentYearWonParams.push(filters.transportType);
+      currentYearWonParamIndex++;
     }
     
-    const currentYearWon = await currentYearWonQuery.getCount();
+    const currentYearWonResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE stage = $1 AND "actual_close_date" BETWEEN $2 AND $3${currentYearWonWhere}`,
+      currentYearWonParams
+    );
+    const currentYearWon = parseInt(currentYearWonResult[0]?.count || '0');
 
-    // CA annuel basé sur le montant total TTC des cotations acceptées
-    let currentYearValueQuery = this.quoteRepository
-      .createQueryBuilder('quote')
-      .select('SUM(quote.total)', 'total')
-      .where('quote.status = :status', { status: 'accepted' })
-      .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-        start: currentYearStart,
-        end: now
-      });
-    
-    const currentYearValueResult = await currentYearValueQuery.getRawOne();
+    // CA annuel bas� sur le montant total TTC des cotations accept�es
+    const currentYearValueResult = await connection.query(
+      `SELECT COALESCE(SUM(total), 0) as total FROM crm_quotes 
+       WHERE status = $1 AND "accepted_at" BETWEEN $2 AND $3`,
+      ['accepted', currentYearStart, now]
+    );
 
-    // Année précédente (avec filtres)
-    let lastYearQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.createdAt BETWEEN :start AND :end', {
-        start: lastYearStart,
-        end: lastYearEnd
-      });
+    // Ann�e pr�c�dente - opportunit�s cr��es
+    let lastYearParams: any[] = [lastYearStart, lastYearEnd];
+    let lastYearWhere = '';
+    let lastYearParamIndex = 3;
     
     if (filters?.transportType) {
-      lastYearQuery = lastYearQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      lastYearWhere = ` AND "transport_type" = $${lastYearParamIndex}`;
+      lastYearParams.push(filters.transportType);
+      lastYearParamIndex++;
     }
     
-    const lastYearTotal = await lastYearQuery.getCount();
+    const lastYearTotalResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE "created_at" BETWEEN $1 AND $2${lastYearWhere}`,
+      lastYearParams
+    );
+    const lastYearTotal = parseInt(lastYearTotalResult[0]?.count || '0');
 
-    let lastYearWonQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-      .andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: lastYearStart,
-        end: lastYearEnd
-      });
+    // Ann�e pr�c�dente - opportunit�s gagn�es
+    let lastYearWonParams: any[] = ['CLOSED_WON', lastYearStart, lastYearEnd];
+    let lastYearWonWhere = '';
+    let lastYearWonParamIndex = 4;
     
     if (filters?.transportType) {
-      lastYearWonQuery = lastYearWonQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      lastYearWonWhere = ` AND "transport_type" = $${lastYearWonParamIndex}`;
+      lastYearWonParams.push(filters.transportType);
+      lastYearWonParamIndex++;
     }
     
-    const lastYearWon = await lastYearWonQuery.getCount();
+    const lastYearWonResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE stage = $1 AND "actual_close_date" BETWEEN $2 AND $3${lastYearWonWhere}`,
+      lastYearWonParams
+    );
+    const lastYearWon = parseInt(lastYearWonResult[0]?.count || '0');
 
-    // CA année précédente basé sur le montant total TTC des cotations acceptées
-    let lastYearValueQuery = this.quoteRepository
-      .createQueryBuilder('quote')
-      .select('SUM(quote.total)', 'total')
-      .where('quote.status = :status', { status: 'accepted' })
-      .andWhere('quote.acceptedAt BETWEEN :start AND :end', {
-        start: lastYearStart,
-        end: lastYearEnd
-      });
-    
-    const lastYearValueResult = await lastYearValueQuery.getRawOne();
+    // CA ann�e pr�c�dente bas� sur le montant total TTC des cotations accept�es
+    const lastYearValueResult = await connection.query(
+      `SELECT COALESCE(SUM(total), 0) as total FROM crm_quotes 
+       WHERE status = $1 AND "accepted_at" BETWEEN $2 AND $3`,
+      ['accepted', lastYearStart, lastYearEnd]
+    );
 
-    const currentYearValue = parseFloat(currentYearValueResult?.total || '0');
-    const lastYearValue = parseFloat(lastYearValueResult?.total || '0');
+    const currentYearValue = parseFloat(currentYearValueResult[0]?.total || '0');
+    const lastYearValue = parseFloat(lastYearValueResult[0]?.total || '0');
     const growth = lastYearValue > 0 
       ? ((currentYearValue - lastYearValue) / lastYearValue) * 100 
       : 0;
@@ -646,148 +564,171 @@ export class DashboardService {
   }
 
   /**
-   * Obtenir les statistiques CRM détaillées avec filtres
+   * Obtenir les statistiques CRM d�taill�es avec filtres
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getCRMStats(filters?: DashboardFilters): Promise<CRMStatsResponse> {
-    const leadWhere = this.buildWhereClause(filters);
+  async getCRMStats(databaseName: string, filters?: DashboardFilters): Promise<CRMStatsResponse> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
     // Statistiques des leads (avec filtres)
-    const totalLeads = await this.leadRepository.count({ where: leadWhere });
-    const newLeads = await this.leadRepository.count({ 
-      where: { ...leadWhere, status: LeadStatus.NEW } 
-    });
-    const contactedLeads = await this.leadRepository.count({ 
-      where: { ...leadWhere, status: LeadStatus.CONTACTED } 
-    });
-    const qualifiedLeads = await this.leadRepository.count({ 
-      where: { ...leadWhere, status: LeadStatus.QUALIFIED } 
-    });
-    const convertedLeads = await this.leadRepository.count({ 
-      where: { ...leadWhere, status: LeadStatus.CONVERTED } 
-    });
-    const lostLeads = await this.leadRepository.count({ 
-      where: { ...leadWhere, status: LeadStatus.LOST } 
-    });
-
-    // Statistiques des opportunités (avec filtres)
-    let oppQuery = this.opportunityRepository.createQueryBuilder('opp');
+    let leadParams: any[] = [];
+    let leadWhere = '';
     
     if (filters?.startDate && filters?.endDate) {
-      oppQuery = oppQuery.where('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      leadWhere = ' WHERE "created_at" BETWEEN $1 AND $2';
+      leadParams = [filters.startDate, filters.endDate];
+    }
+    
+    const totalLeadsResult = await connection.query(`SELECT COUNT(*) as count FROM crm_leads${leadWhere}`, leadParams);
+    const totalLeads = parseInt(totalLeadsResult[0]?.count || '0');
+    
+    const newLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $${leadParams.length + 1}${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [...leadParams, LeadStatus.NEW]
+    );
+    const newLeads = parseInt(newLeadsResult[0]?.count || '0');
+    
+    const contactedLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $${leadParams.length + 1}${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [...leadParams, LeadStatus.CONTACTED]
+    );
+    const contactedLeads = parseInt(contactedLeadsResult[0]?.count || '0');
+    
+    const qualifiedLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $${leadParams.length + 1}${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [...leadParams, LeadStatus.QUALIFIED]
+    );
+    const qualifiedLeads = parseInt(qualifiedLeadsResult[0]?.count || '0');
+    
+    const convertedLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $${leadParams.length + 1}${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [...leadParams, LeadStatus.CONVERTED]
+    );
+    const convertedLeads = parseInt(convertedLeadsResult[0]?.count || '0');
+    
+    const lostLeadsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads WHERE status = $${leadParams.length + 1}${leadWhere ? ' AND ' + leadWhere.replace(' WHERE ', '') : ''}`,
+      [...leadParams, LeadStatus.LOST]
+    );
+    const lostLeads = parseInt(lostLeadsResult[0]?.count || '0');
+
+    // Statistiques des opportunit�s (avec filtres)
+    let oppParams: any[] = [];
+    let oppWhere = '';
+    let paramIndex = 1;
+    
+    if (filters?.startDate && filters?.endDate) {
+      oppWhere = ` WHERE "created_at" BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      oppParams = [filters.startDate, filters.endDate];
+      paramIndex += 2;
     }
     
     if (filters?.transportType) {
-      oppQuery = oppQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      oppWhere += `${oppWhere ? ' AND' : ' WHERE'} "transport_type" = $${paramIndex}`;
+      oppParams.push(filters.transportType);
+      paramIndex++;
     }
     
-    const totalOpps = await oppQuery.getCount();
+    const totalOppsResult = await connection.query(`SELECT COUNT(*) as count FROM crm_opportunities${oppWhere}`, oppParams);
+    const totalOpps = parseInt(totalOppsResult[0]?.count || '0');
     
-    // Opportunités par stage (avec filtres)
-    let oppsByStageQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('opp.stage', 'stage')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COALESCE(SUM(opp.value), 0)', 'value');
+    // Opportunit�s par stage (avec filtres)
+    const oppsByStage = await connection.query(
+      `SELECT stage, COUNT(*) as count, COALESCE(SUM(value), 0) as value 
+       FROM crm_opportunities${oppWhere} GROUP BY stage`,
+      oppParams
+    );
+    
+    // Valeur totale et moyenne des opportunit�s
+    const valueStatsResult = await connection.query(
+      `SELECT 
+        COALESCE(SUM(value), 0) as total,
+        COALESCE(AVG(value), 0) as avg
+       FROM crm_opportunities${oppWhere}`,
+      oppParams
+    );
+    const totalValue = parseFloat(valueStatsResult[0]?.total || '0');
+    const avgValue = parseFloat(valueStatsResult[0]?.avg || '0');
+
+    // Opportunit�s gagn�es (avec filtres)
+    let wonParams: any[] = [];
+    let wonWhere = ' WHERE stage = $1';
+    wonParams.push('CLOSED_WON');
+    let wonParamIndex = 2;
     
     if (filters?.startDate && filters?.endDate) {
-      oppsByStageQuery = oppsByStageQuery.where('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      wonWhere += ` AND "actual_close_date" BETWEEN $${wonParamIndex} AND $${wonParamIndex + 1}`;
+      wonParams.push(filters.startDate, filters.endDate);
+      wonParamIndex += 2;
     }
     
     if (filters?.transportType) {
-      oppsByStageQuery = oppsByStageQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      wonWhere += ` AND "transport_type" = $${wonParamIndex}`;
+      wonParams.push(filters.transportType);
+      wonParamIndex++;
     }
     
-    const oppsByStage = await oppsByStageQuery.groupBy('opp.stage').getRawMany();
+    const wonResult = await connection.query(
+      `SELECT COUNT(*) as count, COALESCE(SUM(value), 0) as total FROM crm_opportunities${wonWhere}`,
+      wonParams
+    );
+    const wonCount = parseInt(wonResult[0]?.count || '0');
+    const wonValue = parseFloat(wonResult[0]?.total || '0');
 
-    // Valeur totale, moyenne, etc. (avec filtres)
-    let statsQuery = this.opportunityRepository.createQueryBuilder('opp');
+    // Opportunit�s perdues (avec filtres)
+    let lostParams: any[] = [];
+    let lostWhere = ' WHERE stage = $1';
+    lostParams.push('CLOSED_LOST');
+    let lostParamIndex = 2;
     
     if (filters?.startDate && filters?.endDate) {
-      statsQuery = statsQuery.where('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      lostWhere += ` AND "created_at" BETWEEN $${lostParamIndex} AND $${lostParamIndex + 1}`;
+      lostParams.push(filters.startDate, filters.endDate);
+      lostParamIndex += 2;
     }
     
     if (filters?.transportType) {
-      statsQuery = statsQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      lostWhere += ` AND "transport_type" = $${lostParamIndex}`;
+      lostParams.push(filters.transportType);
+      lostParamIndex++;
     }
     
-    const totalValueResult = await statsQuery.select('SUM(opp.value)', 'total').getRawOne();
-    const totalValue = parseFloat(totalValueResult?.total || '0');
+    const lostResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities${lostWhere}`,
+      lostParams
+    );
+    const lostCount = parseInt(lostResult[0]?.count || '0');
 
-    const avgValueResult = await statsQuery.select('AVG(opp.value)', 'avg').getRawOne();
-    const avgValue = parseFloat(avgValueResult?.total || '0');
-
-    let wonQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON });
-    
-    if (filters?.startDate && filters?.endDate) {
-      wonQuery = wonQuery.andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
-    }
-    
-    if (filters?.transportType) {
-      wonQuery = wonQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
-    }
-    
-    const wonValueResult = await wonQuery.select('SUM(opp.value)', 'total').getRawOne();
-    const wonValue = parseFloat(wonValueResult?.total || '0');
-    const wonCount = await wonQuery.getCount();
-
-    let lostQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_LOST });
-    
-    if (filters?.startDate && filters?.endDate) {
-      lostQuery = lostQuery.andWhere('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
-    }
-    
-    if (filters?.transportType) {
-      lostQuery = lostQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
-    }
-    
-    const lostCount = await lostQuery.getCount();
-
-    // Taux de conversion Prospect → Opportunité (même logique que la page Reports)
+    // Taux de conversion Prospect ? Opportunit� (m�me logique que la page Reports)
     const conversionRate = totalLeads > 0 ? (totalOpps / totalLeads) * 100 : 0;
 
     // Taux de victoire
     const closedTotal = wonCount + lostCount;
     const winRate = closedTotal > 0 ? (wonCount / closedTotal) * 100 : 0;
 
-    // Durée moyenne du cycle de vente (avec filtres)
-    let cycleQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('AVG(DATE_PART(\'day\', opp.actualCloseDate - opp.createdAt))', 'avgDays')
-      .where('opp.stage = :stage', { stage: OpportunityStage.CLOSED_WON })
-      .andWhere('opp.actualCloseDate IS NOT NULL');
+    // Dur�e moyenne du cycle de vente (avec filtres)
+    let cycleParams: any[] = [];
+    let cycleWhere = ' WHERE stage = $1 AND "actual_close_date" IS NOT NULL';
+    cycleParams.push('CLOSED_WON');
+    let cycleParamIndex = 2;
     
     if (filters?.startDate && filters?.endDate) {
-      cycleQuery = cycleQuery.andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      cycleWhere += ` AND "actual_close_date" BETWEEN $${cycleParamIndex} AND $${cycleParamIndex + 1}`;
+      cycleParams.push(filters.startDate, filters.endDate);
+      cycleParamIndex += 2;
     }
     
     if (filters?.transportType) {
-      cycleQuery = cycleQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      cycleWhere += ` AND "transport_type" = $${cycleParamIndex}`;
+      cycleParams.push(filters.transportType);
+      cycleParamIndex++;
     }
     
-    const cycleResult = await cycleQuery.getRawOne();
-    const avgSalesCycle = parseFloat(cycleResult?.avgDays || '0');
+    const cycleResult = await connection.query(
+      `SELECT AVG(EXTRACT(day FROM "actual_close_date" - "created_at")) as avgdays FROM crm_opportunities${cycleWhere}`,
+      cycleParams
+    );
+    const avgSalesCycle = parseFloat(cycleResult[0]?.avgdays || '0');
 
     return {
       leads: {
@@ -821,61 +762,77 @@ export class DashboardService {
   }
 
   /**
-   * Obtenir les activités récentes avec filtres
+   * Obtenir les activit�s r�centes avec filtres
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getRecentActivities(limit: number = 10, filters?: DashboardFilters): Promise<RecentActivityResponse[]> {
+  async getRecentActivities(databaseName: string, limit: number = 10, filters?: DashboardFilters): Promise<RecentActivityResponse[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     const activities: RecentActivityResponse[] = [];
 
-    // Récupérer les derniers leads créés (avec filtres)
-    let leadsQuery = this.leadRepository
-      .createQueryBuilder('lead')
-      .leftJoinAndSelect('lead.createdBy', 'createdBy')
-      .orderBy('lead.createdAt', 'DESC')
-      .take(Math.ceil(limit / 3));
+    // R�cup�rer les derniers leads cr��s (avec filtres)
+    let leadsParams: any[] = [];
+    let leadsWhere = '';
+    let leadsParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      leadsQuery = leadsQuery.where('lead.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      leadsWhere = ` WHERE l.created_at BETWEEN $${leadsParamIndex} AND $${leadsParamIndex + 1}`;
+      leadsParams = [filters.startDate, filters.endDate];
+      leadsParamIndex += 2;
     }
     
-    const recentLeads = await leadsQuery.getMany();
+    const recentLeads = await connection.query(
+      `SELECT l.id, l.full_name, l.company, l.source, l.created_at, l.created_by,
+              p.nom as created_by_name
+       FROM crm_leads l
+       LEFT JOIN personnel p ON l.created_by = p.id
+       ${leadsWhere}
+       ORDER BY l.created_at DESC
+       LIMIT $${leadsParamIndex}`,
+      [...leadsParams, Math.ceil(limit / 3)]
+    );
 
     for (const lead of recentLeads) {
       activities.push({
         id: lead.id,
         type: 'lead_created',
-        description: `Nouveau prospect: ${lead.fullName} - ${lead.company}`,
+        description: `Nouveau prospect: ${lead.full_name} - ${lead.company}`,
         entityType: 'lead',
         entityId: lead.id,
-        entityName: lead.fullName,
-        userId: lead.createdById || 0,
-        userName: lead.createdBy?.nom || 'Système',
-        createdAt: lead.createdAt,
+        entityName: lead.full_name,
+        userId: lead.created_by || 0,
+        userName: lead.created_by_name || 'Système',
+        createdAt: lead.created_at,
         metadata: { company: lead.company, source: lead.source }
       });
     }
 
     // Récupérer les dernières opportunités créées (avec filtres)
-    let oppsQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .leftJoinAndSelect('opp.createdBy', 'createdBy')
-      .orderBy('opp.createdAt', 'DESC')
-      .take(Math.ceil(limit / 3));
+    let oppsParams: any[] = [];
+    let oppsWhere = '';
+    let oppsParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      oppsQuery = oppsQuery.where('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      oppsWhere = ` WHERE o.created_at BETWEEN $${oppsParamIndex} AND $${oppsParamIndex + 1}`;
+      oppsParams = [filters.startDate, filters.endDate];
+      oppsParamIndex += 2;
     }
     
     if (filters?.transportType) {
-      oppsQuery = oppsQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      oppsWhere += (oppsWhere ? ' AND' : ' WHERE') + ` o.transport_type = $${oppsParamIndex}`;
+      oppsParams.push(filters.transportType);
+      oppsParamIndex++;
     }
     
-    const recentOpps = await oppsQuery.getMany();
+    const recentOpps = await connection.query(
+      `SELECT o.id, o.title, o.value, o.stage, o.transport_type, o.created_at, o.created_by,
+              p.nom as created_by_name
+       FROM crm_opportunities o
+       LEFT JOIN personnel p ON o.created_by = p.id
+       ${oppsWhere}
+       ORDER BY o.created_at DESC
+       LIMIT $${oppsParamIndex}`,
+      [...oppsParams, Math.ceil(limit / 3)]
+    );
 
     for (const opp of recentOpps) {
       activities.push({
@@ -885,27 +842,32 @@ export class DashboardService {
         entityType: 'opportunity',
         entityId: opp.id,
         entityName: opp.title,
-        userId: opp.createdById || 0,
-        userName: opp.createdBy?.nom || 'Système',
-        createdAt: opp.createdAt,
-        metadata: { value: opp.value, stage: opp.stage, transportType: opp.transportType }
+        userId: opp.created_by || 0,
+        userName: opp.created_by_name || 'Système',
+        createdAt: opp.created_at,
+        metadata: { value: opp.value, stage: opp.stage, transportType: opp.transport_type }
       });
     }
 
     // Récupérer les derniers clients créés (avec filtres)
-    let clientsQuery = this.clientRepository
-      .createQueryBuilder('client')
-      .orderBy('client.created_at', 'DESC')
-      .take(Math.ceil(limit / 3));
+    let clientsParams: any[] = [];
+    let clientsWhere = '';
+    let clientsParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      clientsQuery = clientsQuery.where('client.created_at BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      clientsWhere = ` WHERE created_at BETWEEN $${clientsParamIndex} AND $${clientsParamIndex + 1}`;
+      clientsParams = [filters.startDate, filters.endDate];
+      clientsParamIndex += 2;
     }
     
-    const recentClients = await clientsQuery.getMany();
+    const recentClients = await connection.query(
+      `SELECT id, nom, type_client, categorie, created_at
+       FROM client
+       ${clientsWhere}
+       ORDER BY created_at DESC
+       LIMIT $${clientsParamIndex}`,
+      [...clientsParams, Math.ceil(limit / 3)]
+    );
 
     for (const client of recentClients) {
       activities.push({
@@ -923,77 +885,89 @@ export class DashboardService {
     }
 
     // Récupérer les dernières cotations créées (avec filtres)
-    let quotesQuery = this.quoteRepository
-      .createQueryBuilder('quote')
-      .leftJoinAndSelect('quote.creator', 'creator')
-      .orderBy('quote.createdAt', 'DESC')
-      .take(Math.ceil(limit / 4));
+    let quotesParams: any[] = [];
+    let quotesWhere = '';
+    let quotesParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      quotesQuery = quotesQuery.where('quote.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      quotesWhere = ` WHERE q.created_at BETWEEN $${quotesParamIndex} AND $${quotesParamIndex + 1}`;
+      quotesParams = [filters.startDate, filters.endDate];
+      quotesParamIndex += 2;
     }
     
-    const recentQuotes = await quotesQuery.getMany();
+    const recentQuotes = await connection.query(
+      `SELECT q.id, q.title, q.quote_number, q.status, q.total, q.created_at, q.created_by,
+              p.nom as creator_name
+       FROM crm_quotes q
+       LEFT JOIN personnel p ON q.created_by = p.id
+       ${quotesWhere}
+       ORDER BY q.created_at DESC
+       LIMIT $${quotesParamIndex}`,
+      [...quotesParams, Math.ceil(limit / 4)]
+    );
 
     for (const quote of recentQuotes) {
       activities.push({
         id: quote.id,
         type: 'quote_created',
-        description: `Nouvelle cotation: ${quote.title || quote.quoteNumber}`,
+        description: `Nouvelle cotation: ${quote.title || quote.quote_number}`,
         entityType: 'quote',
         entityId: quote.id,
-        entityName: quote.title || quote.quoteNumber,
-        userId: quote.createdBy || 0,
-        userName: quote.creator?.nom || 'Système',
-        createdAt: quote.createdAt,
+        entityName: quote.title || quote.quote_number,
+        userId: quote.created_by || 0,
+        userName: quote.creator_name || 'Système',
+        createdAt: quote.created_at,
         metadata: { 
-          quoteNumber: quote.quoteNumber, 
+          quoteNumber: quote.quote_number, 
           status: quote.status,
           total: quote.total 
         }
       });
     }
 
-    // Trier par date décroissante et limiter
+    // Trier par date d�croissante et limiter
     return activities
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
   }
 
   /**
-   * Obtenir la répartition des ventes par type de transport avec filtres
+   * Obtenir la r�partition des ventes par type de transport avec filtres
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getTransportDistribution(filters?: DashboardFilters): Promise<{
+  async getTransportDistribution(databaseName: string, filters?: DashboardFilters): Promise<{
     byTransportType: { type: string; count: number; value: number; percentage: number }[];
     byTrafficType: { type: string; count: number; value: number }[];
     totalValue: number;
   }> {
-    console.log('🚛 [getTransportDistribution] Début avec filtres:', filters);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    console.log('?? [getTransportDistribution] D�but avec filtres:', filters);
     
-    // Répartition par type de transport (avec filtres)
-    let transportQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('opp.transportType', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COALESCE(SUM(CASE WHEN opp.stage = :won THEN opp.value ELSE 0 END), 0)', 'value')
-      .where('opp.transportType IS NOT NULL')
-      .setParameter('won', OpportunityStage.CLOSED_WON);
+    // R�partition par type de transport (avec filtres)
+    let transportParams: any[] = [];
+    let transportWhere = ' WHERE "transport_type" IS NOT NULL';
+    let transportParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      transportQuery = transportQuery.andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      transportWhere += ` AND "actual_close_date" BETWEEN $${transportParamIndex} AND $${transportParamIndex + 1}`;
+      transportParams = [filters.startDate, filters.endDate];
+      transportParamIndex += 2;
     }
     
-    const transportStats = await transportQuery.groupBy('opp.transportType').getRawMany();
-    console.log('📊 [getTransportDistribution] Stats brutes:', transportStats);
+    const transportStats = await connection.query(
+      `SELECT 
+        "transport_type" as type,
+        COUNT(*) as count,
+        COALESCE(SUM(CASE WHEN stage = 'CLOSED_WON' THEN value ELSE 0 END), 0) as value
+       FROM crm_opportunities
+       ${transportWhere}
+       GROUP BY "transport_type"`,
+      transportParams
+    );
+    console.log('?? [getTransportDistribution] Stats brutes:', transportStats);
 
     const totalValue = transportStats.reduce((sum, item) => sum + parseFloat(item.value || 0), 0);
-    console.log('💰 [getTransportDistribution] Valeur totale:', totalValue);
+    console.log('?? [getTransportDistribution] Valeur totale:', totalValue);
 
     const byTransportType = transportStats.map(item => ({
       type: item.type,
@@ -1002,29 +976,35 @@ export class DashboardService {
       percentage: totalValue > 0 ? (parseFloat(item.value || 0) / totalValue) * 100 : 0
     }));
 
-    console.log('✅ [getTransportDistribution] Par type transport:', byTransportType);
+    console.log('? [getTransportDistribution] Par type transport:', byTransportType);
 
-    // Répartition par type de trafic (Import/Export) avec filtres
-    let trafficQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('opp.traffic', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COALESCE(SUM(CASE WHEN opp.stage = :won THEN opp.value ELSE 0 END), 0)', 'value')
-      .where('opp.traffic IS NOT NULL')
-      .setParameter('won', OpportunityStage.CLOSED_WON);
+    // R�partition par type de trafic (Import/Export) avec filtres
+    let trafficParams: any[] = [];
+    let trafficWhere = ' WHERE traffic IS NOT NULL';
+    let trafficParamIndex = 1;
     
     if (filters?.startDate && filters?.endDate) {
-      trafficQuery = trafficQuery.andWhere('opp.actualCloseDate BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      trafficWhere += ` AND "actual_close_date" BETWEEN $${trafficParamIndex} AND $${trafficParamIndex + 1}`;
+      trafficParams = [filters.startDate, filters.endDate];
+      trafficParamIndex += 2;
     }
     
     if (filters?.transportType) {
-      trafficQuery = trafficQuery.andWhere('opp.transportType = :type', { type: filters.transportType });
+      trafficWhere += ` AND "transport_type" = $${trafficParamIndex}`;
+      trafficParams.push(filters.transportType);
+      trafficParamIndex++;
     }
     
-    const trafficStats = await trafficQuery.groupBy('opp.traffic').getRawMany();
+    const trafficStats = await connection.query(
+      `SELECT 
+        traffic as type,
+        COUNT(*) as count,
+        COALESCE(SUM(CASE WHEN stage = 'CLOSED_WON' THEN value ELSE 0 END), 0) as value
+       FROM crm_opportunities
+       ${trafficWhere}
+       GROUP BY traffic`,
+      trafficParams
+    );
 
     const byTrafficType = trafficStats.map(item => ({
       type: item.type,
@@ -1040,150 +1020,155 @@ export class DashboardService {
   }
 
   /**
-   * Obtenir les statistiques personnalisées du commercial connecté
+   * Obtenir les statistiques personnalis�es du commercial connect�
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getCommercialStats(userId: number): Promise<any> {
+  async getCommercialStats(databaseName: string, userId: number): Promise<any> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     const today = new Date();
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const firstDayOfWeek = new Date(today);
     firstDayOfWeek.setDate(today.getDate() - today.getDay() + 1); // Lundi
 
-    console.log('📊 [getCommercialStats] userId:', userId);
+    console.log('?? [getCommercialStats] userId:', userId);
 
-    // Compter TOUS mes prospects NON ARCHIVÉS (tous les statuts)
-    // ✅ CORRECTION: Gérer NULL comme FALSE
-    const myProspectsCount = await this.leadRepository.count({
-      where: { 
-        assignedToId: userId,
-        isArchived: false,
-        deletedAt: IsNull() // ✅ Exclure soft-deleted
-      }
-    });
+    // Compter TOUS mes prospects NON ARCHIV�S (tous les statuts)
+    const myProspectsResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_leads 
+       WHERE "assigned_to" = $1 
+         AND "is_archived" = false 
+         AND "deleted_at" IS NULL`,
+      [userId]
+    );
+    const myProspectsCount = parseInt(myProspectsResult[0]?.count || '0');
 
-    console.log('✅ [getCommercialStats] myProspectsCount:', myProspectsCount);
+    console.log('? [getCommercialStats] myProspectsCount:', myProspectsCount);
 
-    // Compter TOUTES mes opportunités NON ARCHIVÉES (tous les stages actifs + closed_won)
+    // Compter TOUTES mes opportunit�s NON ARCHIV�ES (tous les stages actifs + closed_won)
     const allActiveStages = [
-      OpportunityStage.PROSPECTING,
-      OpportunityStage.QUALIFICATION,
-      OpportunityStage.NEEDS_ANALYSIS,
-      OpportunityStage.PROPOSAL,
-      OpportunityStage.NEGOTIATION,
-      OpportunityStage.CLOSED_WON // ✅ INCLURE les opportunités gagnées dans le comptage
+      'PROSPECTING',
+      'QUALIFICATION',
+      'NEEDS_ANALYSIS',
+      'PROPOSAL',
+      'NEGOTIATION',
+      'CLOSED_WON'
     ];
     
-    // ✅ CORRECTION: Ajouter deletedAt: IsNull() pour exclure les soft-deleted
-    const myOpportunitiesCount = await this.opportunityRepository.count({
-      where: { 
-        assignedToId: userId,
-        stage: In(allActiveStages),
-        isArchived: false,
-        deletedAt: IsNull() // ✅ Exclure soft-deleted
-      }
-    });
+    const myOpportunitiesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE "assigned_to" = $1 
+         AND stage = ANY($2::text[])
+         AND "is_archived" = false 
+         AND "deleted_at" IS NULL`,
+      [userId, allActiveStages]
+    );
+    const myOpportunitiesCount = parseInt(myOpportunitiesResult[0]?.count || '0');
 
-    console.log('✅ [getCommercialStats] myOpportunitiesCount:', myOpportunitiesCount);
+    console.log('? [getCommercialStats] myOpportunitiesCount:', myOpportunitiesCount);
 
-    // Compter les opportunités gagnées (pour taux de conversion)
-    // ✅ CORRECTION: Ajouter deletedAt: IsNull()
-    const myWonOpportunitiesCount = await this.opportunityRepository.count({
-      where: { 
-        assignedToId: userId,
-        stage: OpportunityStage.CLOSED_WON,
-        isArchived: false,
-        deletedAt: IsNull() // ✅ Exclure soft-deleted
-      }
-    });
+    // Compter les opportunit�s gagn�es (pour taux de conversion)
+    const myWonOpportunitiesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE "assigned_to" = $1 
+         AND stage = $2
+         AND "is_archived" = false 
+         AND "deleted_at" IS NULL`,
+      [userId, 'CLOSED_WON']
+    );
+    const myWonOpportunitiesCount = parseInt(myWonOpportunitiesResult[0]?.count || '0');
 
-    console.log('✅ [getCommercialStats] myWonOpportunitiesCount:', myWonOpportunitiesCount);
+    console.log('? [getCommercialStats] myWonOpportunitiesCount:', myWonOpportunitiesCount);
 
-    // Valeur totale de mes opportunités actives NON ARCHIVÉES
-    // ✅ CORRECTION: Ajouter deletedAt IS NULL
-    const myActiveOpportunities = await this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('COALESCE(SUM(opp.value), 0)', 'totalValue')
-      .where('opp.assignedToId = :userId', { userId })
-      .andWhere('opp.stage IN (:...stages)', { stages: allActiveStages })
-      .andWhere('opp.isArchived = :isArchived', { isArchived: false })
-      .andWhere('opp.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getRawOne();
+    // Valeur totale de mes opportunit�s actives NON ARCHIV�ES
+    const myActiveOpportunities = await connection.query(
+      `SELECT COALESCE(SUM(value), 0) as "totalValue" FROM crm_opportunities
+       WHERE "assigned_to" = $1
+         AND stage = ANY($2::text[])
+         AND "is_archived" = false
+         AND "deleted_at" IS NULL`,
+      [userId, allActiveStages]
+    );
+    const myActiveOpportunitiesValue = parseFloat(myActiveOpportunities[0]?.totalValue || '0');
 
-    const myActiveOpportunitiesValue = parseFloat(myActiveOpportunities?.totalValue || 0);
+    // Compter TOUTES mes cotations NON ARCHIV�ES (tous les statuts)
+    const myQuotesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_quotes 
+       WHERE ("commercial_id" = $1 OR $1 = ANY(commercial_ids))
+         AND ("is_archived" = false OR "is_archived" IS NULL)
+         AND "deleted_at" IS NULL`,
+      [userId]
+    );
+    const myQuotesCount = parseInt(myQuotesResult[0]?.count || '0');
 
-    // Compter TOUTES mes cotations NON ARCHIVÉES (tous les statuts)
-    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
-    const myQuotesCount = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getCount();
+    console.log('? [getCommercialStats] myQuotesCount:', myQuotesCount);
 
-    console.log('✅ [getCommercialStats] myQuotesCount:', myQuotesCount);
+    // Compter cotations accept�es
+    const myAcceptedQuotesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_quotes 
+       WHERE ("commercial_id" = $1 OR $1 = ANY(commercial_ids))
+         AND status = $2
+         AND ("is_archived" = false OR "is_archived" IS NULL)
+         AND "deleted_at" IS NULL`,
+      [userId, 'accepted']
+    );
+    const myAcceptedQuotesCount = parseInt(myAcceptedQuotesResult[0]?.count || '0');
 
-    // Compter cotations acceptées
-    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
-    const myAcceptedQuotesCount = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
-      .andWhere('quote.status = :status', { status: 'accepted' })
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getCount();
+    console.log('? [getCommercialStats] myAcceptedQuotesCount:', myAcceptedQuotesCount);
 
-    console.log('✅ [getCommercialStats] myAcceptedQuotesCount:', myAcceptedQuotesCount);
+    // CA accept� (mes cotations accept�es NON ARCHIV�ES)
+    const myAcceptedQuotes = await connection.query(
+      `SELECT 
+        COALESCE(SUM(total), 0) as "totalAccepted",
+        COALESCE(SUM("total_margin"), 0) as "total_margin"
+       FROM crm_quotes 
+       WHERE ("commercial_id" = $1 OR $1 = ANY(commercial_ids))
+         AND status = $2
+         AND ("is_archived" = false OR "is_archived" IS NULL)
+         AND "deleted_at" IS NULL`,
+      [userId, 'accepted']
+    );
 
-    // CA accepté (mes cotations acceptées NON ARCHIVÉES)
-    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
-    const myAcceptedQuotes = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .select('COALESCE(SUM(quote.total), 0)', 'totalAccepted')
-      .addSelect('COALESCE(SUM(quote.totalMargin), 0)', 'totalMargin')
-      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
-      .andWhere('quote.status = :status', { status: 'accepted' })
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getRawOne();
+    const myAcceptedQuotesValue = parseFloat(myAcceptedQuotes[0]?.totalAccepted || '0');
+    const myTotalMargin = parseFloat(myAcceptedQuotes[0]?.totalMargin || '0');
 
-    const myAcceptedQuotesValue = parseFloat(myAcceptedQuotes?.totalAccepted || 0);
-    const myTotalMargin = parseFloat(myAcceptedQuotes?.totalMargin || 0);
-
-    // Taux de conversion basé sur opportunités gagnées / prospects
+    // Taux de conversion bas� sur opportunit�s gagn�es / prospects
     const myConversionRate = myProspectsCount > 0 
       ? (myWonOpportunitiesCount / myProspectsCount) * 100 
       : 0;
 
-    console.log('✅ [getCommercialStats] myConversionRate:', myConversionRate, '%');
+    console.log('? [getCommercialStats] myConversionRate:', myConversionRate, '%');
 
-    // Activités cette semaine (opportunités créées) - NON ARCHIVÉES
-    // ✅ CORRECTION: Ajouter deletedAt IS NULL
-    const myActivitiesThisWeek = await this.opportunityRepository
-      .createQueryBuilder('opp')
-      .where('opp.assignedToId = :userId', { userId })
-      .andWhere('opp.createdAt >= :weekStart', { weekStart: firstDayOfWeek })
-      .andWhere('opp.isArchived = :isArchived', { isArchived: false })
-      .andWhere('opp.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getCount();
+    // Activit�s cette semaine (opportunit�s cr��es) - NON ARCHIV�ES
+    const myActivitiesThisWeekResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_opportunities 
+       WHERE "assigned_to" = $1 
+         AND "created_at" >= $2
+         AND "is_archived" = false 
+         AND "deleted_at" IS NULL`,
+      [userId, firstDayOfWeek]
+    );
+    const myActivitiesThisWeek = parseInt(myActivitiesThisWeekResult[0]?.count || '0');
 
-    // Cotations ce mois - NON ARCHIVÉES
-    // ✅ CORRECTION: Utiliser commercialId ET commercialIds (système multi-commerciaux)
-    const myQuotesThisMonth = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .where('(quote.commercialId = :userId OR :userId = ANY(quote.commercial_ids))', { userId })
-      .andWhere('quote.createdAt >= :monthStart', { monthStart: firstDayOfMonth })
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .andWhere('quote.deletedAt IS NULL') // ✅ Exclure soft-deleted
-      .getCount();
+    // Cotations ce mois - NON ARCHIV�ES
+    const myQuotesThisMonthResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_quotes 
+       WHERE ("commercial_id" = $1 OR $1 = ANY(commercial_ids))
+         AND "created_at" >= $2
+         AND ("is_archived" = false OR "is_archived" IS NULL)
+         AND "deleted_at" IS NULL`,
+      [userId, firstDayOfMonth]
+    );
+    const myQuotesThisMonth = parseInt(myQuotesThisMonthResult[0]?.count || '0');
 
-    // Valeur moyenne des cotations acceptées - NON ARCHIVÉES
+    // Valeur moyenne des cotations accept�es - NON ARCHIV�ES
     const avgQuoteValue = myAcceptedQuotesCount > 0 ? myAcceptedQuotesValue / myAcceptedQuotesCount : 0;
 
     const result = {
       myProspectsCount,
       myOpportunitiesCount,
-      myWonOpportunitiesCount, // ✅ NOUVEAU: Opportunités gagnées
+      myWonOpportunitiesCount, // ? NOUVEAU: Opportunit�s gagn�es
       myQuotesCount,
-      myAcceptedQuotesCount, // ✅ NOUVEAU: Cotations acceptées
+      myAcceptedQuotesCount, // ? NOUVEAU: Cotations accept�es
       myActiveOpportunitiesValue,
       myAcceptedQuotesValue,
       myConversionRate,
@@ -1192,41 +1177,43 @@ export class DashboardService {
       myTotalMargin,
       avgQuoteValue,
       customerSatisfaction: 75, // TODO: Calculer selon les feedbacks clients
-      monthlyGoalProgress: 60, // TODO: Calculer selon objectifs définis
-      teamPerformance: 70, // TODO: Calculer la moyenne de l'équipe
-      growth: 0 // Sera calculé dans la performance mensuelle
+      monthlyGoalProgress: 60, // TODO: Calculer selon objectifs d�finis
+      teamPerformance: 70, // TODO: Calculer la moyenne de l'�quipe
+      growth: 0 // Sera calcul� dans la performance mensuelle
     };
 
-    console.log('📊 [getCommercialStats] Result:', result);
+    console.log('?? [getCommercialStats] Result:', result);
 
     return result;
   }
 
   /**
    * Obtenir la performance mensuelle du commercial
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getCommercialPerformance(userId: number, filters?: DashboardFilters): Promise<any> {
+  async getCommercialPerformance(databaseName: string, userId: number, filters?: DashboardFilters): Promise<any> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     const endDate = filters?.endDate || new Date();
     const startDate = filters?.startDate || new Date(endDate.getFullYear(), endDate.getMonth() - 11, 1);
 
     // Performance mensuelle
-    const monthlyQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('EXTRACT(MONTH FROM opp.createdAt)', 'month')
-      .addSelect('EXTRACT(YEAR FROM opp.createdAt)', 'year')
-      .addSelect('COUNT(*)', 'opportunities')
-      .addSelect('COUNT(CASE WHEN opp.stage = :won THEN 1 END)', 'wonDeals')
-      .addSelect('COALESCE(SUM(opp.value), 0)', 'totalValue')
-      .addSelect('COALESCE(SUM(CASE WHEN opp.stage = :won THEN opp.value ELSE 0 END), 0)', 'wonValue')
-      .where('opp.assignedToId = :userId', { userId })
-      .andWhere('opp.createdAt BETWEEN :start AND :end', { start: startDate, end: endDate })
-      .setParameter('won', OpportunityStage.CLOSED_WON)
-      .groupBy('EXTRACT(YEAR FROM opp.createdAt), EXTRACT(MONTH FROM opp.createdAt)')
-      .orderBy('year, month');
+    const monthlyData = await connection.query(
+      `SELECT 
+        EXTRACT(MONTH FROM "created_at") as month,
+        EXTRACT(YEAR FROM "created_at") as year,
+        COUNT(*) as opportunities,
+        COUNT(CASE WHEN stage = $1 THEN 1 END) as "wonDeals",
+        COALESCE(SUM(value), 0) as "totalValue",
+        COALESCE(SUM(CASE WHEN stage = $1 THEN value ELSE 0 END), 0) as "wonValue"
+       FROM crm_opportunities
+       WHERE "assigned_to" = $2
+         AND "created_at" BETWEEN $3 AND $4
+       GROUP BY EXTRACT(YEAR FROM "created_at"), EXTRACT(MONTH FROM "created_at")
+       ORDER BY year, month`,
+      ['CLOSED_WON', userId, startDate, endDate]
+    );
 
-    const monthlyData = await monthlyQuery.getRawMany();
-
-    const monthNames = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+    const monthNames = ['Jan', 'F�v', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Ao�t', 'Sep', 'Oct', 'Nov', 'D�c'];
     
     const monthly = monthlyData.map(item => ({
       month: monthNames[parseInt(item.month) - 1],
@@ -1237,7 +1224,7 @@ export class DashboardService {
       wonValue: parseFloat(item.wonValue || 0),
       totalMargin: parseFloat(item.wonValue || 0) * 0.15, // Estimation 15% de marge
       quotes: 0, // TODO: Ajouter les cotations
-      acceptedQuotes: 0 // TODO: Ajouter les cotations acceptées
+      acceptedQuotes: 0 // TODO: Ajouter les cotations accept�es
     }));
 
     // Calculer la croissance
@@ -1247,24 +1234,29 @@ export class DashboardService {
       ? ((currentMonth.wonValue - previousMonth.wonValue) / previousMonth.wonValue) * 100
       : 0;
 
-    // Répartition par type de transport (pour ce commercial)
-    const transportQuery = this.opportunityRepository
-      .createQueryBuilder('opp')
-      .select('opp.transportType', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COALESCE(SUM(CASE WHEN opp.stage = :won THEN opp.value ELSE 0 END), 0)', 'value')
-      .where('opp.assignedToId = :userId', { userId })
-      .andWhere('opp.transportType IS NOT NULL')
-      .setParameter('won', OpportunityStage.CLOSED_WON);
-
+    // R�partition par type de transport (pour ce commercial)
+    let transportParams: any[] = ['CLOSED_WON', userId];
+    let transportWhere = '';
+    let transportParamIndex = 3;
+    
     if (filters?.startDate && filters?.endDate) {
-      transportQuery.andWhere('opp.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      transportWhere = ` AND "created_at" BETWEEN $${transportParamIndex} AND $${transportParamIndex + 1}`;
+      transportParams.push(filters.startDate, filters.endDate);
+      transportParamIndex += 2;
     }
-
-    const transportStats = await transportQuery.groupBy('opp.transportType').getRawMany();
+    
+    const transportStats = await connection.query(
+      `SELECT 
+        "transport_type" as type,
+        COUNT(*) as count,
+        COALESCE(SUM(CASE WHEN stage = $1 THEN value ELSE 0 END), 0) as value
+       FROM crm_opportunities
+       WHERE "assigned_to" = $2
+         AND "transport_type" IS NOT NULL
+         ${transportWhere}
+       GROUP BY "transport_type"`,
+      transportParams
+    );
 
     const byTransportType = transportStats.map(item => ({
       type: item.type,
@@ -1280,51 +1272,56 @@ export class DashboardService {
   }
 
   /**
-   * Obtenir les statistiques Import/Export basées sur les cotations
+   * Obtenir les statistiques Import/Export bas�es sur les cotations
+   * ? MULTI-TENANT: Utilise databaseName
    */
-  async getImportExportStats(filters?: DashboardFilters): Promise<any> {
-    console.log('📊 [getImportExportStats] Récupération des statistiques Import/Export');
-    console.log('📊 [getImportExportStats] Filtres reçus:', filters);
+  async getImportExportStats(databaseName: string, filters?: DashboardFilters): Promise<any> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    console.log('?? [getImportExportStats] R�cup�ration des statistiques Import/Export');
+    console.log('?? [getImportExportStats] Filtres re�us:', filters);
     
-    // Compter d'abord toutes les cotations NON ARCHIVÉES pour debug
-    // ✅ CORRECTION: Exclure les archivées (isArchived = true)
-    const totalQuotes = await this.quoteRepository
-      .createQueryBuilder('quote')
-      .where('quote.deletedAt IS NULL')
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .getCount();
-    console.log('📊 [getImportExportStats] Total cotations NON ARCHIVÉES:', totalQuotes);
+    // Compter d'abord toutes les cotations NON ARCHIV�ES pour debug
+    const totalQuotesResult = await connection.query(
+      `SELECT COUNT(*) as count FROM crm_quotes 
+       WHERE "deleted_at" IS NULL 
+         AND ("is_archived" = false OR "is_archived" IS NULL)`
+    );
+    const totalQuotes = parseInt(totalQuotesResult[0]?.count || '0');
+    console.log('?? [getImportExportStats] Total cotations NON ARCHIV�ES:', totalQuotes);
     
-    // Construire la requête de base - utiliser le nom SQL de la colonne: import_export
-    // ✅ CORRECTION: Exclure les archivées (isArchived = true)
-    let query = this.quoteRepository
-      .createQueryBuilder('quote')
-      .select('quote.import_export', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('COALESCE(SUM(quote.total), 0)', 'totalValue')
-      .addSelect('COALESCE(SUM(quote.total_margin), 0)', 'totalMargin')
-      .where('quote.deletedAt IS NULL')
-      .andWhere('(quote.isArchived = :isArchived OR quote.isArchived IS NULL)', { isArchived: false })
-      .andWhere('quote.import_export IS NOT NULL')
-      .andWhere("quote.import_export != ''");
+    // Construire la requ�te de base - utiliser le nom SQL de la colonne: import_export
+    let statsParams: any[] = [];
+    let statsWhere = ` WHERE "deleted_at" IS NULL 
+                       AND ("is_archived" = false OR "is_archived" IS NULL)
+                       AND import_export IS NOT NULL 
+                       AND import_export != ''`;
+    let statsParamIndex = 1;
     
     // Appliquer les filtres de date si fournis
     if (filters?.startDate && filters?.endDate) {
-      query = query.andWhere('quote.createdAt BETWEEN :start AND :end', {
-        start: filters.startDate,
-        end: filters.endDate
-      });
+      statsWhere += ` AND "created_at" BETWEEN $${statsParamIndex} AND $${statsParamIndex + 1}`;
+      statsParams = [filters.startDate, filters.endDate];
+      statsParamIndex += 2;
     }
     
-    // Grouper par type Import/Export
-    const stats = await query.groupBy('quote.import_export').getRawMany();
+    const stats = await connection.query(
+      `SELECT 
+        import_export as type,
+        COUNT(*) as count,
+        COALESCE(SUM(total), 0) as "totalValue",
+        COALESCE(SUM(total_margin), 0) as "total_margin"
+       FROM crm_quotes
+       ${statsWhere}
+       GROUP BY import_export`,
+      statsParams
+    );
     
-    console.log('✅ [getImportExportStats] Stats brutes:', stats);
-    console.log('✅ [getImportExportStats] Nombre de lignes:', stats.length);
+    console.log('? [getImportExportStats] Stats brutes:', stats);
+    console.log('? [getImportExportStats] Nombre de lignes:', stats.length);
     
-    // Si aucune donnée, retourner des valeurs par défaut
+    // Si aucune donn�e, retourner des valeurs par d�faut
     if (!stats || stats.length === 0) {
-      console.warn('⚠️ [getImportExportStats] Aucune cotation avec import_export trouvée');
+      console.warn('?? [getImportExportStats] Aucune cotation avec import_export trouv�e');
       return {
         stats: [
           { type: 'Import', count: 0, totalValue: 0, totalMargin: 0, percentage: '0' },
@@ -1342,12 +1339,12 @@ export class DashboardService {
     const totalValue = stats.reduce((sum, item) => sum + parseFloat(item.totalValue || 0), 0);
     const totalCount = stats.reduce((sum, item) => sum + parseInt(item.count || 0), 0);
     
-    console.log('📊 [getImportExportStats] Total Value:', totalValue);
-    console.log('📊 [getImportExportStats] Total Count:', totalCount);
+    console.log('?? [getImportExportStats] Total Value:', totalValue);
+    console.log('?? [getImportExportStats] Total Count:', totalCount);
     
     // Normaliser les types (Import/Imp -> Import, Export/Exp -> Export)
     const formattedStats = stats.map(item => {
-      let normalizedType = item.type || 'Non défini';
+      let normalizedType = item.type || 'Non d�fini';
       
       // Normaliser les variations
       if (normalizedType.toLowerCase().includes('imp')) {
@@ -1365,7 +1362,7 @@ export class DashboardService {
       };
     });
     
-    console.log('✅ [getImportExportStats] Stats formatées:', formattedStats);
+    console.log('? [getImportExportStats] Stats format�es:', formattedStats);
     
     return {
       stats: formattedStats,

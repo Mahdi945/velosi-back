@@ -1,17 +1,22 @@
-import { Controller, Get, Post, Body, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, HttpStatus, UseGuards, Request } from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { IndustryService } from '../services/industry.service';
+import { getDatabaseName } from '../../common/helpers/multi-tenant.helper';
 
 @Controller('crm/industries')
+@UseGuards(JwtAuthGuard)
 export class IndustryController {
   constructor(private readonly industryService: IndustryService) {}
 
   /**
    * GET /crm/industries - Récupérer tous les secteurs
+   * ✅ MULTI-TENANT: Utilise databaseName du JWT
    */
   @Get()
-  async getAllIndustries() {
+  async getAllIndustries(@Request() req) {
     try {
-      const industries = await this.industryService.findAll();
+      const databaseName = getDatabaseName(req);
+      const industries = await this.industryService.findAll(databaseName);
       return {
         success: true,
         data: industries,
@@ -27,9 +32,10 @@ export class IndustryController {
 
   /**
    * POST /crm/industries - Créer un nouveau secteur
+   * ✅ MULTI-TENANT: Utilise databaseName du JWT
    */
   @Post()
-  async createIndustry(@Body('libelle') libelle: string) {
+  async createIndustry(@Request() req, @Body('libelle') libelle: string) {
     try {
       if (!libelle || libelle.trim() === '') {
         return {
@@ -38,7 +44,8 @@ export class IndustryController {
         };
       }
 
-      const industry = await this.industryService.create(libelle);
+      const databaseName = getDatabaseName(req);
+      const industry = await this.industryService.create(databaseName, libelle);
       return {
         success: true,
         message: 'Secteur d\'activité créé avec succès',

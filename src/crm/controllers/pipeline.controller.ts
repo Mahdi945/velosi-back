@@ -10,23 +10,54 @@ import {
   ParseIntPipe,
   BadRequestException,
   Logger,
-  Delete
+  Delete,
+  UseGuards,
+  Req,
+  Request
 } from '@nestjs/common';
+import { IsOptional, IsString, IsNumber } from 'class-validator';
+import { Type } from 'class-transformer';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { PipelineService, KanbanData, PipelineFilters } from '../services/pipeline.service';
 import { MoveOpportunityDto, UpdateOpportunityDto, CreateOpportunityDto } from '../../dto/crm/opportunity.dto';
 import { OpportunityStage } from '../../entities/crm/opportunity.entity';
+import { getOrganisationId, getDatabaseName } from '../../common/helpers/multi-tenant.helper';
 
 export class PipelineFiltersDto {
+  @IsOptional()
+  @IsString()
   search?: string;
+  
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   assignedToId?: number;
+  
+  @IsOptional()
+  @IsString()
   priority?: string;
+  
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   minValue?: number;
+  
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
   maxValue?: number;
+  
+  @IsOptional()
+  @IsString()
   dateFrom?: string;
+  
+  @IsOptional()
+  @IsString()
   dateTo?: string;
 }
 
 @Controller('api/crm/pipeline')
+@UseGuards(JwtAuthGuard)
 export class PipelineController {
   private readonly logger = new Logger(PipelineController.name);
 
@@ -35,9 +66,13 @@ export class PipelineController {
   /**
    * GET /api/crm/pipeline
    * Récupérer les données du pipeline Kanban
+   * ✅ MULTI-TENANT: Utilise databaseName depuis le JWT
    */
   @Get()
-  async getKanbanData(@Query() queryFilters: PipelineFiltersDto): Promise<{
+  async getKanbanData(
+    @Query() queryFilters: PipelineFiltersDto,
+    @Req() req: any
+  ): Promise<{
     success: boolean;
     data: KanbanData;
     message: string;
@@ -45,12 +80,16 @@ export class PipelineController {
     this.logger.log('📊 GET /api/crm/pipeline - Récupération données Kanban');
     
     try {
+      // 🏛️ Récupérer databaseName depuis le JWT
+      const databaseName = getDatabaseName(req);
+      
       // Transformer les paramètres de requête en filtres
       const filters: PipelineFilters = this.transformQueryToFilters(queryFilters);
       
       this.logger.log('Filtres appliqués:', filters);
+      this.logger.log(`🏛️ Database: ${databaseName}`);
 
-      const kanbanData = await this.pipelineService.getKanbanData(filters);
+      const kanbanData = await this.pipelineService.getKanbanData(filters, databaseName);
       
       this.logger.log(`✅ Pipeline récupéré: ${kanbanData.totalOpportunities} opportunités, ${kanbanData.stages.length} étapes`);
 
@@ -76,6 +115,7 @@ export class PipelineController {
    */
   @Put(':id/stage')
   async moveOpportunity(
+    @Request() req,
     @Param('id', ParseIntPipe) opportunityId: number,
     @Body() moveDto: MoveOpportunityDto
   ): Promise<{
@@ -86,9 +126,11 @@ export class PipelineController {
     this.logger.log(`🔄 PUT /api/crm/pipeline/${opportunityId}/stage - Déplacement vers ${moveDto.toStage}`);
 
     try {
+      const databaseName = getDatabaseName(req);
       const movedOpportunity = await this.pipelineService.moveOpportunity(
         opportunityId,
-        moveDto.toStage
+        moveDto.toStage,
+        databaseName
       );
 
       this.logger.log(`✅ Opportunité ${opportunityId} déplacée vers ${moveDto.toStage}`);
@@ -117,9 +159,13 @@ export class PipelineController {
   /**
    * GET /api/crm/pipeline/stats
    * Récupérer les statistiques du pipeline
+   * ✅ MULTI-TENANT: Utilise databaseName depuis le JWT
    */
   @Get('stats')
-  async getPipelineStats(@Query() queryFilters: PipelineFiltersDto): Promise<{
+  async getPipelineStats(
+    @Query() queryFilters: PipelineFiltersDto,
+    @Req() req: any
+  ): Promise<{
     success: boolean;
     data: any;
     message: string;
@@ -127,8 +173,11 @@ export class PipelineController {
     this.logger.log('📈 GET /api/crm/pipeline/stats - Récupération statistiques');
 
     try {
+      // 🏛️ Récupérer databaseName depuis le JWT
+      const databaseName = getDatabaseName(req);
+      
       const filters: PipelineFilters = this.transformQueryToFilters(queryFilters);
-      const stats = await this.pipelineService.getPipelineStats(filters);
+      const stats = await this.pipelineService.getPipelineStats(filters, databaseName);
 
       this.logger.log('✅ Statistiques pipeline récupérées');
 
@@ -208,6 +257,7 @@ export class PipelineController {
    */
   @Patch(':id')
   async updateOpportunity(
+    @Request() req,
     @Param('id', ParseIntPipe) opportunityId: number,
     @Body() updateDto: UpdateOpportunityDto
   ): Promise<{
@@ -226,9 +276,11 @@ export class PipelineController {
         updateData.expectedCloseDate = new Date(updateDto.expectedCloseDate);
       }
 
+      const databaseName = getDatabaseName(req);
       const updatedOpportunity = await this.pipelineService.updateOpportunity(
         opportunityId,
-        updateData
+        updateData,
+        databaseName
       );
 
       this.logger.log(`✅ Opportunité ${opportunityId} mise à jour avec succès`);
@@ -252,6 +304,7 @@ export class PipelineController {
    */
   @Delete(':id')
   async deleteOpportunity(
+    @Request() req,
     @Param('id', ParseIntPipe) opportunityId: number
   ): Promise<{
     success: boolean;
@@ -260,7 +313,8 @@ export class PipelineController {
     this.logger.log(`🗑️ DELETE /api/crm/pipeline/${opportunityId} - Suppression opportunité`);
 
     try {
-      await this.pipelineService.deleteOpportunity(opportunityId);
+      const databaseName = getDatabaseName(req);
+      await this.pipelineService.deleteOpportunity(opportunityId, databaseName);
 
       this.logger.log(`✅ Opportunité ${opportunityId} supprimée avec succès`);
 
@@ -282,6 +336,7 @@ export class PipelineController {
    */
   @Patch(':id/won')
   async markAsWon(
+    @Request() req,
     @Param('id', ParseIntPipe) opportunityId: number,
     @Body() body: { comment?: string }
   ): Promise<{
@@ -292,7 +347,8 @@ export class PipelineController {
     this.logger.log(`🏆 PATCH /api/crm/pipeline/${opportunityId}/won - Marquage comme gagné`);
 
     try {
-      const updatedOpportunity = await this.pipelineService.markAsWon(opportunityId, body.comment);
+      const databaseName = getDatabaseName(req);
+      const updatedOpportunity = await this.pipelineService.markAsWon(opportunityId, body.comment, databaseName);
 
       this.logger.log(`✅ Opportunité ${opportunityId} marquée comme gagnée`);
 
@@ -315,6 +371,7 @@ export class PipelineController {
    */
   @Patch(':id/lost')
   async markAsLost(
+    @Request() req,
     @Param('id', ParseIntPipe) opportunityId: number,
     @Body() body: { reason?: string }
   ): Promise<{
@@ -325,7 +382,8 @@ export class PipelineController {
     this.logger.log(`❌ PATCH /api/crm/pipeline/${opportunityId}/lost - Marquage comme perdu`);
 
     try {
-      const updatedOpportunity = await this.pipelineService.markAsLost(opportunityId, body.reason);
+      const databaseName = getDatabaseName(req);
+      const updatedOpportunity = await this.pipelineService.markAsLost(opportunityId, body.reason, databaseName);
 
       this.logger.log(`✅ Opportunité ${opportunityId} marquée comme perdue`);
 
@@ -347,15 +405,16 @@ export class PipelineController {
    * R�cup�rer la liste de tous les prospects (leads)
    */
   @Get('/leads')
-  async getAllLeads(): Promise<{
+  async getAllLeads(@Request() req): Promise<{
     success: boolean;
     data: any[];
     message: string;
   }> {
-    this.logger.log('?? GET /api/crm/leads - R�cup�ration liste des prospects');
+    this.logger.log('📋 GET /api/crm/leads - Récupération liste des prospects');
     
     try {
-      const leads = await this.pipelineService.getAllLeads();
+      const databaseName = getDatabaseName(req);
+      const leads = await this.pipelineService.getAllLeads(databaseName);
 
       this.logger.log(`?  prospects r�cup�r�s`);
 
@@ -377,15 +436,16 @@ export class PipelineController {
    * R�cup�rer la liste de toutes les opportunit�s
    */
   @Get('/opportunities')
-  async getAllOpportunities(): Promise<{
+  async getAllOpportunities(@Request() req): Promise<{
     success: boolean;
     data: any[];
     message: string;
   }> {
-    this.logger.log('?? GET /api/crm/opportunities - R�cup�ration liste des opportunit�s');
+    this.logger.log('📊 GET /api/crm/opportunities - Récupération liste des opportunités');
     
     try {
-      const opportunities = await this.pipelineService.getAllOpportunities();
+      const databaseName = getDatabaseName(req);
+      const opportunities = await this.pipelineService.getAllOpportunities(databaseName);
 
       this.logger.log(`?  opportunit�s r�cup�r�es`);
 

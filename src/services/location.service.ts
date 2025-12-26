@@ -1,17 +1,26 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+﻿import { Injectable, Scope, BadRequestException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { Personnel } from '../entities/personnel.entity';
 import { LocationUpdateDto } from '../dto/location-update.dto';
 import { LocationGateway } from '../gateway/location.gateway';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 @Injectable()
 export class LocationService {
   constructor(
-    @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
+    private readonly databaseConnectionService: DatabaseConnectionService,
     private locationGateway: LocationGateway,
   ) {}
+
+  /**
+   * Obtenir les repositories dynamiques pour une base de données
+   */
+  private async getRepositories(databaseName: string) {
+    const dataSource = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    return {
+      personnelRepository: dataSource.getRepository(Personnel),
+    };
+  }
 
   /**
    * Met à jour la position GPS d'un personnel
@@ -19,8 +28,12 @@ export class LocationService {
   async updatePersonnelLocation(
     personnelId: number,
     locationData: LocationUpdateDto,
+    databaseName: string,
+    organisationId: number,
   ): Promise<Personnel> {
-    const personnel = await this.personnelRepository.findOne({
+    console.log(`🏢 [updatePersonnelLocation] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
+    const personnel = await personnelRepository.findOne({
       where: { id: personnelId, statut: 'actif' },
     });
 
@@ -43,7 +56,7 @@ export class LocationService {
     personnel.location_source = locationData.source || 'unknown';
     personnel.is_location_active = true;
 
-    const updatedPersonnel = await this.personnelRepository.save(personnel);
+    const updatedPersonnel = await personnelRepository.save(personnel);
 
     // Diffuser la mise à jour en temps réel via WebSocket
     await this.locationGateway.broadcastLocationUpdate({
@@ -68,10 +81,14 @@ export class LocationService {
   async toggleLocationTracking(
     personnelId: number,
     enabled: boolean,
+    databaseName: string,
+    organisationId: number,
   ): Promise<Personnel> {
+    console.log(`🏢 [toggleLocationTracking] DB: ${databaseName}, Org: ${organisationId}`);
     console.log(`🔄 Toggle GPS tracking pour personnel ${personnelId}: ${enabled ? 'ACTIVÉ' : 'DÉSACTIVÉ'}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     
-    const personnel = await this.personnelRepository.findOne({
+    const personnel = await personnelRepository.findOne({
       where: { id: personnelId },
     });
 
@@ -98,7 +115,7 @@ export class LocationService {
       console.log('✅ Tracking GPS activé - is_location_active sera activé lors de la prochaine position');
     }
 
-    const updatedPersonnel = await this.personnelRepository.save(personnel);
+    const updatedPersonnel = await personnelRepository.save(personnel);
 
     // Log l'état après modification
     console.log(`📊 État après modification:`, {
@@ -123,8 +140,13 @@ export class LocationService {
   /**
    * Récupère tous les personnels avec leur position
    */
-  async getAllPersonnelWithLocation(): Promise<Personnel[]> {
-    return this.personnelRepository.find({
+  async getAllPersonnelWithLocation(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<Personnel[]> {
+    console.log(`🏢 [getAllPersonnelWithLocation] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
+    return personnelRepository.find({
       where: { 
         statut: 'actif',
         location_tracking_enabled: true,
@@ -142,10 +164,15 @@ export class LocationService {
   /**
    * Récupère les personnels actifs avec position récente
    */
-  async getActivePersonnelWithRecentLocation(): Promise<Personnel[]> {
+  async getActivePersonnelWithRecentLocation(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<Personnel[]> {
+    console.log(`🏢 [getActivePersonnelWithRecentLocation] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     
-    return this.personnelRepository
+    return personnelRepository
       .createQueryBuilder('personnel')
       .where('personnel.statut = :statut', { statut: 'actif' })
       .andWhere('personnel.location_tracking_enabled = :enabled', { enabled: true })
@@ -169,10 +196,13 @@ export class LocationService {
     latitude: number,
     longitude: number,
     radiusKm: number = 5,
+    databaseName: string,
+    organisationId: number,
   ): Promise<Array<Personnel & { distance: number }>> {
+    console.log(`🏢 [findPersonnelNearby] DB: ${databaseName}, Org: ${organisationId}`);
     this.validateCoordinates(latitude, longitude);
 
-    const personnelList = await this.getActivePersonnelWithRecentLocation();
+    const personnelList = await this.getActivePersonnelWithRecentLocation(databaseName, organisationId);
     
     const nearbyPersonnel = personnelList
       .map(personnel => {
@@ -188,10 +218,15 @@ export class LocationService {
   /**
    * Marque les positions inactives (plus de 5 minutes)
    */
-  async markInactiveLocations(): Promise<void> {
+  async markInactiveLocations(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<void> {
+    console.log(`🏢 [markInactiveLocations] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     
-    await this.personnelRepository
+    await personnelRepository
       .createQueryBuilder()
       .update(Personnel)
       .set({ is_location_active: false })
@@ -203,30 +238,35 @@ export class LocationService {
   /**
    * Obtient les statistiques de géolocalisation
    */
-  async getLocationStats(): Promise<{
+  async getLocationStats(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<{
     totalPersonnel: number;
     trackingEnabled: number;
     currentlyActive: number;
     withPosition: number;
     lastHourUpdates: number;
   }> {
+    console.log(`🏢 [getLocationStats] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
     const [total, tracking, active, withPos, recent] = await Promise.all([
-      this.personnelRepository.count({ where: { statut: 'actif' } }),
-      this.personnelRepository.count({ 
+      personnelRepository.count({ where: { statut: 'actif' } }),
+      personnelRepository.count({ 
         where: { statut: 'actif', location_tracking_enabled: true } 
       }),
-      this.personnelRepository.count({ 
+      personnelRepository.count({ 
         where: { statut: 'actif', is_location_active: true } 
       }),
-      this.personnelRepository
+      personnelRepository
         .createQueryBuilder('personnel')
         .where('personnel.statut = :statut', { statut: 'actif' })
         .andWhere('personnel.latitude IS NOT NULL')
         .andWhere('personnel.longitude IS NOT NULL')
         .getCount(),
-      this.personnelRepository
+      personnelRepository
         .createQueryBuilder('personnel')
         .where('personnel.statut = :statut', { statut: 'actif' })
         .andWhere('personnel.last_location_update > :oneHourAgo', { oneHourAgo })
@@ -257,8 +297,14 @@ export class LocationService {
   /**
    * Trouve un personnel par son ID
    */
-  async findPersonnelById(personnelId: number): Promise<Personnel | null> {
-    return await this.personnelRepository.findOne({
+  async findPersonnelById(
+    personnelId: number,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<Personnel | null> {
+    console.log(`🏢 [findPersonnelById] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
+    return await personnelRepository.findOne({
       where: { id: personnelId },
       select: [
         'id', 'nom', 'prenom', 'role',
@@ -272,10 +318,15 @@ export class LocationService {
   /**
    * Nettoie les anciennes positions (plus de 24h)
    */
-  async cleanupOldLocations(): Promise<void> {
+  async cleanupOldLocations(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<void> {
+    console.log(`🏢 [cleanupOldLocations] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
-    await this.personnelRepository
+    await personnelRepository
       .createQueryBuilder()
       .update(Personnel)
       .set({ 

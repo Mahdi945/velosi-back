@@ -8,9 +8,14 @@ import { ObjectifCom } from '../entities/objectif-com.entity';
 import { ContactClient } from '../entities/contact-client.entity';
 import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../services/email.service';
+import { DatabaseModule } from '../common/database.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Client, Personnel, ObjectifCom, ContactClient]), AuthModule],
+  imports: [
+    TypeOrmModule.forFeature([Client, Personnel, ObjectifCom, ContactClient]), 
+    AuthModule,
+    DatabaseModule, // 🏢 Importer DatabaseModule pour TenantRepositoryService
+  ],
   providers: [UsersService, EmailService],
   controllers: [UsersController],
   exports: [UsersService],

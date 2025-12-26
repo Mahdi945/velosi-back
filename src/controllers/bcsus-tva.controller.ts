@@ -15,10 +15,12 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BCsusTVAService } from '../services/bcsus-tva.service';
 import { CreateBCsusTVADto, UpdateBCsusTVADto, BCsusTVAResponseDto } from '../dto/bcsus-tva.dto';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -30,8 +32,9 @@ export class BCsusTVAController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createBCsusTVADto: CreateBCsusTVADto): Promise<BCsusTVAResponseDto> {
-    return this.bcsusTVAService.create(createBCsusTVADto);
+  async create(@Body() createBCsusTVADto: CreateBCsusTVADto, @Req() req: any): Promise<BCsusTVAResponseDto> {
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.create(databaseName, createBCsusTVADto);
   }
 
   @Get()
@@ -39,44 +42,53 @@ export class BCsusTVAController {
     @Query('autorisationId') autorisationId?: number,
     @Query('statut') statut?: string,
     @Query('isActive') isActive?: boolean,
+    @Req() req?: any,
   ): Promise<BCsusTVAResponseDto[]> {
-    return this.bcsusTVAService.findAll(autorisationId, statut, isActive);
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.findAll(databaseName, autorisationId, statut, isActive);
   }
 
   @Get('client/:clientId')
-  async findByClient(@Param('clientId', ParseIntPipe) clientId: number): Promise<BCsusTVAResponseDto[]> {
-    return this.bcsusTVAService.findByClient(clientId);
+  async findByClient(@Param('clientId', ParseIntPipe) clientId: number, @Req() req: any): Promise<BCsusTVAResponseDto[]> {
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.findByClient(databaseName, clientId);
   }
 
   @Get('autorisation/:autorisationId/stats')
-  async getStatsByAutorisation(@Param('autorisationId', ParseIntPipe) autorisationId: number) {
-    return this.bcsusTVAService.getStatsByAutorisation(autorisationId);
+  async getStatsByAutorisation(@Param('autorisationId', ParseIntPipe) autorisationId: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.getStatsByAutorisation(databaseName, autorisationId);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<BCsusTVAResponseDto> {
-    return this.bcsusTVAService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<BCsusTVAResponseDto> {
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.findOne(databaseName, id);
   }
 
   @Patch(':id')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateBCsusTVADto: UpdateBCsusTVADto,
+    @Req() req: any,
   ): Promise<BCsusTVAResponseDto> {
-    return this.bcsusTVAService.update(id, updateBCsusTVADto);
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.update(databaseName, id, updateBCsusTVADto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<{ success: boolean; message: string }> {
-    await this.bcsusTVAService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<{ success: boolean; message: string }> {
+    const databaseName = getDatabaseName(req);
+    await this.bcsusTVAService.remove(databaseName, id);
     return { success: true, message: 'Bon de commande supprimé avec succès' };
   }
 
   @Delete(':id/hard')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async hardDelete(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return this.bcsusTVAService.hardDelete(id);
+  async hardDelete(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<void> {
+    const databaseName = getDatabaseName(req);
+    return this.bcsusTVAService.hardDelete(databaseName, id);
   }
 
   @Post(':id/upload-image')
@@ -109,6 +121,7 @@ export class BCsusTVAController {
   async uploadImage(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ): Promise<{ message: string; imagePath: string }> {
     if (!file) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -117,7 +130,8 @@ export class BCsusTVAController {
     const imagePath = `uploads/bons-de-commande/${file.filename}`;
     
     // Mettre à jour le bon de commande avec le chemin de l'image
-    await this.bcsusTVAService.update(id, { imagePath });
+    const databaseName = getDatabaseName(req);
+    await this.bcsusTVAService.update(databaseName, id, { imagePath });
 
     return {
       message: 'Image téléchargée avec succès',
@@ -126,8 +140,9 @@ export class BCsusTVAController {
   }
 
   @Get(':id/image')
-  async getImage(@Param('id', ParseIntPipe) id: number): Promise<{ imagePath: string }> {
-    const bonCommande = await this.bcsusTVAService.findOne(id);
+  async getImage(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<{ imagePath: string }> {
+    const databaseName = getDatabaseName(req);
+    const bonCommande = await this.bcsusTVAService.findOne(databaseName, id);
     
     if (!bonCommande.imagePath) {
       throw new BadRequestException('Aucune image associée à ce bon de commande');

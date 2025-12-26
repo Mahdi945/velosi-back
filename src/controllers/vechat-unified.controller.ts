@@ -11,6 +11,7 @@ import {
   HttpStatus,
   Logger
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { VeChatUnifiedService } from '../services/vechat-unified.service';
 import { 
   UnifiedUserDto, 
@@ -21,6 +22,7 @@ import {
 } from '../dto/vechat-unified.dto';
 
 @Controller('api/vechat')
+@UseGuards(JwtAuthGuard)
 export class VeChatUnifiedController {
   private readonly logger = new Logger(VeChatUnifiedController.name);
 

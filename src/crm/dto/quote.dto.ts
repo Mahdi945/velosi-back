@@ -382,6 +382,49 @@ export class CreateQuoteDto {
   @IsString()
   exchangeNotes?: string;
 
+  // 🔧 Type de cotation (cotation ou fiche_dossier)
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  // 🚢 Champs transport maritime
+  @IsOptional()
+  @IsString()
+  condition?: string;
+
+  @IsOptional()
+  @IsString()
+  hbl?: string;
+
+  @IsOptional()
+  @IsString()
+  mbl?: string;
+
+  @IsOptional()
+  @IsNumber()
+  armateurId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  navireId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  portLivraisonId?: number;
+
+  // ✈️ Champs transport aérien
+  @IsOptional()
+  @IsNumber()
+  aeroportEnlevementId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  aeroportLivraisonId?: number;
+
   // 🔧 FIX: Champ createdBy pour enregistrer qui a créé la cotation
   @IsOptional()
   @IsNumber()

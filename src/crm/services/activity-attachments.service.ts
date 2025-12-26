@@ -1,7 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Activity } from '../entities/activity.entity';
+import { DatabaseConnectionService } from '../../common/database-connection.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { existsSync } from 'fs';
@@ -20,9 +18,40 @@ export class ActivityAttachmentsService {
   private readonly baseUploadPath = './uploads/activites';
 
   constructor(
-    @InjectRepository(Activity)
-    private activityRepository: Repository<Activity>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
+
+  /**
+   * Parser JSON de manière sécurisée
+   */
+  private parseJsonSafely(jsonString: any): any[] {
+    if (!jsonString) {
+      return [];
+    }
+    
+    // Si c'est déjà un array, le retourner directement
+    if (Array.isArray(jsonString)) {
+      return jsonString;
+    }
+    
+    // Si c'est une chaîne vide ou invalide
+    if (typeof jsonString === 'string') {
+      const trimmed = jsonString.trim();
+      if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') {
+        return [];
+      }
+      
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (error) {
+        console.warn('Erreur lors du parsing JSON des attachments:', error.message);
+        return [];
+      }
+    }
+    
+    return [];
+  }
 
   /**
    * Créer le dossier pour une activité
@@ -73,12 +102,17 @@ export class ActivityAttachmentsService {
   async addAttachments(
     activityId: number,
     files: Express.Multer.File[],
+    databaseName: string,
   ): Promise<AttachmentMetadata[]> {
-    const activity = await this.activityRepository.findOne({
-      where: { id: activityId },
-    });
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    if (!activity) {
+    // Vérifier que l'activité existe
+    const activities = await connection.query(
+      'SELECT id, attachments FROM crm_activities WHERE id = $1',
+      [activityId]
+    );
+
+    if (!activities || activities.length === 0) {
       // Nettoyer les fichiers temporaires
       await this.cleanupTempFiles(files);
       throw new NotFoundException(`Activité ${activityId} non trouvée`);
@@ -91,10 +125,13 @@ export class ActivityAttachmentsService {
     );
 
     // Mettre à jour l'activité
-    const existingAttachments = activity.attachments || [];
-    activity.attachments = [...existingAttachments, ...newAttachments];
+    const existingAttachments = this.parseJsonSafely(activities[0].attachments);
+    const updatedAttachments = [...existingAttachments, ...newAttachments];
 
-    await this.activityRepository.save(activity);
+    await connection.query(
+      'UPDATE crm_activities SET attachments = $1 WHERE id = $2',
+      [JSON.stringify(updatedAttachments), activityId]
+    );
 
     return newAttachments;
   }
@@ -105,18 +142,25 @@ export class ActivityAttachmentsService {
   async deleteAttachment(
     activityId: number,
     fileName: string,
+    databaseName: string,
   ): Promise<void> {
-    const activity = await this.activityRepository.findOne({
-      where: { id: activityId },
-    });
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    if (!activity) {
+    // Récupérer l'activité
+    const activities = await connection.query(
+      'SELECT id, attachments FROM crm_activities WHERE id = $1',
+      [activityId]
+    );
+
+    if (!activities || activities.length === 0) {
       throw new NotFoundException(`Activité ${activityId} non trouvée`);
     }
 
+    const attachments = this.parseJsonSafely(activities[0].attachments);
+
     // Trouver l'attachment
-    const attachment = activity.attachments?.find(
-      (a) => a.fileName === fileName,
+    const attachment = attachments.find(
+      (a: AttachmentMetadata) => a.fileName === fileName,
     );
 
     if (!attachment) {
@@ -134,11 +178,14 @@ export class ActivityAttachmentsService {
     }
 
     // Retirer des métadonnées
-    activity.attachments = activity.attachments.filter(
-      (a) => a.fileName !== fileName,
+    const updatedAttachments = attachments.filter(
+      (a: AttachmentMetadata) => a.fileName !== fileName,
     );
 
-    await this.activityRepository.save(activity);
+    await connection.query(
+      'UPDATE crm_activities SET attachments = $1 WHERE id = $2',
+      [JSON.stringify(updatedAttachments), activityId]
+    );
   }
 
   /**
@@ -189,3 +236,4 @@ export class ActivityAttachmentsService {
     }
   }
 }
+

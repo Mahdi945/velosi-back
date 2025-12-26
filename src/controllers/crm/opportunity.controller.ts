@@ -9,6 +9,7 @@ import {
   Query,
   Request,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { OpportunityService } from '../../services/crm/opportunity.service';
 import {
@@ -20,20 +21,28 @@ import {
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../auth/roles.guard';
 import { Roles } from '../../auth/roles.decorator';
+import { getDatabaseName, getOrganisationId } from '../../common/helpers/multi-tenant.helper';
 
 @Controller('crm/opportunities')
-// @UseGuards(JwtAuthGuard, RolesGuard) // Temporairement désactivé pour debug
+@UseGuards(JwtAuthGuard)
 export class OpportunityController {
   constructor(private readonly opportunityService: OpportunityService) {}
 
   /**
    * Créer une nouvelle opportunité
    * POST /api/crm/opportunities
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Post()
-  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
-  async create(@Body() rawBody: any, @Request() req) {
+  @Roles('commercial', 'admin')
+  async create(@Body() rawBody: any, @Req() req) {
     console.log('🔍 DEBUG CREATE - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+    
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    const userId = req.user?.userId || req.user?.id || 1;
+    
+    console.log(`🏢 [Opportunity.create] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}`);
     
     // Transformer engineTypes (array) en engineType (single) si nécessaire
     const createOpportunityDto = { ...rawBody };
@@ -46,7 +55,6 @@ export class OpportunityController {
         createOpportunityDto.engineType = parsedEngineType;
         console.log('🔄 CREATE - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
       }
-      // Supprimer engineTypes pour éviter confusion
       delete createOpportunityDto.engineTypes;
     }
     
@@ -58,39 +66,19 @@ export class OpportunityController {
         createOpportunityDto.engineType = parsedEngineType;
         console.log('🔄 CREATE - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
       }
-      // Supprimer vehicleTypes pour éviter confusion
       delete createOpportunityDto.vehicleTypes;
     }
     
     console.log('🔍 DEBUG CREATE - Données après transformation:', JSON.stringify(createOpportunityDto, null, 2));
     try {
-      // Priorité : utilisateur authentifié > header personnalisé > défaut
-      let userId = 1; // ID par défaut (administratif)
-      
-      if (req.user && req.user.id) {
-        userId = req.user.id;
-        console.log('👤 Utilisateur authentifié pour création opportunité:', { 
-          id: userId, 
-          username: req.user.username, 
-          role: req.user.role 
-        });
-      } else if (req.headers['x-user-id']) {
-        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
-        if (!isNaN(headerUserId) && headerUserId > 0) {
-          userId = headerUserId;
-          console.log('👤 Utilisateur via header pour création opportunité:', { id: userId });
-        }
-      } else {
-        console.warn('⚠️ Pas d\'utilisateur identifié pour création opportunité, utilisation de l\'ID par défaut:', userId);
-      }
-      
-      const opportunity = await this.opportunityService.create(createOpportunityDto, userId);
+      const opportunity = await this.opportunityService.create(databaseName, organisationId, createOpportunityDto, userId);
       return {
         success: true,
         message: 'Opportunité créée avec succès',
         data: opportunity,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.create] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -102,13 +90,18 @@ export class OpportunityController {
   /**
    * 📋 Obtenir toutes les opportunités ARCHIVÉES avec filtres
    * GET /api/crm/opportunities/archived
-   * ✅ NOUVELLE ROUTE: Retourne uniquement les archivées
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    * ⚠️ IMPORTANT: Doit être AVANT @Get(':id') pour éviter la confusion avec les paramètres de route
    */
   @Get('archived')
-  async findAllArchived(@Query() query: OpportunityQueryDto) {
+  async findAllArchived(@Query() query: OpportunityQueryDto, @Req() req) {
     try {
-      const result = await this.opportunityService.findAllArchived(query);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log(`🏢 [Opportunity.findAllArchived] DB: ${databaseName}, Org: ${organisationId}`);
+      
+      const result = await this.opportunityService.findAllArchived(databaseName, organisationId, query);
       return {
         success: true,
         message: 'Opportunités archivées récupérées avec succès',
@@ -119,6 +112,7 @@ export class OpportunityController {
         pageSize: query.limit || 25,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.findAllArchived] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -130,12 +124,30 @@ export class OpportunityController {
   /**
    * Obtenir toutes les opportunités NON-ARCHIVÉES avec filtres
    * GET /api/crm/opportunities
-   * ✅ CORRECTION: Retourne uniquement les NON-archivées
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Get()
-  async findAll(@Query() query: OpportunityQueryDto) {
+  async findAll(@Query() query: OpportunityQueryDto, @Req() req) {
     try {
-      const result = await this.opportunityService.findAll(query);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const userId = req.user?.userId || req.user?.id;
+      const userRoles = req.user?.roles || [];
+      
+      console.log(`🏢 [Opportunity.findAll] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}`);
+      
+      // Si l'utilisateur est SEULEMENT commercial (pas admin), filtrer par ses opportunités
+      const isCommercialOnly = userRoles.includes('commercial') && !userRoles.includes('administratif') && !userRoles.includes('admin');
+      
+      if (isCommercialOnly && userId && !query.assignedToId && !query.assignedToIds) {
+        console.log(`🔐 [Opportunity] Filtrage par commercial assigné: ${userId}`);
+        query.assignedToId = userId;
+      }
+      
+      const result = await this.opportunityService.findAll(databaseName, organisationId, query);
+      
+      console.log(`✅ [Opportunity] ${result.data.length} opportunités récupérées depuis ${databaseName}`);
+      
       return {
         success: true,
         message: 'Opportunités récupérées avec succès',
@@ -146,6 +158,7 @@ export class OpportunityController {
         pageSize: query.limit || 25,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.findAll] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -157,17 +170,24 @@ export class OpportunityController {
   /**
    * Obtenir une opportunité par ID
    * GET /api/crm/opportunities/:id
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Get(':id')
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @Req() req) {
     try {
-      const opportunity = await this.opportunityService.findOne(+id);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log(`🏢 [Opportunity.findOne] DB: ${databaseName}, Org: ${organisationId}, ID: ${id}`);
+      
+      const opportunity = await this.opportunityService.findOne(databaseName, organisationId, +id);
       return {
         success: true,
         message: 'Opportunité récupérée avec succès',
         data: opportunity,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.findOne] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -179,16 +199,23 @@ export class OpportunityController {
   /**
    * Mettre à jour une opportunité
    * PATCH /api/crm/opportunities/:id
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Patch(':id')
-  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
+  @Roles('commercial', 'admin')
   async update(
     @Param('id') id: string,
-    @Body() rawBody: any, // Accepter d'abord les données brutes
-    @Request() req,
+    @Body() rawBody: any,
+    @Req() req,
   ) {
     console.log('🔍 DEBUG UPDATE - Opportunity ID:', id);
     console.log('🔍 DEBUG UPDATE - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+    
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    const userId = req.user?.userId || req.user?.id || 1;
+    
+    console.log(`🏢 [Opportunity.update] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}, ID: ${id}`);
     
     // Transformer engineTypes (array) en engineType (single) si nécessaire
     const updateOpportunityDto = { ...rawBody };
@@ -201,7 +228,6 @@ export class OpportunityController {
         updateOpportunityDto.engineType = parsedEngineType;
         console.log('🔄 UPDATE - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
       }
-      // Supprimer engineTypes pour éviter confusion
       delete updateOpportunityDto.engineTypes;
     }
     
@@ -213,48 +239,19 @@ export class OpportunityController {
         updateOpportunityDto.engineType = parsedEngineType;
         console.log('🔄 UPDATE - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
       }
-      // Supprimer vehicleTypes pour éviter confusion
       delete updateOpportunityDto.vehicleTypes;
     }
     
     console.log('🔍 DEBUG UPDATE - Données après transformation:', JSON.stringify(updateOpportunityDto, null, 2));
     try {
-      console.log('🔄 [CONTROLLER UPDATE] Mise à jour opportunité ID:', id);
-      console.log('📝 [CONTROLLER UPDATE] Données reçues:', updateOpportunityDto);
-      console.log('🎯 [CONTROLLER UPDATE] AssignedToId reçu:', updateOpportunityDto.assignedToId, 'type:', typeof updateOpportunityDto.assignedToId);
-      console.log('👤 [CONTROLLER UPDATE] Utilisateur dans req:', req.user);
-      
-      // Priorité : utilisateur authentifié > header personnalisé > défaut
-      let userId = 1; // ID par défaut (administratif)
-      let userInfo = 'Utilisateur par défaut (ID: 1)';
-      
-      if (req.user && req.user.id) {
-        userId = req.user.id;
-        userInfo = `${req.user.username || 'N/A'} (ID: ${userId}, Rôle: ${req.user.role || 'N/A'})`;
-        console.log('👤 Utilisateur authentifié pour mise à jour opportunité:', { 
-          id: userId, 
-          username: req.user.username, 
-          role: req.user.role 
-        });
-      } else if (req.headers['x-user-id']) {
-        // Header personnalisé pour l'ID utilisateur
-        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
-        if (!isNaN(headerUserId) && headerUserId > 0) {
-          userId = headerUserId;
-          userInfo = `Via header (ID: ${userId})`;
-          console.log('👤 Utilisateur via header pour mise à jour opportunité:', { id: userId });
-        }
-      } else {
-        console.warn('⚠️ Pas d\'utilisateur identifié pour mise à jour opportunité, utilisation de l\'ID par défaut:', userId);
-      }
-      
-      const opportunity = await this.opportunityService.update(+id, updateOpportunityDto, userId);
+      const opportunity = await this.opportunityService.update(databaseName, organisationId, +id, updateOpportunityDto, userId);
       return {
         success: true,
         message: 'Opportunité mise à jour avec succès',
         data: opportunity,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.update] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -266,17 +263,24 @@ export class OpportunityController {
   /**
    * Supprimer une opportunité
    * DELETE /api/crm/opportunities/:id
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Delete(':id')
   @Roles('admin')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Req() req) {
     try {
-      await this.opportunityService.remove(+id);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log(`🏢 [Opportunity.remove] DB: ${databaseName}, Org: ${organisationId}, ID: ${id}`);
+      
+      await this.opportunityService.remove(databaseName, organisationId, +id);
       return {
         success: true,
         message: 'Opportunité supprimée avec succès',
       };
     } catch (error) {
+      console.error('❌ [Opportunity.remove] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -288,17 +292,24 @@ export class OpportunityController {
   /**
    * Convertir un prospect en opportunité
    * POST /api/crm/opportunities/convert-from-lead/:leadId
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Post('convert-from-lead/:leadId')
-  // @Roles('commercial', 'admin') // Temporairement désactivé pour debug
+  @Roles('commercial', 'admin')
   async convertFromLead(
     @Param('leadId') leadId: string,
-    @Body() rawBody: any, // Accepter d'abord les données brutes
-    @Request() req,
+    @Body() rawBody: any,
+    @Req() req,
   ) {
     try {
       console.log('🔍 DEBUG CONVERSION - Lead ID:', leadId);
       console.log('🔍 DEBUG CONVERSION - Données brutes reçues:', JSON.stringify(rawBody, null, 2));
+      
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const userId = req.user?.userId || req.user?.id || 1;
+      
+      console.log(`🏢 [Opportunity.convertFromLead] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}, Lead ID: ${leadId}`);
       
       // Transformer engineTypes (array) en engineType (single) si nécessaire
       const convertDto = { ...rawBody };
@@ -311,7 +322,6 @@ export class OpportunityController {
           convertDto.engineType = parsedEngineType;
           console.log('🔄 CONVERT - Conversion engineTypes -> engineType:', firstEngineId, '->', parsedEngineType);
         }
-        // Supprimer engineTypes pour éviter confusion
         delete convertDto.engineTypes;
       }
       
@@ -323,43 +333,19 @@ export class OpportunityController {
           convertDto.engineType = parsedEngineType;
           console.log('🔄 CONVERT - Conversion vehicleTypes -> engineType:', firstVehicleType, '->', parsedEngineType);
         }
-        // Supprimer vehicleTypes pour éviter confusion
         delete convertDto.vehicleTypes;
       }
       
       console.log('🔍 DEBUG CONVERSION - Données après transformation:', JSON.stringify(convertDto, null, 2));
-      // Priorité : utilisateur authentifié > header personnalisé > défaut
-      let userId = 1; // ID par défaut (administratif)
-      let userInfo = 'Utilisateur par défaut (ID: 1)';
       
-      if (req.user && req.user.id) {
-        // Utilisateur authentifié via JWT
-        userId = req.user.id;
-        userInfo = `${req.user.username || 'N/A'} (ID: ${userId}, Rôle: ${req.user.role || 'N/A'})`;
-        console.log('👤 Utilisateur authentifié pour conversion:', { 
-          id: userId, 
-          username: req.user.username, 
-          role: req.user.role 
-        });
-      } else if (req.headers['x-user-id']) {
-        // Header personnalisé pour l'ID utilisateur
-        const headerUserId = parseInt(req.headers['x-user-id'] as string, 10);
-        if (!isNaN(headerUserId) && headerUserId > 0) {
-          userId = headerUserId;
-          userInfo = `Via header (ID: ${userId})`;
-          console.log('👤 Utilisateur via header pour conversion:', { id: userId });
-        }
-      } else {
-        console.warn('⚠️ Pas d\'utilisateur identifié, utilisation de l\'ID par défaut:', userId);
-      }
-      
-      const opportunity = await this.opportunityService.convertFromLead(+leadId, convertDto, userId);
+      const opportunity = await this.opportunityService.convertFromLead(databaseName, organisationId, +leadId, convertDto, userId);
       return {
         success: true,
         message: 'Prospect converti en opportunité avec succès',
         data: opportunity,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.convertFromLead] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -371,19 +357,27 @@ export class OpportunityController {
   /**
    * Obtenir les statistiques des opportunités
    * GET /api/crm/opportunities/stats
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Get('stats/summary')
-  async getStats(@Query('userId') userId?: string, @Request() req?) {
+  async getStats(@Query('userId') userId?: string, @Req() req?) {
     try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
       // Utiliser l'ID fourni ou celui de l'utilisateur authentifié
-      const targetUserId = userId ? +userId : (req.user?.id || null);
-      const stats = await this.opportunityService.getStats(targetUserId);
+      const targetUserId = userId ? +userId : (req.user?.userId || req.user?.id || null);
+      
+      console.log(`🏢 [Opportunity.getStats] DB: ${databaseName}, Org: ${organisationId}, User: ${targetUserId}`);
+      
+      const stats = await this.opportunityService.getStats(databaseName, organisationId, targetUserId);
       return {
         success: true,
         message: 'Statistiques récupérées avec succès',
         data: stats,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.getStats] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -395,23 +389,29 @@ export class OpportunityController {
   /**
    * Changer le stage d'une opportunité
    * PATCH /api/crm/opportunities/:id/stage
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Patch(':id/stage')
   @Roles('commercial', 'admin')
   async changeStage(
     @Param('id') id: string,
     @Body() body: { stage: string; wonDescription?: string; lostReason?: string; lostToCompetitor?: string },
-    @Request() req,
+    @Req() req,
   ) {
     try {
-      // Vérifier que l'utilisateur est authentifié
-      if (!req.user || !req.user.id) {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const userId = req.user?.userId || req.user?.id;
+      
+      if (!userId) {
         return {
           success: false,
           message: 'Utilisateur non authentifié',
           error: 'UNAUTHORIZED',
         };
       }
+      
+      console.log(`🏢 [Opportunity.changeStage] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}, ID: ${id}`);
       
       const updateData: UpdateOpportunityDto = { stage: body.stage as any };
       
@@ -427,13 +427,14 @@ export class OpportunityController {
         updateData.lostToCompetitor = body.lostToCompetitor;
       }
 
-      const opportunity = await this.opportunityService.update(+id, updateData, req.user.id);
+      const opportunity = await this.opportunityService.update(databaseName, organisationId, +id, updateData, userId);
       return {
         success: true,
         message: 'Stage de l\'opportunité mis à jour avec succès',
         data: opportunity,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.changeStage] Erreur:', error);
       return {
         success: false,
         message: error.message,
@@ -445,10 +446,16 @@ export class OpportunityController {
   /**
    * Obtenir les opportunités par stage (pour kanban)
    * GET /api/crm/opportunities/by-stage
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
    */
   @Get('by-stage/all')
-  async getByStage(@Query('assignedToId') assignedToId?: string) {
+  async getByStage(@Query('assignedToId') assignedToId?: string, @Req() req?) {
     try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log(`🏢 [Opportunity.getByStage] DB: ${databaseName}, Org: ${organisationId}`);
+      
       const stages = ['prospecting', 'qualification', 'needs_analysis', 'proposal', 'negotiation'];
       const result = {};
 
@@ -457,7 +464,7 @@ export class OpportunityController {
         if (assignedToId) {
           query.assignedToId = +assignedToId;
         }
-        const stageData = await this.opportunityService.findAll(query);
+        const stageData = await this.opportunityService.findAll(databaseName, organisationId, query);
         result[stage] = stageData.data;
       }
 
@@ -467,6 +474,80 @@ export class OpportunityController {
         data: result,
       };
     } catch (error) {
+      console.error('❌ [Opportunity.getByStage] Erreur:', error);
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * 🗄️ Archiver une opportunité
+   * POST /api/crm/opportunities/:id/archive
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
+   */
+  @Post(':id/archive')
+  @Roles('commercial', 'admin')
+  async archiveOpportunity(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @Req() req,
+  ) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const userId = req.user?.userId || req.user?.id;
+      
+      if (!userId) {
+        return {
+          success: false,
+          message: 'Utilisateur non authentifié',
+          error: 'UNAUTHORIZED',
+        };
+      }
+      
+      console.log(`🏢 [Opportunity.archive] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}, ID: ${id}`);
+      
+      const opportunity = await this.opportunityService.archiveOpportunity(databaseName, organisationId, +id, body.reason, userId);
+      return {
+        success: true,
+        message: 'Opportunité archivée avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      console.error('❌ [Opportunity.archive] Erreur:', error);
+      return {
+        success: false,
+        message: error.message,
+        error: error.name,
+      };
+    }
+  }
+
+  /**
+   * ♻️ Restaurer une opportunité archivée
+   * POST /api/crm/opportunities/:id/restore
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le JWT
+   */
+  @Post(':id/restore')
+  @Roles('commercial', 'admin')
+  async restoreOpportunity(@Param('id') id: string, @Req() req) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log(`🏢 [Opportunity.restore] DB: ${databaseName}, Org: ${organisationId}, ID: ${id}`);
+      
+      const opportunity = await this.opportunityService.restoreOpportunity(databaseName, organisationId, +id);
+      return {
+        success: true,
+        message: 'Opportunité restaurée avec succès',
+        data: opportunity,
+      };
+    } catch (error) {
+      console.error('❌ [Opportunity.restore] Erreur:', error);
       return {
         success: false,
         message: error.message,

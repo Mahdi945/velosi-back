@@ -22,6 +22,7 @@ import { TokenAuthGuard } from '../auth/token-auth.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 
 @Controller('users')
 export class UsersController {
@@ -30,28 +31,38 @@ export class UsersController {
   @Post('clients')
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin', 'commercial')
-  async createClient(@Body() createClientDto: CreateClientDto) {
-    const client = await this.usersService.createClient(createClientDto);
-    return {
-      message: 'Client créé avec succès',
-      client: {
-        id: client.id,
-        nom: client.nom,
-        interlocuteur: client.interlocuteur,
-        adresse: client.adresse,
-        ville: client.ville,
-        pays: client.pays,
-        created_at: client.created_at,
-      },
-    };
+  async createClient(@Body() createClientDto: CreateClientDto, @Request() req: any) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log('📥 [createClient] Création client pour DB:', databaseName, 'Org:', organisationId);
+      const client = await this.usersService.createClient(databaseName, organisationId, createClientDto);
+      console.log('✅ [createClient] Client créé avec succès:', client.id, client.nom);
+      console.log('📤 [createClient] Données retournées:', JSON.stringify(client, null, 2));
+      
+      return {
+        success: true,
+        message: 'Client créé avec succès',
+        data: client, // Retourner toutes les données du client
+      };
+    } catch (error) {
+      console.error('❌ [createClient] Erreur:', error);
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la création du client',
+        error: error.message,
+      };
+    }
   }
 
   @Post('personnel')
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin', 'superviseur')
-  async createPersonnel(@Body() createPersonnelDto: CreatePersonnelDto) {
+  async createPersonnel(@Body() createPersonnelDto: CreatePersonnelDto, @Request() req: any) {
     try {
-      const personnel = await this.usersService.createPersonnel(createPersonnelDto);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const personnel = await this.usersService.createPersonnel(databaseName, organisationId, createPersonnelDto);
       return {
         success: true,
         message: 'Personnel créé avec succès',
@@ -82,6 +93,8 @@ export class UsersController {
     try {
       console.log('🔍 [GET /users/clients] Requête reçue');
       console.log('👤 [GET /users/clients] Utilisateur:', req.user?.username);
+      console.log('🏢 [GET /users/clients] Database:', req.user?.databaseName);
+      console.log('🏛️ [GET /users/clients] Organisation:', req.user?.organisationId);
       console.log('📥 [GET /users/clients] Headers:', Object.keys(req.headers));
       console.log('🔐 [GET /users/clients] Authorization header:', req.headers.authorization ? 'Présent' : 'Absent');
       const clients = await this.usersService.getAllClients(req.user);
@@ -105,10 +118,18 @@ export class UsersController {
   @Get('personnel')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('administratif', 'admin', 'commercial', 'client')
-  async getAllPersonnel() {
+  async getAllPersonnel(@Request() req) {
     try {
       console.log('🔍 [GET /users/personnel] Requête reçue');
-      const personnel = await this.usersService.getAllPersonnel();
+      console.log('👤 [GET /users/personnel] Utilisateur:', req.user?.username);
+      console.log('🏢 [GET /users/personnel] Database (req.user):', req.user?.databaseName);
+      console.log('🏛️ [GET /users/personnel] Organisation (req.user):', req.user?.organisationId);
+      console.log('🏢 [GET /users/personnel] Database (interceptor):', req.organisationDatabase);
+      console.log('🏛️ [GET /users/personnel] Organisation (interceptor):', req.organisationId);
+      
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const personnel = await this.usersService.getAllPersonnel(databaseName, organisationId);
       console.log('✅ [GET /users/personnel] Personnel récupéré:', personnel.length);
       return {
         success: true,
@@ -126,11 +147,25 @@ export class UsersController {
   }
 
   @Get('personnel/commerciaux')
-  async getCommerciaux() {
+  @UseGuards(JwtAuthGuard)
+  async getCommerciaux(@Request() req) {
     try {
-      // Endpoint public pour récupérer la liste des commerciaux
-      // Utile pour les listes déroulantes dans les formulaires
-      const personnel = await this.usersService.getPersonnelByRole(['commercial', 'Commercial', 'COMMERCIAL', 'sales']);
+      console.log('🔍 [GET /users/personnel/commerciaux] Requête reçue');
+      console.log('👤 [GET /users/personnel/commerciaux] Utilisateur:', req.user?.username);
+      console.log('🏢 [GET /users/personnel/commerciaux] Database (req.user):', req.user?.databaseName);
+      console.log('🏛️ [GET /users/personnel/commerciaux] Organisation (req.user):', req.user?.organisationId);
+      console.log('🏢 [GET /users/personnel/commerciaux] Database (interceptor):', req.organisationDatabase);
+      console.log('🏛️ [GET /users/personnel/commerciaux] Organisation (interceptor):', req.organisationId);
+      
+      // Récupérer le databaseName depuis les helpers multi-tenant
+      const databaseName = getDatabaseName(req);
+      
+      const personnel = await this.usersService.getPersonnelByRole(
+        ['commercial', 'Commercial', 'COMMERCIAL', 'sales'],
+        databaseName
+      );
+      
+      console.log(`✅ [GET /users/personnel/commerciaux] ${personnel.length} commerciaux trouvés`);
       
       // Ne retourner que les informations nécessaires (pas de données sensibles)
       const commerciaux = personnel.map(p => ({
@@ -147,6 +182,7 @@ export class UsersController {
         data: commerciaux,
       };
     } catch (error) {
+      console.error('❌ [GET /users/personnel/commerciaux] Erreur:', error);
       return {
         success: false,
         message: 'Erreur lors de la récupération des commerciaux',
@@ -170,8 +206,10 @@ export class UsersController {
         };
       }
 
-      const client = await this.usersService.getClientById(currentUser.id);
-      const clientData = await this.usersService.getClientWithContactData(currentUser.id);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const client = await this.usersService.getClientById(databaseName, organisationId, currentUser.id);
+      const clientData = await this.usersService.getClientWithContactData(databaseName, organisationId, currentUser.id);
       
       console.log('📋 [getMyClientData] Données client récupérées:', {
         id: clientData?.id,
@@ -196,14 +234,26 @@ export class UsersController {
   }
 
   @Get('clients/:id')
-  @UseGuards(TokenAuthGuard, RolesGuard)
-  @Roles('administratif', 'admin', 'commercial')
-  async getClientById(@Param('id', ParseIntPipe) id: number) {
-    const client = await this.usersService.getClientById(id);
-    return {
-      message: 'Client récupéré avec succès',
-      client,
-    };
+  @UseGuards(JwtAuthGuard)
+  async getClientById(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log('👤 [getClientById] DB:', databaseName, 'Org:', organisationId, 'ID:', id);
+      const client = await this.usersService.getClientById(databaseName, organisationId, id);
+      return {
+        success: true,
+        message: 'Client récupéré avec succès',
+        data: client,
+      };
+    } catch (error) {
+      console.error('❌ [getClientById] Erreur:', error);
+      return {
+        success: false,
+        message: error.message || 'Client introuvable',
+        data: null,
+      };
+    }
   }
 
   @Put('clients/:id')
@@ -215,11 +265,12 @@ export class UsersController {
     @Request() req: any
   ) {
     try {
-      const currentUser = req.user;
-      console.log('🔄 [updateClient] Utilisateur connecté:', currentUser);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log('🔄 [updateClient] DB:', databaseName, 'Org:', organisationId);
       console.log('🔄 [updateClient] ID client à modifier:', id);
       
-      const client = await this.usersService.updateClient(id, updateClientDto);
+      const client = await this.usersService.updateClient(databaseName, organisationId, id, updateClientDto);
       return {
         success: true,
         message: 'Client modifié avec succès',
@@ -236,14 +287,26 @@ export class UsersController {
   }
 
   @Get('personnel/:id')
-  @UseGuards(TokenAuthGuard, RolesGuard)
-  @Roles('administratif', 'admin')
-  async getPersonnelById(@Param('id', ParseIntPipe) id: number) {
-    const personnel = await this.usersService.getPersonnelById(id);
-    return {
-      message: 'Personnel récupéré avec succès',
-      personnel,
-    };
+  @UseGuards(JwtAuthGuard)
+  async getPersonnelById(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log('👤 [getPersonnelById] DB:', databaseName, 'Org:', organisationId, 'ID:', id);
+      const personnel = await this.usersService.getPersonnelById(databaseName, organisationId, id);
+      return {
+        success: true,
+        message: 'Personnel récupéré avec succès',
+        data: personnel,
+      };
+    } catch (error) {
+      console.error('❌ [getPersonnelById] Erreur:', error);
+      return {
+        success: false,
+        message: error.message || 'Personnel introuvable',
+        data: null,
+      };
+    }
   }
 
   @Put('personnel/:id')
@@ -273,7 +336,9 @@ export class UsersController {
         };
       }
       
-      const personnel = await this.usersService.updatePersonnel(id, updatePersonnelDto);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      const personnel = await this.usersService.updatePersonnel(databaseName, organisationId, id, updatePersonnelDto);
       return {
         success: true,
         message: 'Personnel modifié avec succès',
@@ -292,8 +357,10 @@ export class UsersController {
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
   @HttpCode(HttpStatus.OK)
-  async blockClient(@Param('id', ParseIntPipe) id: number) {
-    await this.usersService.blockClient(id);
+  async blockClient(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.blockClient(databaseName, organisationId, id);
     return {
       message: 'Client bloqué avec succès',
     };
@@ -303,8 +370,10 @@ export class UsersController {
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
   @HttpCode(HttpStatus.OK)
-  async unblockClient(@Param('id', ParseIntPipe) id: number) {
-    await this.usersService.unblockClient(id);
+  async unblockClient(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.unblockClient(databaseName, organisationId, id);
     return {
       message: 'Client débloqué avec succès',
     };
@@ -316,9 +385,12 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async deactivatePersonnel(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { reason?: string }
+    @Body() body: { reason?: string },
+    @Request() req: any
   ) {
-    await this.usersService.deactivatePersonnel(id, body.reason);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.deactivatePersonnel(databaseName, organisationId, id, body.reason);
     return {
       message: 'Personnel désactivé avec succès',
       success: true
@@ -331,9 +403,12 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async suspendPersonnel(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { reason?: string }
+    @Body() body: { reason?: string },
+    @Request() req: any
   ) {
-    await this.usersService.suspendPersonnel(id, body.reason);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.suspendPersonnel(databaseName, organisationId, id, body.reason);
     return {
       message: 'Personnel suspendu avec succès',
       success: true
@@ -344,8 +419,10 @@ export class UsersController {
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
   @HttpCode(HttpStatus.OK)
-  async activatePersonnel(@Param('id', ParseIntPipe) id: number) {
-    await this.usersService.activatePersonnel(id);
+  async activatePersonnel(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.activatePersonnel(databaseName, organisationId, id);
     return {
       message: 'Personnel activé avec succès',
       success: true
@@ -357,9 +434,12 @@ export class UsersController {
   @Roles('administratif', 'admin')
   @HttpCode(HttpStatus.OK)
   async reactivatePersonnel(
-    @Param('id', ParseIntPipe) id: number
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: any
   ) {
-    await this.usersService.reactivatePersonnel(id);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.reactivatePersonnel(databaseName, organisationId, id);
     return {
       message: 'Personnel réactivé avec succès',
       success: true
@@ -372,9 +452,12 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async updatePersonnelPassword(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { newPassword: string }
+    @Body() body: { newPassword: string },
+    @Request() req: any,
   ) {
-    await this.usersService.updatePersonnelPassword(id, body.newPassword);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.updatePersonnelPassword(databaseName, organisationId, id, body.newPassword);
     return {
       message: 'Mot de passe mis à jour avec succès',
       success: true
@@ -384,23 +467,49 @@ export class UsersController {
   @Get('personnel/:id/activity')
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
-  async getPersonnelActivity(@Param('id', ParseIntPipe) id: number) {
-    return await this.usersService.getPersonnelActivity(id);
+  async getPersonnelActivity(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log(`🔍 [getPersonnelActivity] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+      return await this.usersService.getPersonnelActivity(databaseName, organisationId, id);
+    } catch (error) {
+      console.error(`❌ [getPersonnelActivity] Erreur pour personnel ${id}:`, error);
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la récupération de l\'activité',
+        data: [],
+      };
+    }
   }
 
   @Get('personnel/:id/sessions')
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
-  async getPersonnelSessions(@Param('id', ParseIntPipe) id: number) {
-    return await this.usersService.getPersonnelSessions(id);
+  async getPersonnelSessions(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    try {
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      console.log(`🔍 [getPersonnelSessions] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+      return await this.usersService.getPersonnelSessions(databaseName, organisationId, id);
+    } catch (error) {
+      console.error(`❌ [getPersonnelSessions] Erreur pour personnel ${id}:`, error);
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la récupération des sessions',
+        sessions: [],
+      };
+    }
   }
 
   @Post('personnel/:id/logout-all')
   @UseGuards(TokenAuthGuard, RolesGuard)
   @Roles('administratif', 'admin')
   @HttpCode(HttpStatus.OK)
-  async logoutAllPersonnelSessions(@Param('id', ParseIntPipe) id: number) {
-    return await this.usersService.logoutAllPersonnelSessions(id);
+  async logoutAllPersonnelSessions(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    return await this.usersService.logoutAllPersonnelSessions(databaseName, organisationId, id);
   }
 
   @Delete('personnel/:id')
@@ -409,10 +518,13 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async deletePersonnel(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { reason?: string }
+    @Body() body: { reason?: string },
+    @Request() req: any
   ) {
     try {
-      await this.usersService.deletePersonnel(id, body.reason);
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      await this.usersService.deletePersonnel(databaseName, organisationId, id, body.reason);
       return {
         success: true,
         message: 'Personnel supprimé avec succès'
@@ -432,9 +544,12 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async deactivateClient(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { statut: string; motif: string; notifyByEmail: boolean }
+    @Body() body: { statut: string; motif: string; notifyByEmail: boolean },
+    @Request() req: any
   ) {
-    await this.usersService.deactivateClient(id, body.statut, body.motif, body.notifyByEmail);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.deactivateClient(databaseName, organisationId, id, body.statut, body.motif, body.notifyByEmail);
     return {
       message: `Client ${body.statut === 'desactive' ? 'désactivé' : 'suspendu'} avec succès`,
       success: true
@@ -447,9 +562,12 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   async reactivateClient(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { notifyByEmail: boolean }
+    @Body() body: { notifyByEmail: boolean },
+    @Request() req: any
   ) {
-    await this.usersService.reactivateClient(id, body.notifyByEmail);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    await this.usersService.reactivateClient(databaseName, organisationId, id, body.notifyByEmail);
     return {
       message: 'Client réactivé avec succès',
       success: true

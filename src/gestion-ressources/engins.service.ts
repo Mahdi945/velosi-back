@@ -1,22 +1,25 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+﻿import { Injectable, Scope, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Repository } from 'typeorm';
 import { Engin } from '../entities/engin.entity';
 import { CreateEnginDto, UpdateEnginDto, EnginFiltersDto } from './dto/engin.dto';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class EnginsService {
   constructor(
-    @InjectRepository(Engin)
-    private enginRepository: Repository<Engin>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
   /**
    * Récupérer tous les engins avec filtres et pagination
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async findAll(filters?: EnginFiltersDto): Promise<any> {
-    // Gérer is_active ou isActive
-    const isActiveValue = filters?.is_active !== undefined ? filters.is_active : filters?.isActive;
+  async findAll(databaseName: string, filters?: EnginFiltersDto): Promise<any> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
+    // Gérer is_active
+    const isActiveValue = filters?.is_active;
 
     // Pagination
     const page = filters?.page || 1;
@@ -24,7 +27,7 @@ export class EnginsService {
     const skip = (page - 1) * limit;
 
     // Construire la requête avec QueryBuilder pour gérer tous les filtres
-    const queryBuilder = this.enginRepository.createQueryBuilder('engin');
+    const queryBuilder = enginRepository.createQueryBuilder('engin');
 
     // Filtre par recherche (libelle, conteneur_remorque, description)
     if (filters?.search) {
@@ -78,9 +81,12 @@ export class EnginsService {
 
   /**
    * Récupérer un engin par ID
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async findOne(id: number): Promise<Engin> {
-    const engin = await this.enginRepository.findOne({ where: { id } });
+  async findOne(databaseName: string, id: number): Promise<Engin> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    const engin = await enginRepository.findOne({ where: { id } });
     
     if (!engin) {
       throw new NotFoundException(`Engin avec l'ID ${id} introuvable`);
@@ -91,10 +97,14 @@ export class EnginsService {
 
   /**
    * Créer un nouvel engin
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async create(createEnginDto: CreateEnginDto): Promise<Engin> {
+  async create(databaseName: string, createEnginDto: CreateEnginDto): Promise<Engin> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
     // Vérifier si un engin avec le même libellé existe déjà
-    const existingEngin = await this.enginRepository.findOne({
+    const existingEngin = await enginRepository.findOne({
       where: { libelle: createEnginDto.libelle },
     });
 
@@ -103,8 +113,8 @@ export class EnginsService {
     }
 
     try {
-      const engin = this.enginRepository.create(createEnginDto);
-      return await this.enginRepository.save(engin);
+      const engin = enginRepository.create(createEnginDto);
+      return await enginRepository.save(engin);
     } catch (error) {
       // Gérer l'erreur de clé primaire dupliquée
       if (error.code === '23505' && error.constraint === 'engin_pkey') {
@@ -118,13 +128,17 @@ export class EnginsService {
 
   /**
    * Mettre à jour un engin
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async update(id: number, updateEnginDto: UpdateEnginDto): Promise<Engin> {
-    const engin = await this.findOne(id);
+  async update(databaseName: string, id: number, updateEnginDto: UpdateEnginDto): Promise<Engin> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
+    const engin = await this.findOne(databaseName, id);
 
     // Vérifier si le libellé est unique (si modifié)
     if (updateEnginDto.libelle && updateEnginDto.libelle !== engin.libelle) {
-      const existingEngin = await this.enginRepository.findOne({
+      const existingEngin = await enginRepository.findOne({
         where: { libelle: updateEnginDto.libelle },
       });
 
@@ -134,31 +148,43 @@ export class EnginsService {
     }
 
     Object.assign(engin, updateEnginDto);
-    return this.enginRepository.save(engin);
+    return enginRepository.save(engin);
   }
 
   /**
    * Supprimer un engin
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async remove(id: number): Promise<void> {
-    const engin = await this.findOne(id);
-    await this.enginRepository.remove(engin);
+  async remove(databaseName: string, id: number): Promise<void> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
+    const engin = await this.findOne(databaseName, id);
+    await enginRepository.remove(engin);
   }
 
   /**
    * Activer/Désactiver un engin
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async toggleActive(id: number): Promise<Engin> {
-    const engin = await this.findOne(id);
+  async toggleActive(databaseName: string, id: number): Promise<Engin> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
+    const engin = await this.findOne(databaseName, id);
     engin.isActive = !engin.isActive;
-    return this.enginRepository.save(engin);
+    return enginRepository.save(engin);
   }
 
   /**
    * Récupérer uniquement les engins actifs
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async findAllActive(): Promise<Engin[]> {
-    return this.enginRepository.find({
+  async findAllActive(databaseName: string): Promise<Engin[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
+    return enginRepository.find({
       where: { isActive: true },
       order: { libelle: 'ASC' },
     });
@@ -166,16 +192,20 @@ export class EnginsService {
 
   /**
    * Récupérer les statistiques
+   * ✅ MULTI-TENANT: Utilise databaseName (isolation par base de données)
    */
-  async getStats(): Promise<any> {
+  async getStats(databaseName: string): Promise<any> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const enginRepository = connection.getRepository(Engin);
+    
     const [total, actifs, inactifs] = await Promise.all([
-      this.enginRepository.count(),
-      this.enginRepository.count({ where: { isActive: true } }),
-      this.enginRepository.count({ where: { isActive: false } }),
+      enginRepository.count(),
+      enginRepository.count({ where: { isActive: true } }),
+      enginRepository.count({ where: { isActive: false } }),
     ]);
 
     // Grouper par taille (pied)
-    const parPied = await this.enginRepository
+    const parPied = await enginRepository
       .createQueryBuilder('engin')
       .select('engin.pied', 'pied')
       .addSelect('COUNT(*)', 'count')

@@ -9,15 +9,23 @@ import { Personnel } from '../../entities/personnel.entity';
 import { OpportunityService } from '../../services/crm/opportunity.service';
 import { Opportunity } from '../../entities/crm/opportunity.entity';
 import { Client } from '../../entities/client.entity';
+import { DatabaseModule } from '../../common/database.module';
 
 @Module({
   imports: [
+    DatabaseModule,
     TypeOrmModule.forFeature([Lead, Personnel, Opportunity, Client]),
   ],
-  controllers: [LeadController, LeadsController],
+  // ⚠️ DÉSACTIVATION DE L'ANCIEN CONTROLLER - Utiliser LeadsController à la place
+  // LeadController utilise @InjectRepository qui se connecte à velosi
+  // LeadsController utilise connection.query() multi-tenant
+  controllers: [
+    // LeadController, // ❌ ANCIEN - Utilise TypeORM (velosi uniquement)
+    LeadsController,   // ✅ NOUVEAU - Multi-tenant compatible
+  ],
   providers: [
-    LeadService,
-    LeadsService, // Service avec soft delete
+    LeadService,      // ⚠️ Garde pour la compatibilité, mais ne pas utiliser directement
+    LeadsService,     // ✅ Service avec soft delete et multi-tenant
     OpportunityService,
   ],
   exports: [LeadService, LeadsService],

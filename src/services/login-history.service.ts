@@ -1,11 +1,11 @@
-import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+﻿import { Injectable, Scope, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 import { LoginHistory, UserType, LoginStatus, LoginMethod } from '../entities/login-history.entity';
 import { Personnel } from '../entities/personnel.entity';
 import { Client } from '../entities/client.entity';
 import { Request } from 'express';
 import { LoginHistoryGateway } from '../gateway/login-history.gateway';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 /**
  * DTO pour créer une entrée d'historique de connexion
@@ -60,22 +60,35 @@ export class LoginHistoryService {
   private readonly logger = new Logger(LoginHistoryService.name);
 
   constructor(
-    @InjectRepository(LoginHistory)
-    private loginHistoryRepository: Repository<LoginHistory>,
-    @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    private readonly databaseConnectionService: DatabaseConnectionService,
     @Inject(forwardRef(() => LoginHistoryGateway))
     private loginHistoryGateway: LoginHistoryGateway,
   ) {}
 
   /**
+   * Obtenir les repositories dynamiques pour une base de données
+   */
+  private async getRepositories(databaseName: string) {
+    const dataSource = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    return {
+      loginHistoryRepository: dataSource.getRepository(LoginHistory),
+      personnelRepository: dataSource.getRepository(Personnel),
+      clientRepository: dataSource.getRepository(Client),
+    };
+  }
+
+  /**
    * Enregistrer une nouvelle connexion
    */
-  async createLoginEntry(dto: CreateLoginHistoryDto): Promise<LoginHistory> {
+  async createLoginEntry(
+    dto: CreateLoginHistoryDto,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<LoginHistory> {
+    console.log(`🏢 [createLoginEntry] DB: ${databaseName}, Org: ${organisationId}`);
     try {
-      const loginEntry = this.loginHistoryRepository.create({
+      const { loginHistoryRepository } = await this.getRepositories(databaseName);
+      const loginEntry = loginHistoryRepository.create({
         user_id: dto.userId,
         user_type: dto.userType,
         username: dto.username,
@@ -98,7 +111,7 @@ export class LoginHistoryService {
         login_time: new Date(),
       });
 
-      const saved = await this.loginHistoryRepository.save(loginEntry);
+      const saved = await loginHistoryRepository.save(loginEntry);
       
       this.logger.log(`✅ Connexion enregistrée: ${dto.userType} #${dto.userId} (${dto.username})`);
       
@@ -121,9 +134,15 @@ export class LoginHistoryService {
   /**
    * Enregistrer une déconnexion
    */
-  async recordLogout(loginHistoryId: number): Promise<LoginHistory> {
+  async recordLogout(
+    loginHistoryId: number,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<LoginHistory> {
+    console.log(`🏢 [recordLogout] DB: ${databaseName}, Org: ${organisationId}`);
     try {
-      const loginEntry = await this.loginHistoryRepository.findOne({
+      const { loginHistoryRepository } = await this.getRepositories(databaseName);
+      const loginEntry = await loginHistoryRepository.findOne({
         where: { id: loginHistoryId },
       });
 
@@ -134,7 +153,7 @@ export class LoginHistoryService {
       loginEntry.logout_time = new Date();
       loginEntry.session_duration = loginEntry.calculateSessionDuration();
 
-      const updated = await this.loginHistoryRepository.save(loginEntry);
+      const updated = await loginHistoryRepository.save(loginEntry);
       
       this.logger.log(`✅ Déconnexion enregistrée: ${loginEntry.user_type} #${loginEntry.user_id} - Durée: ${updated.getFormattedDuration()}`);
       
@@ -161,8 +180,12 @@ export class LoginHistoryService {
     userId: number,
     userType: UserType,
     options: PaginationOptions = {},
+    databaseName: string,
+    organisationId: number,
   ): Promise<PaginatedLoginHistory> {
+    console.log(`🏢 [getUserLoginHistory] DB: ${databaseName}, Org: ${organisationId}`);
     try {
+      const { loginHistoryRepository } = await this.getRepositories(databaseName);
       const page = options.page || 1;
       const limit = options.limit || 10;
       const skip = (page - 1) * limit;
@@ -175,7 +198,7 @@ export class LoginHistoryService {
         limit
       });
 
-      const queryBuilder = this.loginHistoryRepository
+      const queryBuilder = loginHistoryRepository
         .createQueryBuilder('lh')
         .where('lh.user_id = :userId', { userId })
         .andWhere('lh.user_type = :userType', { userType });
@@ -223,8 +246,15 @@ export class LoginHistoryService {
   /**
    * Récupérer la dernière connexion d'un utilisateur
    */
-  async getLastLogin(userId: number, userType: UserType): Promise<LoginHistory | null> {
-    return await this.loginHistoryRepository.findOne({
+  async getLastLogin(
+    userId: number,
+    userType: UserType,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<LoginHistory | null> {
+    console.log(`🏢 [getLastLogin] DB: ${databaseName}, Org: ${organisationId}`);
+    const { loginHistoryRepository } = await this.getRepositories(databaseName);
+    return await loginHistoryRepository.findOne({
       where: { user_id: userId, user_type: userType, status: LoginStatus.SUCCESS },
       order: { login_time: 'DESC' },
     });
@@ -233,8 +263,15 @@ export class LoginHistoryService {
   /**
    * Récupérer les connexions actives d'un utilisateur
    */
-  async getActiveSessions(userId: number, userType: UserType): Promise<LoginHistory[]> {
-    return await this.loginHistoryRepository.find({
+  async getActiveSessions(
+    userId: number,
+    userType: UserType,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<LoginHistory[]> {
+    console.log(`🏢 [getActiveSessions] DB: ${databaseName}, Org: ${organisationId}`);
+    const { loginHistoryRepository } = await this.getRepositories(databaseName);
+    return await loginHistoryRepository.find({
       where: { 
         user_id: userId, 
         user_type: userType,
@@ -251,10 +288,14 @@ export class LoginHistoryService {
     userId: number,
     userType: UserType,
     minutesAgo: number = 15,
+    databaseName: string,
+    organisationId: number,
   ): Promise<number> {
+    console.log(`🏢 [countRecentFailedAttempts] DB: ${databaseName}, Org: ${organisationId}`);
+    const { loginHistoryRepository } = await this.getRepositories(databaseName);
     const since = new Date(Date.now() - minutesAgo * 60 * 1000);
     
-    return await this.loginHistoryRepository.count({
+    return await loginHistoryRepository.count({
       where: {
         user_id: userId,
         user_type: userType,
@@ -351,8 +392,12 @@ export class LoginHistoryService {
     fullName: string,
     loginMethod: LoginMethod = LoginMethod.PASSWORD,
     status: LoginStatus = LoginStatus.SUCCESS,
-    failureReason?: string,
+    failureReason: string | undefined,
+    databaseName: string,
+    organisationId: number,
   ): Promise<LoginHistory> {
+    console.log(`🏢 [createLoginFromRequest] DB: ${databaseName}, Org: ${organisationId}`);
+    const { personnelRepository } = await this.getRepositories(databaseName);
     const userAgent = req.headers['user-agent'] || '';
     const ipAddress = this.getIpAddress(req);
     const deviceInfo = this.parseUserAgent(userAgent);
@@ -365,7 +410,7 @@ export class LoginHistoryService {
 
     if (userType === UserType.PERSONNEL) {
       try {
-        const personnel = await this.personnelRepository.findOne({
+        const personnel = await personnelRepository.findOne({
           where: { id: userId },
           select: ['latitude', 'longitude', 'location_tracking_enabled', 'is_location_active']
         });
@@ -403,13 +448,18 @@ export class LoginHistoryService {
       loginMethod,
       status,
       failureReason,
-    });
+    }, databaseName, organisationId);
   }
 
   /**
    * Obtenir des statistiques de connexion
    */
-  async getLoginStatistics(userId: number, userType: UserType): Promise<{
+  async getLoginStatistics(
+    userId: number,
+    userType: UserType,
+    databaseName: string,
+    organisationId: number,
+  ): Promise<{
     totalLogins: number;
     successfulLogins: number;
     failedLogins: number;
@@ -418,7 +468,9 @@ export class LoginHistoryService {
     mostUsedDevice: string | null;
     mostUsedBrowser: string | null;
   }> {
-    const history = await this.loginHistoryRepository.find({
+    console.log(`🏢 [getLoginStatistics] DB: ${databaseName}, Org: ${organisationId}`);
+    const { loginHistoryRepository } = await this.getRepositories(databaseName);
+    const history = await loginHistoryRepository.find({
       where: { user_id: userId, user_type: userType },
     });
 
@@ -467,13 +519,18 @@ export class LoginHistoryService {
    * Fermer automatiquement les sessions expirées (8 heures)
    * À appeler régulièrement via un cron job ou scheduler
    */
-  async closeExpiredSessions(): Promise<number> {
+  async closeExpiredSessions(
+    databaseName: string,
+    organisationId: number,
+  ): Promise<number> {
+    console.log(`🏢 [closeExpiredSessions] DB: ${databaseName}, Org: ${organisationId}`);
     try {
+      const { loginHistoryRepository } = await this.getRepositories(databaseName);
       const sessionDuration = 8 * 60 * 60 * 1000; // 8 heures en millisecondes
       const expirationTime = new Date(Date.now() - sessionDuration);
 
       // Trouver toutes les sessions actives (sans logout_time) qui ont dépassé 8 heures
-      const expiredSessions = await this.loginHistoryRepository
+      const expiredSessions = await loginHistoryRepository
         .createQueryBuilder('lh')
         .where('lh.logout_time IS NULL')
         .andWhere('lh.login_time < :expirationTime', { expirationTime })
@@ -494,7 +551,7 @@ export class LoginHistoryService {
         session.logout_time = autoLogoutTime;
         session.session_duration = Math.floor(sessionDuration / 1000); // 8 heures en secondes (28800 secondes)
         
-        await this.loginHistoryRepository.save(session);
+        await loginHistoryRepository.save(session);
         
         this.logger.log(`✅ Session #${session.id} fermée automatiquement (User: ${session.user_type} #${session.user_id})`);
         
@@ -515,6 +572,3 @@ export class LoginHistoryService {
     }
   }
 }
-
-// Import nécessaire pour MoreThanOrEqual
-import { MoreThanOrEqual } from 'typeorm';

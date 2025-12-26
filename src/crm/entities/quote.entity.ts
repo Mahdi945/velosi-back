@@ -64,6 +64,10 @@ export class Quote extends BaseEntityWithSoftDelete {
   @JoinColumn({ name: 'client_id' })
   client: Client;
 
+  // 🏢 Multi-tenant: Organisation (utilisé pour récupérer les infos dans les vues publiques)
+  @Column({ name: 'organisation_id', nullable: false, default: 1 })
+  organisationId: number;
+
   // Informations du devis
   @Column({ length: 255 })
   title: string;

@@ -18,6 +18,7 @@ import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { VechatService } from './vechat.service';
 import { CreateMessageDto, UpdateMessageDto, MarkReadDto } from './dto/vechat.dto';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 
 @Controller('vechat')
 @UseGuards(JwtAuthGuard)
@@ -30,6 +31,10 @@ export class VechatController {
   async getConversations(
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     // Utiliser les informations de l'utilisateur connecté via JWT
     const userId = req.user.id;
     const userType = req.user.userType || 'personnel';
@@ -38,6 +43,8 @@ export class VechatController {
       userId,
       userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -51,12 +58,18 @@ export class VechatController {
     },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.createOrGetConversation(
       body.participant1_id,
       body.participant1_type,
       body.participant2_id,
       body.participant2_type,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -66,11 +79,17 @@ export class VechatController {
     @Body() body: { userId: number; userType: 'personnel' | 'client' },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.archiveConversation(
       parseInt(conversationId),
       body.userId,
       body.userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -80,12 +99,18 @@ export class VechatController {
     @Body() body: { userId: number; userType: 'personnel' | 'client'; muted: boolean },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.muteConversation(
       parseInt(conversationId),
       body.userId,
       body.userType,
       body.muted,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -95,11 +120,17 @@ export class VechatController {
     @Body() body: { userId: number; userType: 'personnel' | 'client' },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.resetUnreadCount(
       parseInt(conversationId),
       body.userId,
       body.userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -108,7 +139,11 @@ export class VechatController {
     @Param('id') conversationId: string,
     @Request() req: any,
   ) {
-    return this.vechatService.deleteConversation(parseInt(conversationId), req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.deleteConversation(parseInt(conversationId), req.user, databaseName, organisationId);
   }
 
   // === Messages ===
@@ -120,11 +155,17 @@ export class VechatController {
     @Query('limit') limit: string = '50',
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.getConversationMessages(
       parseInt(conversationId),
       parseInt(page),
       parseInt(limit),
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -133,7 +174,11 @@ export class VechatController {
     @Body() createMessageDto: CreateMessageDto,
     @Request() req: any,
   ) {
-    return this.vechatService.sendMessage(createMessageDto, req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.sendMessage(createMessageDto, req.user, databaseName, organisationId);
   }
 
   @Put('messages/:id')
@@ -142,10 +187,16 @@ export class VechatController {
     @Body() updateMessageDto: UpdateMessageDto,
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.updateMessage(
       parseInt(messageId),
       updateMessageDto,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -154,11 +205,17 @@ export class VechatController {
     @Param('id') messageId: string,
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.deleteMessage(
       parseInt(messageId),
       req.user.id,
       req.user.userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -167,7 +224,11 @@ export class VechatController {
     @Body() markReadDto: MarkReadDto,
     @Request() req: any,
   ) {
-    return this.vechatService.markMessagesAsRead(markReadDto.messageIds, req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.markMessagesAsRead(markReadDto.messageIds, req.user, databaseName, organisationId);
   }
 
   @Get('messages/search')
@@ -178,12 +239,18 @@ export class VechatController {
     @Query('limit') limit: string = '20',
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.searchMessages(
       parseInt(conversationId),
       query,
       parseInt(page),
       parseInt(limit),
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -200,12 +267,18 @@ export class VechatController {
     },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.uploadFile(
       file,
       parseInt(body.receiver_id),
       body.receiver_type,
       body.message_type,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -220,12 +293,18 @@ export class VechatController {
     },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.uploadVoiceMessage(
       file,
       parseInt(body.receiver_id),
       body.receiver_type,
       parseInt(body.duration),
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -235,7 +314,11 @@ export class VechatController {
   async getAvailableContacts(
     @Request() req: any,
   ) {
-    return this.vechatService.getAvailableContacts(req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.getAvailableContacts(req.user, databaseName, organisationId);
   }
 
   @Get('contacts/search')
@@ -244,7 +327,11 @@ export class VechatController {
     @Query('type') type: 'personnel' | 'client' = 'personnel',
     @Request() req: any,
   ) {
-    return this.vechatService.searchContacts(query, type, req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.searchContacts(query, type, req.user, databaseName, organisationId);
   }
 
   // === Présence ===
@@ -258,11 +345,17 @@ export class VechatController {
     },
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.updatePresence(
       body.userId,
       body.userType,
       body.status,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -272,8 +365,12 @@ export class VechatController {
     @Query('userType') userType: 'personnel' | 'client',
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     const userIdArray = userIds.split(',').map(id => parseInt(id));
-    return this.vechatService.getPresenceStatus(userIdArray, userType, req.user);
+    return this.vechatService.getPresenceStatus(userIdArray, userType, req.user, databaseName, organisationId);
   }
 
   // === Paramètres ===
@@ -284,10 +381,16 @@ export class VechatController {
     @Query('userType') userType: 'personnel' | 'client',
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.getUserSettings(
       parseInt(userId),
       userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -306,7 +409,11 @@ export class VechatController {
     },
     @Request() req: any,
   ) {
-    return this.vechatService.updateUserSettings(body, req.user);
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    return this.vechatService.updateUserSettings(body, req.user, databaseName, organisationId);
   }
 
   // === Suppression de tous les messages ===
@@ -316,9 +423,15 @@ export class VechatController {
     @Param('conversationId') conversationId: string,
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.clearConversationMessages(
       parseInt(conversationId),
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 
@@ -330,10 +443,16 @@ export class VechatController {
     @Query('userType') userType: 'personnel' | 'client',
     @Request() req: any,
   ) {
+    // 🏢 Extraire les informations multi-tenant
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
     return this.vechatService.getChatStatistics(
       parseInt(userId),
       userType,
       req.user,
+      databaseName,
+      organisationId,
     );
   }
 

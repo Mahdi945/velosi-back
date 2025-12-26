@@ -1,10 +1,13 @@
-import { Controller, Get, Param, Query, ParseIntPipe, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Query, ParseIntPipe, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { LoginHistoryService, PaginatedLoginHistory } from '../services/login-history.service';
 import { UserType, LoginStatus, LoginMethod } from '../entities/login-history.entity';
 
 @ApiTags('Login History')
 @Controller('login-history')
+@UseGuards(JwtAuthGuard)
 export class LoginHistoryController {
   constructor(private readonly loginHistoryService: LoginHistoryService) {}
 
@@ -23,6 +26,7 @@ export class LoginHistoryController {
   @ApiQuery({ name: 'startDate', required: false, type: String, description: 'Date de début (ISO 8601)' })
   @ApiQuery({ name: 'endDate', required: false, type: String, description: 'Date de fin (ISO 8601)' })
   async getPersonnelLoginHistory(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
@@ -31,6 +35,7 @@ export class LoginHistoryController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ): Promise<PaginatedLoginHistory> {
+    const { databaseName, organisationId } = req.user as any;
     return await this.loginHistoryService.getUserLoginHistory(
       id,
       UserType.PERSONNEL,
@@ -42,6 +47,8 @@ export class LoginHistoryController {
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       },
+      databaseName,
+      organisationId,
     );
   }
 
@@ -60,6 +67,7 @@ export class LoginHistoryController {
   @ApiQuery({ name: 'startDate', required: false, type: String, description: 'Date de début (ISO 8601)' })
   @ApiQuery({ name: 'endDate', required: false, type: String, description: 'Date de fin (ISO 8601)' })
   async getClientLoginHistory(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) id: number,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
@@ -68,6 +76,7 @@ export class LoginHistoryController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ): Promise<PaginatedLoginHistory> {
+    const { databaseName, organisationId } = req.user as any;
     return await this.loginHistoryService.getUserLoginHistory(
       id,
       UserType.CLIENT,
@@ -79,6 +88,8 @@ export class LoginHistoryController {
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       },
+      databaseName,
+      organisationId,
     );
   }
 
@@ -89,8 +100,12 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer la dernière connexion d\'un personnel' })
   @ApiResponse({ status: 200, description: 'Dernière connexion récupérée' })
-  async getPersonnelLastLogin(@Param('id', ParseIntPipe) id: number) {
-    const lastLogin = await this.loginHistoryService.getLastLogin(id, UserType.PERSONNEL);
+  async getPersonnelLastLogin(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    const lastLogin = await this.loginHistoryService.getLastLogin(id, UserType.PERSONNEL, databaseName, organisationId);
     return lastLogin || { message: 'Aucune connexion trouvée' };
   }
 
@@ -101,8 +116,12 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer la dernière connexion d\'un client' })
   @ApiResponse({ status: 200, description: 'Dernière connexion récupérée' })
-  async getClientLastLogin(@Param('id', ParseIntPipe) id: number) {
-    const lastLogin = await this.loginHistoryService.getLastLogin(id, UserType.CLIENT);
+  async getClientLastLogin(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    const lastLogin = await this.loginHistoryService.getLastLogin(id, UserType.CLIENT, databaseName, organisationId);
     return lastLogin || { message: 'Aucune connexion trouvée' };
   }
 
@@ -113,8 +132,12 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer les sessions actives d\'un personnel' })
   @ApiResponse({ status: 200, description: 'Sessions actives récupérées' })
-  async getPersonnelActiveSessions(@Param('id', ParseIntPipe) id: number) {
-    return await this.loginHistoryService.getActiveSessions(id, UserType.PERSONNEL);
+  async getPersonnelActiveSessions(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    return await this.loginHistoryService.getActiveSessions(id, UserType.PERSONNEL, databaseName, organisationId);
   }
 
   /**
@@ -124,8 +147,12 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer les sessions actives d\'un client' })
   @ApiResponse({ status: 200, description: 'Sessions actives récupérées' })
-  async getClientActiveSessions(@Param('id', ParseIntPipe) id: number) {
-    return await this.loginHistoryService.getActiveSessions(id, UserType.CLIENT);
+  async getClientActiveSessions(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    return await this.loginHistoryService.getActiveSessions(id, UserType.CLIENT, databaseName, organisationId);
   }
 
   /**
@@ -135,8 +162,12 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer les statistiques de connexion d\'un personnel' })
   @ApiResponse({ status: 200, description: 'Statistiques récupérées' })
-  async getPersonnelStatistics(@Param('id', ParseIntPipe) id: number) {
-    return await this.loginHistoryService.getLoginStatistics(id, UserType.PERSONNEL);
+  async getPersonnelStatistics(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    return await this.loginHistoryService.getLoginStatistics(id, UserType.PERSONNEL, databaseName, organisationId);
   }
 
   /**
@@ -146,7 +177,11 @@ export class LoginHistoryController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Récupérer les statistiques de connexion d\'un client' })
   @ApiResponse({ status: 200, description: 'Statistiques récupérées' })
-  async getClientStatistics(@Param('id', ParseIntPipe) id: number) {
-    return await this.loginHistoryService.getLoginStatistics(id, UserType.CLIENT);
+  async getClientStatistics(
+    @Req() req: Request,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const { databaseName, organisationId } = req.user as any;
+    return await this.loginHistoryService.getLoginStatistics(id, UserType.CLIENT, databaseName, organisationId);
   }
 }

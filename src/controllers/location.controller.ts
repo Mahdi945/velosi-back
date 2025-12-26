@@ -10,7 +10,10 @@ import {
   HttpException,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { LocationService } from '../services/location.service';
 import { 
   LocationUpdateDto, 
@@ -22,6 +25,7 @@ import {
 import { Personnel } from '../entities/personnel.entity';
 
 @Controller('location')
+@UseGuards(JwtAuthGuard)
 export class LocationController {
   constructor(private readonly locationService: LocationService) {}
 
@@ -31,13 +35,17 @@ export class LocationController {
    */
   @Post('personnel/:id/update')
   async updatePersonnelLocation(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) personnelId: number,
     @Body() locationData: LocationUpdateDto,
   ): Promise<{ success: boolean; data: Personnel; message: string }> {
     try {
+      const { databaseName, organisationId } = req.user as any;
       const updatedPersonnel = await this.locationService.updatePersonnelLocation(
         personnelId,
         locationData,
+        databaseName,
+        organisationId,
       );
 
       return {
@@ -62,13 +70,17 @@ export class LocationController {
    */
   @Put('personnel/:id/tracking')
   async toggleLocationTracking(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) personnelId: number,
     @Body() toggleData: LocationTrackingToggleDto,
   ): Promise<{ success: boolean; data: Personnel; message: string }> {
     try {
+      const { databaseName, organisationId } = req.user as any;
       const updatedPersonnel = await this.locationService.toggleLocationTracking(
         personnelId,
         toggleData.enabled,
+        databaseName,
+        organisationId,
       );
 
       return {
@@ -92,13 +104,16 @@ export class LocationController {
    * GET /location/personnel/all
    */
   @Get('personnel/all')
-  async getAllPersonnelWithLocation(): Promise<{
+  async getAllPersonnelWithLocation(
+    @Req() req: Request,
+  ): Promise<{
     success: boolean;
     data: Personnel[];
     count: number;
   }> {
     try {
-      const personnelList = await this.locationService.getAllPersonnelWithLocation();
+      const { databaseName, organisationId } = req.user as any;
+      const personnelList = await this.locationService.getAllPersonnelWithLocation(databaseName, organisationId);
 
       return {
         success: true,
@@ -121,13 +136,16 @@ export class LocationController {
    * GET /location/personnel/active
    */
   @Get('personnel/active')
-  async getActivePersonnelWithRecentLocation(): Promise<{
+  async getActivePersonnelWithRecentLocation(
+    @Req() req: Request,
+  ): Promise<{
     success: boolean;
     data: Personnel[];
     count: number;
   }> {
     try {
-      const activePersonnelList = await this.locationService.getActivePersonnelWithRecentLocation();
+      const { databaseName, organisationId } = req.user as any;
+      const activePersonnelList = await this.locationService.getActivePersonnelWithRecentLocation(databaseName, organisationId);
 
       return {
         success: true,
@@ -151,6 +169,7 @@ export class LocationController {
    */
   @Get('personnel/nearby')
   async findPersonnelNearby(
+    @Req() req: Request,
     @Query('lat') latitude: number,
     @Query('lng') longitude: number,
     @Query('radius') radius?: number,
@@ -170,11 +189,14 @@ export class LocationController {
         );
       }
 
+      const { databaseName, organisationId } = req.user as any;
       const searchRadius = radius || 5;
       const nearbyPersonnel = await this.locationService.findPersonnelNearby(
         Number(latitude),
         Number(longitude),
         searchRadius,
+        databaseName,
+        organisationId,
       );
 
       return {
@@ -201,10 +223,12 @@ export class LocationController {
    */
   @Get('personnel/:id')
   async getPersonnelLocation(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) personnelId: number,
   ): Promise<{ success: boolean; data: Personnel | null }> {
     try {
-      const personnelList = await this.locationService.getAllPersonnelWithLocation();
+      const { databaseName, organisationId } = req.user as any;
+      const personnelList = await this.locationService.getAllPersonnelWithLocation(databaseName, organisationId);
       const personnel = personnelList.find(p => p.id === personnelId);
 
       return {
@@ -227,12 +251,15 @@ export class LocationController {
    * GET /location/stats
    */
   @Get('stats')
-  async getLocationStats(): Promise<{
+  async getLocationStats(
+    @Req() req: Request,
+  ): Promise<{
     success: boolean;
     data: LocationStatsResponseDto;
   }> {
     try {
-      const stats = await this.locationService.getLocationStats();
+      const { databaseName, organisationId } = req.user as any;
+      const stats = await this.locationService.getLocationStats(databaseName, organisationId);
 
       return {
         success: true,
@@ -254,12 +281,15 @@ export class LocationController {
    * POST /location/cleanup/inactive
    */
   @Post('cleanup/inactive')
-  async markInactiveLocations(): Promise<{
+  async markInactiveLocations(
+    @Req() req: Request,
+  ): Promise<{
     success: boolean;
     message: string;
   }> {
     try {
-      await this.locationService.markInactiveLocations();
+      const { databaseName, organisationId } = req.user as any;
+      await this.locationService.markInactiveLocations(databaseName, organisationId);
 
       return {
         success: true,
@@ -281,12 +311,15 @@ export class LocationController {
    * POST /location/cleanup/old
    */
   @Post('cleanup/old')
-  async cleanupOldLocations(): Promise<{
+  async cleanupOldLocations(
+    @Req() req: Request,
+  ): Promise<{
     success: boolean;
     message: string;
   }> {
     try {
-      await this.locationService.cleanupOldLocations();
+      const { databaseName, organisationId } = req.user as any;
+      await this.locationService.cleanupOldLocations(databaseName, organisationId);
 
       return {
         success: true,
@@ -309,10 +342,12 @@ export class LocationController {
    */
   @Get('personnel/:id/tracking-status')
   async getPersonnelTrackingStatus(
+    @Req() req: Request,
     @Param('id', ParseIntPipe) personnelId: number,
   ): Promise<{ location_tracking_enabled: boolean; is_location_active: boolean }> {
     try {
-      const personnel = await this.locationService.findPersonnelById(personnelId);
+      const { databaseName, organisationId } = req.user as any;
+      const personnel = await this.locationService.findPersonnelById(personnelId, databaseName, organisationId);
       
       if (!personnel) {
         throw new HttpException(

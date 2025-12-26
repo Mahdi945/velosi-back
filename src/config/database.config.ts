@@ -53,6 +53,9 @@ export const typeOrmConfig = (
     port: parseInt(configService.get('DB_PORT')) || 5432,
     username: configService.get('DB_USERNAME') || configService.get('DB_USER') || 'msp',
     password: configService.get('DB_PASSWORD') || '87Eq8384',
+    // ⚠️ BASE PAR DÉFAUT POUR TYPEORM (utilisée pour les services legacy non migrés)
+    // ATTENTION: Cette base est utilisée UNIQUEMENT pour les repositories @InjectRepository
+    // Les nouveaux services DOIVENT utiliser DatabaseConnectionService.getOrganisationConnection()
     database: configService.get('DB_DATABASE') || 'velosi',
     entities: [
       Client,

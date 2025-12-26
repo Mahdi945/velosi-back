@@ -1,140 +1,210 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { ContactClient } from '../entities/contact-client.entity';
-import { Client } from '../entities/client.entity';
 import { CreateContactClientDto, UpdateContactClientDto } from '../dto/contact-client.dto';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 @Injectable()
 export class ContactClientService {
   constructor(
-    @InjectRepository(ContactClient)
-    private contactClientRepository: Repository<ContactClient>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
-  async create(createContactClientDto: CreateContactClientDto): Promise<ContactClient> {
-    const client = await this.clientRepository.findOne({
-      where: { id: createContactClientDto.clientId }
-    });
+  /**
+   * Créer un contact client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async create(databaseName: string, createContactClientDto: CreateContactClientDto): Promise<ContactClient> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    if (!client) {
+    // Vérifier que le client existe
+    const client = await connection.query(
+      `SELECT * FROM client WHERE id = $1 LIMIT 1`,
+      [createContactClientDto.clientId]
+    );
+
+    if (!client || client.length === 0) {
       throw new NotFoundException(`Client avec l'ID ${createContactClientDto.clientId} non trouvé`);
     }
 
     // Si ce contact doit être principal, retirer le statut principal des autres contacts
     if (createContactClientDto.is_principal) {
-      await this.removePrincipalStatus(createContactClientDto.clientId);
+      await this.removePrincipalStatus(databaseName, createContactClientDto.clientId);
     }
 
-    const contactClient = this.contactClientRepository.create({
-      id_client: createContactClientDto.clientId,
-      nom: createContactClientDto.nom,
-      prenom: createContactClientDto.prenom,
-      tel1: createContactClientDto.tel1,
-      tel2: createContactClientDto.tel2,
-      tel3: createContactClientDto.tel3,
-      fax: createContactClientDto.fax,
-      mail1: createContactClientDto.mail1,
-      mail2: createContactClientDto.mail2,
-      fonction: createContactClientDto.fonction,
-      is_principal: createContactClientDto.is_principal || false,
-      client,
-    });
+    const result = await connection.query(
+      `INSERT INTO contact_client (id_client, nom, prenom, tel1, tel2, tel3, fax, mail1, mail2, fonction, is_principal, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+       RETURNING *`,
+      [
+        createContactClientDto.clientId,
+        createContactClientDto.nom,
+        createContactClientDto.prenom || null,
+        createContactClientDto.tel1 || null,
+        createContactClientDto.tel2 || null,
+        createContactClientDto.tel3 || null,
+        createContactClientDto.fax || null,
+        createContactClientDto.mail1 || null,
+        createContactClientDto.mail2 || null,
+        createContactClientDto.fonction || null,
+        createContactClientDto.is_principal || false,
+      ]
+    );
 
-    return this.contactClientRepository.save(contactClient);
+    return result[0];
   }
 
-  async findAll(): Promise<ContactClient[]> {
-    return this.contactClientRepository.find({
-      relations: ['client'],
-      order: { id_client: 'DESC', is_principal: 'DESC', id: 'DESC' },
-    });
+  /**
+   * Récupérer tous les contacts clients
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findAll(databaseName: string): Promise<ContactClient[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT cc.*, c.id as client_id, c.nom as client_nom
+       FROM contact_client cc
+       LEFT JOIN client c ON cc.id_client = c.id
+       ORDER BY cc.id_client DESC, cc.is_principal DESC, cc.id DESC`
+    );
   }
 
-  async findOne(id: number): Promise<ContactClient> {
-    const contactClient = await this.contactClientRepository.findOne({
-      where: { id },
-      relations: ['client'],
-    });
+  /**
+   * Récupérer un contact client par ID
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findOne(databaseName: string, id: number): Promise<ContactClient> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `SELECT cc.*, c.id as client_id, c.nom as client_nom
+       FROM contact_client cc
+       LEFT JOIN client c ON cc.id_client = c.id
+       WHERE cc.id = $1`,
+      [id]
+    );
 
-    if (!contactClient) {
+    if (!result || result.length === 0) {
       throw new NotFoundException(`Contact client avec l'ID ${id} non trouvé`);
     }
 
-    return contactClient;
+    return result[0];
   }
 
-  async findByClient(clientId: number): Promise<ContactClient[]> {
-    return this.contactClientRepository.find({
-      where: { id_client: clientId },
-      relations: ['client'],
-      order: { is_principal: 'DESC', id: 'DESC' },
-    });
+  /**
+   * Récupérer les contacts d'un client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findByClient(databaseName: string, clientId: number): Promise<ContactClient[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT cc.*, c.id as client_id, c.nom as client_nom
+       FROM contact_client cc
+       LEFT JOIN client c ON cc.id_client = c.id
+       WHERE cc.id_client = $1
+       ORDER BY cc.is_principal DESC, cc.id DESC`,
+      [clientId]
+    );
   }
 
-  async findPrincipalByClient(clientId: number): Promise<ContactClient | null> {
-    return this.contactClientRepository.findOne({
-      where: { id_client: clientId, is_principal: true },
-      relations: ['client'],
-    });
+  /**
+   * Récupérer le contact principal d'un client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findPrincipalByClient(databaseName: string, clientId: number): Promise<ContactClient | null> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `SELECT cc.*, c.id as client_id, c.nom as client_nom
+       FROM contact_client cc
+       LEFT JOIN client c ON cc.id_client = c.id
+       WHERE cc.id_client = $1 AND cc.is_principal = true
+       LIMIT 1`,
+      [clientId]
+    );
+
+    return result && result.length > 0 ? result[0] : null;
   }
 
-  async findByEmail(email: string): Promise<ContactClient | null> {
-    const contactClient = await this.contactClientRepository.findOne({
-      where: [
-        { mail1: email },
-        { mail2: email }
-      ],
-      relations: ['client'],
-    });
+  /**
+   * Rechercher un contact par email
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findByEmail(databaseName: string, email: string): Promise<ContactClient | null> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `SELECT cc.*, c.id as client_id, c.nom as client_nom
+       FROM contact_client cc
+       LEFT JOIN client c ON cc.id_client = c.id
+       WHERE cc.mail1 = $1 OR cc.mail2 = $1
+       LIMIT 1`,
+      [email]
+    );
 
-    return contactClient;
+    return result && result.length > 0 ? result[0] : null;
   }
 
-  async update(id: number, updateContactClientDto: UpdateContactClientDto): Promise<ContactClient> {
-    const contactClient = await this.findOne(id);
+  /**
+   * Mettre à jour un contact client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async update(databaseName: string, id: number, updateContactClientDto: UpdateContactClientDto): Promise<ContactClient> {
+    const contactClient = await this.findOne(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
     // Si ce contact doit devenir principal, retirer le statut principal des autres contacts
     if (updateContactClientDto.is_principal && !contactClient.is_principal) {
-      await this.removePrincipalStatus(contactClient.id_client, id);
+      await this.removePrincipalStatus(databaseName, contactClient.id_client, id);
     }
 
+    // Si le client change, vérifier qu'il existe
     if (updateContactClientDto.clientId && updateContactClientDto.clientId !== contactClient.id_client) {
-      const client = await this.clientRepository.findOne({
-        where: { id: updateContactClientDto.clientId }
-      });
+      const client = await connection.query(
+        `SELECT * FROM client WHERE id = $1 LIMIT 1`,
+        [updateContactClientDto.clientId]
+      );
 
-      if (!client) {
+      if (!client || client.length === 0) {
         throw new NotFoundException(`Client avec l'ID ${updateContactClientDto.clientId} non trouvé`);
       }
-
-      contactClient.client = client;
-      contactClient.id_client = updateContactClientDto.clientId;
     }
 
-    // Mettre à jour les champs
-    if (updateContactClientDto.nom !== undefined) contactClient.nom = updateContactClientDto.nom;
-    if (updateContactClientDto.prenom !== undefined) contactClient.prenom = updateContactClientDto.prenom;
-    if (updateContactClientDto.tel1 !== undefined) contactClient.tel1 = updateContactClientDto.tel1;
-    if (updateContactClientDto.tel2 !== undefined) contactClient.tel2 = updateContactClientDto.tel2;
-    if (updateContactClientDto.tel3 !== undefined) contactClient.tel3 = updateContactClientDto.tel3;
-    if (updateContactClientDto.fax !== undefined) contactClient.fax = updateContactClientDto.fax;
-    if (updateContactClientDto.mail1 !== undefined) contactClient.mail1 = updateContactClientDto.mail1;
-    if (updateContactClientDto.mail2 !== undefined) contactClient.mail2 = updateContactClientDto.mail2;
-    if (updateContactClientDto.fonction !== undefined) contactClient.fonction = updateContactClientDto.fonction;
-    if (updateContactClientDto.is_principal !== undefined) contactClient.is_principal = updateContactClientDto.is_principal;
+    await connection.query(
+      `UPDATE contact_client 
+       SET id_client = $1, nom = $2, prenom = $3, tel1 = $4, tel2 = $5, tel3 = $6, 
+           fax = $7, mail1 = $8, mail2 = $9, fonction = $10, is_principal = $11, updated_at = NOW()
+       WHERE id = $12`,
+      [
+        updateContactClientDto.clientId !== undefined ? updateContactClientDto.clientId : contactClient.id_client,
+        updateContactClientDto.nom !== undefined ? updateContactClientDto.nom : contactClient.nom,
+        updateContactClientDto.prenom !== undefined ? updateContactClientDto.prenom : contactClient.prenom,
+        updateContactClientDto.tel1 !== undefined ? updateContactClientDto.tel1 : contactClient.tel1,
+        updateContactClientDto.tel2 !== undefined ? updateContactClientDto.tel2 : contactClient.tel2,
+        updateContactClientDto.tel3 !== undefined ? updateContactClientDto.tel3 : contactClient.tel3,
+        updateContactClientDto.fax !== undefined ? updateContactClientDto.fax : contactClient.fax,
+        updateContactClientDto.mail1 !== undefined ? updateContactClientDto.mail1 : contactClient.mail1,
+        updateContactClientDto.mail2 !== undefined ? updateContactClientDto.mail2 : contactClient.mail2,
+        updateContactClientDto.fonction !== undefined ? updateContactClientDto.fonction : contactClient.fonction,
+        updateContactClientDto.is_principal !== undefined ? updateContactClientDto.is_principal : contactClient.is_principal,
+        id,
+      ]
+    );
 
-    return this.contactClientRepository.save(contactClient);
+    return this.findOne(databaseName, id);
   }
 
-  async remove(id: number): Promise<void> {
-    const contactClient = await this.findOne(id);
+  /**
+   * Supprimer un contact client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async remove(databaseName: string, id: number): Promise<void> {
+    const contactClient = await this.findOne(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
     // Empêcher la suppression du contact principal s'il n'y a qu'un seul contact
     if (contactClient.is_principal) {
-      const allContacts = await this.findByClient(contactClient.id_client);
+      const allContacts = await this.findByClient(databaseName, contactClient.id_client);
       if (allContacts.length === 1) {
         throw new BadRequestException('Impossible de supprimer le seul contact du client. Le client doit avoir au moins un contact.');
       }
@@ -144,27 +214,37 @@ export class ContactClientService {
       if (allContacts.length > 1) {
         const nextContact = allContacts.find(c => c.id !== id);
         if (nextContact) {
-          nextContact.is_principal = true;
-          await this.contactClientRepository.save(nextContact);
+          await connection.query(
+            `UPDATE contact_client SET is_principal = true, updated_at = NOW() WHERE id = $1`,
+            [nextContact.id]
+          );
         }
       }
     }
     
-    await this.contactClientRepository.remove(contactClient);
+    await connection.query(`DELETE FROM contact_client WHERE id = $1`, [id]);
   }
 
   /**
    * Retire le statut principal de tous les contacts d'un client
    * sauf celui spécifié par exceptId (optionnel)
+   * ✅ MULTI-TENANT: Utilise databaseName
    */
-  private async removePrincipalStatus(clientId: number, exceptId?: number): Promise<void> {
-    const contacts = await this.findByClient(clientId);
+  private async removePrincipalStatus(databaseName: string, clientId: number, exceptId?: number): Promise<void> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
-    for (const contact of contacts) {
-      if (contact.is_principal && contact.id !== exceptId) {
-        contact.is_principal = false;
-        await this.contactClientRepository.save(contact);
-      }
+    if (exceptId) {
+      await connection.query(
+        `UPDATE contact_client SET is_principal = false, updated_at = NOW() 
+         WHERE id_client = $1 AND is_principal = true AND id != $2`,
+        [clientId, exceptId]
+      );
+    } else {
+      await connection.query(
+        `UPDATE contact_client SET is_principal = false, updated_at = NOW() 
+         WHERE id_client = $1 AND is_principal = true`,
+        [clientId]
+      );
     }
   }
 }

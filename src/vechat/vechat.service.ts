@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Scope, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, In } from 'typeorm';
+import { Repository, Like, In, DataSource } from 'typeorm';
 import { 
   VechatMessage, 
   VechatConversation, 
@@ -10,37 +10,50 @@ import {
 import { Personnel } from '../entities/personnel.entity';
 import { Client } from '../entities/client.entity';
 import { CreateMessageDto, UpdateMessageDto } from './dto/vechat.dto';
-// import { VechatGateway } from './vechat.gateway'; // Supprimé pour éviter l'importation circulaire
+import { DatabaseConnectionService } from '../common/database-connection.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class VechatService {
   constructor(
-    @InjectRepository(VechatMessage)
-    private messageRepository: Repository<VechatMessage>,
-    @InjectRepository(VechatConversation)
-    private conversationRepository: Repository<VechatConversation>,
-    @InjectRepository(VechatPresence)
-    private presenceRepository: Repository<VechatPresence>,
-    @InjectRepository(VechatUserSettings)
-    private userSettingsRepository: Repository<VechatUserSettings>,
-    // @InjectRepository(Personnel)
-    // private personnelRepository: Repository<Personnel>,
-    // @InjectRepository(Client)
-    // private clientRepository: Repository<Client>,
-    // private vechatGateway: VechatGateway, // Supprimé pour éviter l'importation circulaire
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
+
+  // 🏢 M\u00e9thode helper pour obtenir les repositories dynamiques
+  private async getRepositories(databaseName: string) {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return {
+      messageRepository: connection.getRepository(VechatMessage),
+      conversationRepository: connection.getRepository(VechatConversation),
+      presenceRepository: connection.getRepository(VechatPresence),
+      userSettingsRepository: connection.getRepository(VechatUserSettings),
+      personnelRepository: connection.getRepository(Personnel),
+      clientRepository: connection.getRepository(Client),
+    };
+  }
 
   // === Service Conversations ===
 
-  async getUserConversations(userId: number, userType: 'personnel' | 'client', currentUser: any) {
+  async getUserConversations(
+    userId: number, 
+    userType: 'personnel' | 'client', 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [getUserConversations] DB: ${databaseName}, Org: ${organisationId}, User: ${userId}, Type: ${userType}`);
+    
     // Vérifier les permissions
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const conversations = await this.conversationRepository.find({
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+
+    const conversations = await conversationRepository.find({
       where: [
         {
           participant1_id: userId,
@@ -57,10 +70,10 @@ export class VechatService {
     // Enrichir avec les informations des participants
     const enrichedConversations = await Promise.all(
       conversations.map(async (conv) => {
-        const participant1 = await this.getUserDetails(conv.participant1_id, conv.participant1_type);
-        const participant2 = await this.getUserDetails(conv.participant2_id, conv.participant2_type);
+        const participant1 = await this.getUserDetails(conv.participant1_id, conv.participant1_type, databaseName);
+        const participant2 = await this.getUserDetails(conv.participant2_id, conv.participant2_type, databaseName);
         const lastMessage = conv.last_message_id ? 
-          await this.messageRepository.findOne({ where: { id: conv.last_message_id } }) : null;
+          await messageRepository.findOne({ where: { id: conv.last_message_id } }) : null;
 
         return {
           ...conv,
@@ -74,6 +87,7 @@ export class VechatService {
       })
     );
 
+    console.log(`📊 [getUserConversations] Récupéré ${enrichedConversations.length} conversations`);
     return enrichedConversations;
   }
 
@@ -82,13 +96,20 @@ export class VechatService {
     participant1Type: 'personnel' | 'client',
     participant2Id: number,
     participant2Type: 'personnel' | 'client',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [createOrGetConversation] DB: ${databaseName}, Org: ${organisationId}`);
+    
     // Vérifier les permissions
     if (!this.canAccessUser(currentUser, participant1Id, participant1Type) &&
         !this.canAccessUser(currentUser, participant2Id, participant2Type)) {
       throw new ForbiddenException('Accès non autorisé');
     }
+
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
 
     // Normaliser l'ordre des participants
     let normalizedParticipant1Id = participant1Id;
@@ -105,7 +126,7 @@ export class VechatService {
     }
 
     // Chercher une conversation existante
-    let conversation = await this.conversationRepository.findOne({
+    let conversation = await conversationRepository.findOne({
       where: {
         participant1_id: normalizedParticipant1Id,
         participant1_type: normalizedParticipant1Type,
@@ -116,7 +137,7 @@ export class VechatService {
 
     if (!conversation) {
       // Créer une nouvelle conversation
-      conversation = this.conversationRepository.create({
+      conversation = conversationRepository.create({
         participant1_id: normalizedParticipant1Id,
         participant1_type: normalizedParticipant1Type,
         participant2_id: normalizedParticipant2Id,
@@ -129,7 +150,10 @@ export class VechatService {
         is_muted_by_participant2: false,
       });
 
-      conversation = await this.conversationRepository.save(conversation);
+      conversation = await conversationRepository.save(conversation);
+      console.log(`✅ [createOrGetConversation] Nouvelle conversation créée: ${conversation.id}`);
+    } else {
+      console.log(`📋 [createOrGetConversation] Conversation existante: ${conversation.id}`);
     }
 
     return conversation;
@@ -139,13 +163,20 @@ export class VechatService {
     conversationId: number,
     userId: number,
     userType: 'personnel' | 'client',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [archiveConversation] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const conversation = await this.conversationRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
+
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -169,7 +200,7 @@ export class VechatService {
       conversation.is_archived_by_participant2 = true;
     }
 
-    return await this.conversationRepository.save(conversation);
+    return await conversationRepository.save(conversation);
   }
 
   async muteConversation(
@@ -177,13 +208,20 @@ export class VechatService {
     userId: number,
     userType: 'personnel' | 'client',
     muted: boolean,
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [muteConversation] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const conversation = await this.conversationRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
+
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -206,20 +244,27 @@ export class VechatService {
       conversation.is_muted_by_participant2 = muted;
     }
 
-    return await this.conversationRepository.save(conversation);
+    return await conversationRepository.save(conversation);
   }
 
   async resetUnreadCount(
     conversationId: number,
     userId: number,
     userType: 'personnel' | 'client',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [resetUnreadCount] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const conversation = await this.conversationRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -254,7 +299,7 @@ export class VechatService {
       console.log(`✅ Compteur participant2 remis à zéro pour conversation ${conversationId}`);
     }
 
-    const savedConversation = await this.conversationRepository.save(conversation);
+    const savedConversation = await conversationRepository.save(conversation);
     
     console.log(`📊 RESET UNREAD COUNT - État APRÈS sauvegarde:`, {
       conversationId,
@@ -268,7 +313,7 @@ export class VechatService {
     const otherParticipantType = isParticipant1 ? conversation.participant2_type : conversation.participant1_type;
 
     // Compter d'abord combien de messages vont être marqués comme lus
-    const messagesToMarkRead = await this.messageRepository.count({
+    const messagesToMarkRead = await messageRepository.count({
       where: {
         sender_id: otherParticipantId,
         sender_type: otherParticipantType,
@@ -280,7 +325,7 @@ export class VechatService {
 
     console.log(`🔄 MARQUAGE MESSAGES - ${messagesToMarkRead} messages à marquer comme lus`);
 
-    const updateResult = await this.messageRepository.update(
+    const updateResult = await messageRepository.update(
       {
         sender_id: otherParticipantId,
         sender_type: otherParticipantType,
@@ -301,8 +346,18 @@ export class VechatService {
     return savedConversation;
   }
 
-  async deleteConversation(conversationId: number, currentUser: any) {
-    const conversation = await this.conversationRepository.findOne({
+  async deleteConversation(
+    conversationId: number, 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [deleteConversation] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -319,13 +374,13 @@ export class VechatService {
     }
 
     // Supprimer tous les messages de la conversation
-    await this.messageRepository.delete({
+    await messageRepository.delete({
       sender_id: In([conversation.participant1_id, conversation.participant2_id]),
       receiver_id: In([conversation.participant1_id, conversation.participant2_id])
     });
 
     // Supprimer la conversation
-    await this.conversationRepository.delete(conversationId);
+    await conversationRepository.delete(conversationId);
 
     return { success: true };
   }
@@ -336,9 +391,16 @@ export class VechatService {
     conversationId: number,
     page: number = 1,
     limit: number = 50,
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
-    const conversation = await this.conversationRepository.findOne({
+    console.log(`🏢 [getConversationMessages] DB: ${databaseName}, Org: ${organisationId}, Conversation: ${conversationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -354,7 +416,7 @@ export class VechatService {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const messages = await this.messageRepository.find({
+    const messages = await messageRepository.find({
       where: [
         {
           sender_id: conversation.participant1_id,
@@ -377,8 +439,8 @@ export class VechatService {
     // Enrichir avec les informations des expéditeurs
     const enrichedMessages = await Promise.all(
       messages.map(async (message) => {
-        const sender = await this.getUserDetails(message.sender_id, message.sender_type);
-        const receiver = await this.getUserDetails(message.receiver_id, message.receiver_type);
+        const sender = await this.getUserDetails(message.sender_id, message.sender_type, databaseName);
+        const receiver = await this.getUserDetails(message.receiver_id, message.receiver_type, databaseName);
 
         return {
           ...message,
@@ -400,10 +462,18 @@ export class VechatService {
       })
     );
 
+    console.log(`📊 [getConversationMessages] Récupéré ${enrichedMessages.length} messages`);
     return enrichedMessages.reverse(); // Retourner dans l'ordre chronologique
   }
 
-  async sendMessage(createMessageDto: CreateMessageDto, currentUser: any) {
+  async sendMessage(
+    createMessageDto: CreateMessageDto, 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [sendMessage] DB: ${databaseName}, Org: ${organisationId}`);
+    
     // Déterminer le type et l'ID de l'expéditeur
     const senderType = currentUser.userType || 'personnel';
     const senderId = currentUser.id;
@@ -413,8 +483,11 @@ export class VechatService {
       throw new ForbiddenException('Accès non autorisé');
     }
 
+    // 🔄 Obtenir les repositories dynamiques
+    const { messageRepository } = await this.getRepositories(databaseName);
+
     // Vérifier que le destinataire existe
-    const receiver = await this.getUserDetails(createMessageDto.receiver_id, createMessageDto.receiver_type);
+    const receiver = await this.getUserDetails(createMessageDto.receiver_id, createMessageDto.receiver_type, databaseName);
     if (!receiver) {
       throw new NotFoundException('Destinataire non trouvé');
     }
@@ -453,15 +526,15 @@ export class VechatService {
       messageData['audio_waveform'] = createMessageDto.audio_waveform;
     }
 
-    const message = this.messageRepository.create(messageData);
+    const message = messageRepository.create(messageData);
 
-    const savedMessage = await this.messageRepository.save(message);
+    const savedMessage = await messageRepository.save(message);
 
     // Mettre à jour ou créer la conversation
-    await this.updateConversationAfterMessage(savedMessage);
+    await this.updateConversationAfterMessage(savedMessage, databaseName);
 
     // Enrichir le message avec les détails
-    const sender = await this.getUserDetails(senderId, senderType);
+    const sender = await this.getUserDetails(senderId, senderType, databaseName);
     const enrichedMessage = {
       ...savedMessage,
       sender_name: sender ? `${sender.prenom} ${sender.nom}` : null,
@@ -480,14 +553,27 @@ export class VechatService {
       } : undefined
     };
 
+    console.log(`✅ [sendMessage] Message créé: ${savedMessage.id}`);
+
     // Émettre via WebSocket - géré par le gateway
     // this.vechatGateway.handleNewMessage(enrichedMessage);
 
     return enrichedMessage;
   }
 
-  async updateMessage(messageId: number, updateMessageDto: UpdateMessageDto, currentUser: any) {
-    const message = await this.messageRepository.findOne({
+  async updateMessage(
+    messageId: number, 
+    updateMessageDto: UpdateMessageDto, 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [updateMessage] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { messageRepository } = await this.getRepositories(databaseName);
+    
+    const message = await messageRepository.findOne({
       where: { id: messageId }
     });
 
@@ -510,7 +596,7 @@ export class VechatService {
     message.message = updateMessageDto.message;
     message.updated_at = new Date();
 
-    const updatedMessage = await this.messageRepository.save(message);
+    const updatedMessage = await messageRepository.save(message);
 
     console.log(`✅ Message ${messageId} modifié par l'expéditeur`);
 
@@ -524,13 +610,20 @@ export class VechatService {
     messageId: number,
     userId: number,
     userType: 'personnel' | 'client',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [deleteMessage] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const message = await this.messageRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { messageRepository } = await this.getRepositories(databaseName);
+
+    const message = await messageRepository.findOne({
       where: { id: messageId }
     });
 
@@ -541,12 +634,12 @@ export class VechatService {
     // Seul l'expéditeur peut supprimer définitivement son message
     if (message.sender_id === userId && message.sender_type === userType) {
       // Suppression définitive du message pour l'expéditeur
-      await this.messageRepository.remove(message);
+      await messageRepository.remove(message);
       console.log(`✅ Message ${messageId} supprimé définitivement par l'expéditeur`);
     } else if (message.receiver_id === userId && message.receiver_type === userType) {
       // Masquer seulement pour le destinataire
       message.is_deleted_by_receiver = true;
-      await this.messageRepository.save(message);
+      await messageRepository.save(message);
       console.log(`✅ Message ${messageId} masqué pour le destinataire`);
     } else {
       throw new ForbiddenException('Vous ne pouvez supprimer que vos propres messages');
@@ -558,10 +651,19 @@ export class VechatService {
     return { success: true };
   }
 
-  async markMessagesAsRead(messageIds: number[], currentUser: any) {
+  async markMessagesAsRead(
+    messageIds: number[], 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
     console.log('🔄 Backend - Marquage messages comme lus:', messageIds);
+    console.log(`🏢 [markMessagesAsRead] DB: ${databaseName}, Org: ${organisationId}`);
     
-    const messages = await this.messageRepository.find({
+    // 🔄 Obtenir les repositories dynamiques
+    const { messageRepository } = await this.getRepositories(databaseName);
+    
+    const messages = await messageRepository.find({
       where: { id: In(messageIds) }
     });
 
@@ -573,11 +675,11 @@ export class VechatService {
       if (this.canAccessUser(currentUser, message.receiver_id, message.receiver_type)) {
         message.is_read = true;
         message.read_at = new Date();
-        await this.messageRepository.save(message);
+        await messageRepository.save(message);
         updatedMessages.push(message);
 
         // Collecter les conversations à mettre à jour
-        const conversation = await this.getConversationForMessage(message);
+        const conversation = await this.getConversationForMessage(message, databaseName);
         if (conversation) {
           conversationsToUpdate.add(conversation.id);
         }
@@ -586,7 +688,7 @@ export class VechatService {
 
     // Mettre à jour les compteurs des conversations
     for (const conversationId of conversationsToUpdate) {
-      await this.updateUnreadCountersForConversation(conversationId);
+      await this.updateUnreadCountersForConversation(conversationId, databaseName);
     }
 
     console.log('✅ Backend - Messages marqués comme lus:', updatedMessages.length);
@@ -594,8 +696,13 @@ export class VechatService {
   }
 
   // Méthode publique pour obtenir la conversation d'un message
-  async getConversationForMessage(message: VechatMessage): Promise<VechatConversation | null> {
-    return await this.conversationRepository.findOne({
+  async getConversationForMessage(
+    message: VechatMessage,
+    databaseName: string
+  ): Promise<VechatConversation | null> {
+    const { conversationRepository } = await this.getRepositories(databaseName);
+    
+    return await conversationRepository.findOne({
       where: [
         {
           participant1_id: message.sender_id,
@@ -614,10 +721,16 @@ export class VechatService {
   }
 
   // Nouvelle méthode pour mettre à jour les compteurs d'une conversation
-  private async updateUnreadCountersForConversation(conversationId: number): Promise<void> {
+  private async updateUnreadCountersForConversation(
+    conversationId: number,
+    databaseName: string
+  ): Promise<void> {
     console.log('🔄 Mise à jour compteurs conversation:', conversationId);
     
-    const conversation = await this.conversationRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -628,7 +741,7 @@ export class VechatService {
 
     // Compter les messages non lus pour chaque participant de manière optimisée
     const [unreadCountParticipant1, unreadCountParticipant2] = await Promise.all([
-      this.messageRepository.count({
+      messageRepository.count({
         where: {
           receiver_id: conversation.participant1_id,
           receiver_type: conversation.participant1_type,
@@ -637,7 +750,7 @@ export class VechatService {
           sender_type: conversation.participant2_type,
         }
       }),
-      this.messageRepository.count({
+      messageRepository.count({
         where: {
           receiver_id: conversation.participant2_id,
           receiver_type: conversation.participant2_type,
@@ -656,7 +769,7 @@ export class VechatService {
       conversation.unread_count_participant1 = unreadCountParticipant1;
       conversation.unread_count_participant2 = unreadCountParticipant2;
 
-      await this.conversationRepository.save(conversation);
+      await conversationRepository.save(conversation);
       
       console.log('✅ Compteurs mis à jour:', {
         conversationId,
@@ -672,8 +785,18 @@ export class VechatService {
     }
   }
 
-  async clearConversationMessages(conversationId: number, currentUser: any) {
-    const conversation = await this.conversationRepository.findOne({
+  async clearConversationMessages(
+    conversationId: number, 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [clearConversationMessages] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -690,7 +813,7 @@ export class VechatService {
     }
 
     // Supprimer tous les messages de la conversation
-    await this.messageRepository.delete({
+    await messageRepository.delete({
       sender_id: In([conversation.participant1_id, conversation.participant2_id]),
       receiver_id: In([conversation.participant1_id, conversation.participant2_id]),
     });
@@ -701,7 +824,7 @@ export class VechatService {
     conversation.unread_count_participant1 = 0;
     conversation.unread_count_participant2 = 0;
 
-    await this.conversationRepository.save(conversation);
+    await conversationRepository.save(conversation);
 
     return { success: true, clearedCount: 0 }; // TODO: retourner le nombre réel de messages supprimés
   }
@@ -711,9 +834,16 @@ export class VechatService {
     query: string,
     page: number = 1,
     limit: number = 20,
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
-    const conversation = await this.conversationRepository.findOne({
+    console.log(`🏢 [searchMessages] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -729,7 +859,7 @@ export class VechatService {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    const messages = await this.messageRepository.find({
+    const messages = await messageRepository.find({
       where: [
         {
           sender_id: conversation.participant1_id,
@@ -761,8 +891,12 @@ export class VechatService {
     receiverId: number,
     receiverType: 'personnel' | 'client',
     messageType: 'image' | 'file' | 'video' | 'audio',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [uploadFile] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!file) {
       throw new BadRequestException('Aucun fichier fourni');
     }
@@ -822,7 +956,7 @@ export class VechatService {
       file_type: file.mimetype,
     };
 
-    const message = await this.sendMessage(messageData, currentUser);
+    const message = await this.sendMessage(messageData, currentUser, databaseName, organisationId);
 
     return {
       success: true,
@@ -836,8 +970,12 @@ export class VechatService {
     receiverId: number,
     receiverType: 'personnel' | 'client',
     duration: number,
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [uploadVoiceMessage] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!file) {
       throw new BadRequestException('Aucun fichier audio fourni');
     }
@@ -890,7 +1028,7 @@ export class VechatService {
       audio_duration: duration,
     };
 
-    const message = await this.sendMessage(messageData, currentUser);
+    const message = await this.sendMessage(messageData, currentUser, databaseName, organisationId);
 
     return {
       success: true,
@@ -907,8 +1045,16 @@ export class VechatService {
 
   // === Service Contacts ===
 
-  async searchContacts(query: string, type: 'personnel' | 'client', currentUser: any) {
-    console.log('🔍 Recherche contacts avec règles de visibilité:', {
+  async searchContacts(
+    query: string, 
+    type: 'personnel' | 'client', 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log('🔍 [searchContacts] Recherche contacts avec règles de visibilité:', {
+      database: databaseName,
+      organisationId,
       currentUser: currentUser.id,
       currentUserType: currentUser.userType || 'personnel',
       searchType: type,
@@ -925,8 +1071,8 @@ export class VechatService {
         // Admin/Commercial peuvent voir tout le monde
         if (type === 'personnel') {
           // Admin recherche personnel : retourner personnel + clients pour éviter confusion
-          const personnel = await this.getPersonnelContacts(query, currentUser);
-          const clients = await this.getClientContacts(query, currentUser);
+          const personnel = await this.getPersonnelContacts(query, currentUser, databaseName);
+          const clients = await this.getClientContacts(query, currentUser, databaseName);
           results = [...personnel, ...clients];
           console.log('👨‍💼 Admin/Commercial - Récupération complète:', {
             personnel: personnel.length,
@@ -934,24 +1080,24 @@ export class VechatService {
             total: results.length
           });
         } else if (type === 'client') {
-          results = await this.getClientContacts(query, currentUser);
+          results = await this.getClientContacts(query, currentUser, databaseName);
         } else {
           // Récupérer les deux types
-          const personnel = await this.getPersonnelContacts(query, currentUser);
-          const clients = await this.getClientContacts(query, currentUser);
+          const personnel = await this.getPersonnelContacts(query, currentUser, databaseName);
+          const clients = await this.getClientContacts(query, currentUser, databaseName);
           results = [...personnel, ...clients];
         }
       } else {
         // Autres rôles personnel : seulement le personnel
         if (type === 'personnel' || !type) {
-          results = await this.getPersonnelContacts(query, currentUser);
+          results = await this.getPersonnelContacts(query, currentUser, databaseName);
         }
         // Pas de clients pour les autres rôles
       }
     } else if (currentUserType === 'client') {
       // Clients : seulement leur commercial
       if (type === 'personnel' || !type) {
-        results = await this.getCommercialForClient(currentUser.id, query);
+        results = await this.getCommercialForClient(currentUser.id, query, databaseName);
       }
       // Les clients ne voient pas d'autres clients
     }
@@ -960,8 +1106,14 @@ export class VechatService {
     return results;
   }
 
-  async getAvailableContacts(currentUser: any) {
-    console.log('📞 Récupération contacts disponibles pour:', {
+  async getAvailableContacts(
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log('📞 [getAvailableContacts] Récupération contacts disponibles pour:', {
+      database: databaseName,
+      organisationId,
       userId: currentUser.id,
       userType: currentUser.userType || 'personnel'
     });
@@ -977,15 +1129,15 @@ export class VechatService {
     if (currentUserType === 'personnel') {
       if (isAdminOrComm) {
         // Admin/Commercial voient tout le monde
-        availableContacts.personnel = await this.getPersonnelContacts('', currentUser);
-        availableContacts.clients = await this.getClientContacts('', currentUser);
+        availableContacts.personnel = await this.getPersonnelContacts('', currentUser, databaseName);
+        availableContacts.clients = await this.getClientContacts('', currentUser, databaseName);
       } else {
         // Autres rôles personnel : seulement le personnel
-        availableContacts.personnel = await this.getPersonnelContacts('', currentUser);
+        availableContacts.personnel = await this.getPersonnelContacts('', currentUser, databaseName);
       }
     } else if (currentUserType === 'client') {
       // Clients : seulement leur commercial
-      availableContacts.personnel = await this.getCommercialForClient(currentUser.id, '');
+      availableContacts.personnel = await this.getCommercialForClient(currentUser.id, '', databaseName);
     }
 
     console.log('📊 Contacts disponibles:', {
@@ -996,129 +1148,170 @@ export class VechatService {
     return availableContacts;
   }
 
-  private async getPersonnelContacts(query: string, currentUser: any): Promise<any[]> {
-    // TODO: Implémenter avec la vraie table personnel
-    const mockPersonnel = [
-      {
-        id: 1,
-        nom: 'Admin',
-        prenom: 'Super',
-        email: 'admin@velosi.com',
-        poste: 'Administrateur',
-        role: 'administratif',
-        chat_avatar: null,
-        is_chat_enabled: true,
-        user_type: 'personnel'
-      },
-      {
-        id: 2,
-        nom: 'Commercial',
-        prenom: 'Premier',
-        email: 'commercial@velosi.com',
-        poste: 'Commercial',
-        role: 'commercial',
-        chat_avatar: null,
-        is_chat_enabled: true,
-        user_type: 'personnel'
-      },
-      {
-        id: 3,
-        nom: 'Technicien',
-        prenom: 'Jean',
-        email: 'tech@velosi.com',
-        poste: 'Technicien',
-        role: 'autre',
-        chat_avatar: null,
-        is_chat_enabled: true,
-        user_type: 'personnel'
+  private async getPersonnelContacts(query: string, currentUser: any, databaseName: string): Promise<any[]> {
+    console.log(`🔍 [getPersonnelContacts] Récupération personnel depuis ${databaseName}`);
+    
+    try {
+      const { personnelRepository } = await this.getRepositories(databaseName);
+      
+      // Construction de la requête
+      const queryBuilder = personnelRepository.createQueryBuilder('personnel')
+        .where('personnel.id != :currentId', { currentId: currentUser.id })
+        .andWhere('personnel.statut = :statut', { statut: 'actif' });
+      
+      // Filtre de recherche si query fourni
+      if (query) {
+        queryBuilder.andWhere(
+          '(personnel.nom ILIKE :query OR personnel.prenom ILIKE :query OR personnel.email ILIKE :query OR personnel.nom_utilisateur ILIKE :query)',
+          { query: `%${query}%` }
+        );
       }
-    ];
-
-    return mockPersonnel
-      .filter(p => p.id !== currentUser.id) // Exclure soi-même
-      .filter(p => 
-        !query || 
-        p.nom.toLowerCase().includes(query.toLowerCase()) ||
-        p.prenom.toLowerCase().includes(query.toLowerCase()) ||
-        p.email.toLowerCase().includes(query.toLowerCase())
-      );
+      
+      const personnelList = await queryBuilder
+        .select([
+          'personnel.id',
+          'personnel.nom',
+          'personnel.prenom',
+          'personnel.email',
+          'personnel.role',
+          'personnel.nom_utilisateur',
+          'personnel.photo',
+        ])
+        .orderBy('personnel.nom', 'ASC')
+        .getMany();
+      
+      const results = personnelList.map(p => ({
+        id: p.id,
+        nom: p.nom,
+        prenom: p.prenom,
+        email: p.email,
+        poste: p.role, // Utiliser role car poste n'existe pas
+        role: p.role,
+        photo: p.photo || null, // Champ photo pour le frontend
+        chat_avatar: p.photo || null, // Utiliser photo car chat_avatar/avatar n'existent pas
+        is_chat_enabled: true,
+        user_type: 'personnel'
+      }));
+      
+      console.log(`✅ [getPersonnelContacts] Récupéré ${results.length} membres du personnel`);
+      return results;
+    } catch (error) {
+      console.error(`❌ [getPersonnelContacts] Erreur:`, error);
+      return [];
+    }
   }
 
-  private async getClientContacts(query: string, currentUser: any): Promise<any[]> {
-    console.log('🏢 Récupération contacts clients:', {
+  private async getClientContacts(query: string, currentUser: any, databaseName: string): Promise<any[]> {
+    console.log(`🔍 [getClientContacts] Récupération clients depuis ${databaseName}`, {
       currentUser: currentUser.id,
       query,
       isAdminOrComm: this.isAdminOrCommercial(currentUser)
     });
 
-    // TODO: Implémenter avec la vraie table client
-    const mockClients = [
-      {
-        id: 1,
-        nom: 'Client1',
-        prenom: 'Société',
-        email: 'client1@example.com',
-        societe: 'Entreprise ABC',
-        charge_com: 'commercial_user',
-        chat_avatar: null,
-        is_chat_enabled: true,
-        user_type: 'client'
-      },
-      {
-        id: 2,
-        nom: 'Client2',
-        prenom: 'Société',
-        email: 'client2@example.com',
-        societe: 'Entreprise XYZ',
-        charge_com: 'commercial_user',
-        chat_avatar: null,
-        is_chat_enabled: true,
-        user_type: 'client'
+    try {
+      const { clientRepository } = await this.getRepositories(databaseName);
+      
+      // Construction de la requête
+      const queryBuilder = clientRepository.createQueryBuilder('client')
+        .where('client.statut = :statut', { statut: 'actif' });
+      
+      // Filtre de recherche si query fourni
+      if (query) {
+        queryBuilder.andWhere(
+          '(client.nom ILIKE :query OR client.interlocuteur ILIKE :query OR client.email ILIKE :query)',
+          { query: `%${query}%` }
+        );
       }
-    ];
-
-    const filteredClients = mockClients.filter(c => 
-      !query || 
-      c.nom.toLowerCase().includes(query.toLowerCase()) ||
-      c.prenom.toLowerCase().includes(query.toLowerCase()) ||
-      c.email.toLowerCase().includes(query.toLowerCase()) ||
-      c.societe.toLowerCase().includes(query.toLowerCase())
-    );
-
-    console.log('🏢 Clients trouvés:', {
-      mockClientsCount: mockClients.length,
-      filteredCount: filteredClients.length,
-      clients: filteredClients.map(c => ({ id: c.id, nom: c.nom, societe: c.societe }))
-    });
-
-    return filteredClients;
+      
+      const clientList = await queryBuilder
+        .select([
+          'client.id',
+          'client.nom',
+          'client.interlocuteur',
+          'client.email',
+          'client.charge_com',
+        ])
+        .orderBy('client.nom', 'ASC')
+        .getMany();
+      
+      const results = clientList.map(c => ({
+        id: c.id,
+        nom: c.nom,
+        prenom: c.interlocuteur || '', // Utiliser interlocuteur car prenom n'existe pas
+        interlocuteur: c.interlocuteur,
+        email: c.email,
+        societe: c.nom, // La société est dans nom
+        charge_com: c.charge_com,
+        photo: null, // Pas de photo pour les clients
+        chat_avatar: null, // Pas d'avatar pour les clients
+        is_chat_enabled: true,
+        user_type: 'client'
+      }));
+      
+      console.log(`✅ [getClientContacts] Récupéré ${results.length} clients`);
+      return results;
+    } catch (error) {
+      console.error(`❌ [getClientContacts] Erreur:`, error);
+      return [];
+    }
   }
 
-  private async getCommercialForClient(clientId: number, query: string): Promise<any[]> {
-    // TODO: Récupérer le commercial assigné au client
-    const chargeComm = this.getClientChargeComm(clientId);
+  private async getCommercialForClient(clientId: number, query: string, databaseName: string): Promise<any[]> {
+    console.log(`🔍 [getCommercialForClient] Récupération commercial pour client ${clientId} depuis ${databaseName}`);
     
-    const mockCommercial = [
-      {
-        id: 2,
-        nom: 'Commercial',
-        prenom: 'Assigné',
-        email: 'commercial@velosi.com',
-        poste: 'Commercial',
-        role: 'commercial',
-        username: chargeComm,
-        chat_avatar: null,
+    try {
+      const { clientRepository, personnelRepository } = await this.getRepositories(databaseName);
+      
+      // Récupérer le client pour connaître son commercial
+      const client = await clientRepository.findOne({ 
+        where: { id: clientId },
+        select: ['charge_com']
+      });
+      
+      if (!client || !client.charge_com) {
+        console.log(`⚠️ [getCommercialForClient] Client sans commercial assigné`);
+        return [];
+      }
+      
+      // Récupérer le commercial par son nom d'utilisateur
+      const commercial = await personnelRepository.findOne({
+        where: { nom_utilisateur: client.charge_com },
+        select: ['id', 'nom', 'prenom', 'email', 'role', 'photo']
+      });
+      
+      if (!commercial) {
+        console.log(`⚠️ [getCommercialForClient] Commercial ${client.charge_com} non trouvé`);
+        return [];
+      }
+      
+      // Appliquer le filtre de recherche si fourni
+      if (query) {
+        const searchLower = query.toLowerCase();
+        if (!(commercial.nom.toLowerCase().includes(searchLower) || 
+              commercial.prenom.toLowerCase().includes(searchLower) ||
+              commercial.email.toLowerCase().includes(searchLower))) {
+          return [];
+        }
+      }
+      
+      const result = {
+        id: commercial.id,
+        nom: commercial.nom,
+        prenom: commercial.prenom,
+        email: commercial.email,
+        poste: commercial.role, // Utiliser role car poste n'existe pas
+        role: commercial.role,
+        chat_avatar: commercial.photo || null, // Utiliser photo car chat_avatar/avatar n'existent pas
         is_chat_enabled: true,
         user_type: 'personnel'
-      }
-    ];
-
-    return mockCommercial.filter(c => 
-      !query || 
-      c.nom.toLowerCase().includes(query.toLowerCase()) ||
-      c.prenom.toLowerCase().includes(query.toLowerCase()) ||
-      c.email.toLowerCase().includes(query.toLowerCase())
-    );
+      };
+      
+      console.log(`✅ [getCommercialForClient] Commercial trouvé: ${result.prenom} ${result.nom}`);
+      return [result];
+    } catch (error) {
+      console.error(`❌ [getCommercialForClient] Erreur:`, error);
+      return [];
+    }
   }
 
   // === Service Présence ===
@@ -1127,18 +1320,25 @@ export class VechatService {
     userId: number,
     userType: 'personnel' | 'client',
     status: 'online' | 'offline' | 'away' | 'busy',
-    currentUser: any
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
   ) {
+    console.log(`🏢 [updatePresence] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    let presence = await this.presenceRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { presenceRepository } = await this.getRepositories(databaseName);
+
+    let presence = await presenceRepository.findOne({
       where: { user_id: userId, user_type: userType }
     });
 
     if (!presence) {
-      presence = this.presenceRepository.create({
+      presence = presenceRepository.create({
         user_id: userId,
         user_type: userType,
         status,
@@ -1149,7 +1349,7 @@ export class VechatService {
       presence.last_seen = new Date();
     }
 
-    const savedPresence = await this.presenceRepository.save(presence);
+    const savedPresence = await presenceRepository.save(presence);
 
     // Émettre via WebSocket - géré par le gateway
     // this.vechatGateway.handleUserOnlineStatus({
@@ -1162,8 +1362,19 @@ export class VechatService {
     return savedPresence;
   }
 
-  async getPresenceStatus(userIds: number[], userType: 'personnel' | 'client', currentUser: any) {
-    const presences = await this.presenceRepository.find({
+  async getPresenceStatus(
+    userIds: number[], 
+    userType: 'personnel' | 'client', 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [getPresenceStatus] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { presenceRepository } = await this.getRepositories(databaseName);
+    
+    const presences = await presenceRepository.find({
       where: {
         user_id: In(userIds),
         user_type: userType,
@@ -1175,18 +1386,29 @@ export class VechatService {
 
   // === Service Paramètres ===
 
-  async getUserSettings(userId: number, userType: 'personnel' | 'client', currentUser: any) {
+  async getUserSettings(
+    userId: number, 
+    userType: 'personnel' | 'client', 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [getUserSettings] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    let settings = await this.userSettingsRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { userSettingsRepository } = await this.getRepositories(databaseName);
+
+    let settings = await userSettingsRepository.findOne({
       where: { user_id: userId, user_type: userType }
     });
 
     if (!settings) {
       // Créer des paramètres par défaut
-      settings = this.userSettingsRepository.create({
+      settings = userSettingsRepository.create({
         user_id: userId,
         user_type: userType,
         email_notifications: true,
@@ -1197,23 +1419,33 @@ export class VechatService {
         show_online_status: true,
         show_read_receipts: true,
       });
-      settings = await this.userSettingsRepository.save(settings);
+      settings = await userSettingsRepository.save(settings);
     }
 
     return settings;
   }
 
-  async updateUserSettings(settingsData: any, currentUser: any) {
+  async updateUserSettings(
+    settingsData: any, 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [updateUserSettings] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, settingsData.userId, settingsData.userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
-    let settings = await this.userSettingsRepository.findOne({
+    // 🔄 Obtenir les repositories dynamiques
+    const { userSettingsRepository } = await this.getRepositories(databaseName);
+
+    let settings = await userSettingsRepository.findOne({
       where: { user_id: settingsData.userId, user_type: settingsData.userType }
     });
 
     if (!settings) {
-      settings = this.userSettingsRepository.create({
+      settings = userSettingsRepository.create({
         user_id: settingsData.userId,
         user_type: settingsData.userType,
       });
@@ -1222,28 +1454,39 @@ export class VechatService {
     // Mettre à jour les champs fournis
     Object.assign(settings, settingsData);
 
-    return await this.userSettingsRepository.save(settings);
+    return await userSettingsRepository.save(settings);
   }
 
   // === Service Statistiques ===
 
-  async getChatStatistics(userId: number, userType: 'personnel' | 'client', currentUser: any) {
+  async getChatStatistics(
+    userId: number, 
+    userType: 'personnel' | 'client', 
+    currentUser: any,
+    databaseName: string,
+    organisationId: number
+  ) {
+    console.log(`🏢 [getChatStatistics] DB: ${databaseName}, Org: ${organisationId}`);
+    
     if (!this.canAccessUser(currentUser, userId, userType)) {
       throw new ForbiddenException('Accès non autorisé');
     }
 
+    // 🔄 Obtenir les repositories dynamiques
+    const { messageRepository, conversationRepository } = await this.getRepositories(databaseName);
+
     // Statistiques des messages envoyés
-    const sentMessages = await this.messageRepository.count({
+    const sentMessages = await messageRepository.count({
       where: { sender_id: userId, sender_type: userType }
     });
 
     // Statistiques des messages reçus
-    const receivedMessages = await this.messageRepository.count({
+    const receivedMessages = await messageRepository.count({
       where: { receiver_id: userId, receiver_type: userType }
     });
 
     // Statistiques des conversations
-    const conversations = await this.conversationRepository.count({
+    const conversations = await conversationRepository.count({
       where: [
         { participant1_id: userId, participant1_type: userType },
         { participant2_id: userId, participant2_type: userType }
@@ -1260,7 +1503,12 @@ export class VechatService {
 
   // === Méthodes utilitaires ===
 
-  private async updateConversationAfterMessage(message: VechatMessage) {
+  private async updateConversationAfterMessage(message: VechatMessage, databaseName: string) {
+    console.log(`🔄 [updateConversationAfterMessage] Mise à jour conversation après message ${message.id}`);
+    
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
+    
     // Normaliser l'ordre des participants
     let participant1Id = message.sender_id;
     let participant1Type = message.sender_type;
@@ -1275,7 +1523,7 @@ export class VechatService {
       participant2Type = message.sender_type;
     }
 
-    let conversation = await this.conversationRepository.findOne({
+    let conversation = await conversationRepository.findOne({
       where: {
         participant1_id: participant1Id,
         participant1_type: participant1Type,
@@ -1285,7 +1533,7 @@ export class VechatService {
     });
 
     if (!conversation) {
-      conversation = this.conversationRepository.create({
+      conversation = conversationRepository.create({
         participant1_id: participant1Id,
         participant1_type: participant1Type,
         participant2_id: participant2Id,
@@ -1297,6 +1545,7 @@ export class VechatService {
         is_muted_by_participant1: false,
         is_muted_by_participant2: false,
       });
+      console.log(`✨ [updateConversationAfterMessage] Nouvelle conversation créée`);
     }
 
     // Mettre à jour la conversation
@@ -1310,22 +1559,55 @@ export class VechatService {
       conversation.unread_count_participant2++;
     }
 
-    await this.conversationRepository.save(conversation);
+    await conversationRepository.save(conversation);
+    console.log(`✅ [updateConversationAfterMessage] Conversation mise à jour`);
   }
 
-  private async getUserDetails(userId: number, userType: 'personnel' | 'client') {
-    // TODO: Implémenter avec vos vraies entités
-    // Pour l'instant, retourner des données mock
-    return {
-      id: userId,
-      nom: 'Utilisateur',
-      prenom: `${userType} ${userId}`,
-      email: `user${userId}@example.com`,
-      chat_avatar: null,
-      avatar: null,
-      role: userType === 'personnel' ? this.getUserRole(userId) : null,
-      charge_com: userType === 'client' ? this.getClientChargeComm(userId) : null
-    };
+  private async getUserDetails(userId: number, userType: 'personnel' | 'client', databaseName: string) {
+    console.log(`🔍 [getUserDetails] Récupération détails: ${userType} ${userId} depuis ${databaseName}`);
+    
+    try {
+      const { personnelRepository, clientRepository } = await this.getRepositories(databaseName);
+      
+      if (userType === 'personnel') {
+        const personnel = await personnelRepository.findOne({ where: { id: userId } });
+        if (personnel) {
+          console.log(`✅ Personnel trouvé: ${personnel.prenom} ${personnel.nom}`);
+          return {
+            id: personnel.id,
+            nom: personnel.nom,
+            prenom: personnel.prenom,
+            email: personnel.email,
+            chat_avatar: personnel.photo || null, // Utiliser photo
+            avatar: personnel.photo || null, // Utiliser photo
+            role: personnel.role,
+            poste: personnel.role || null, // Utiliser role car poste n'existe pas
+          };
+        }
+        console.log(`⚠️ Personnel ${userId} non trouvé dans ${databaseName}`);
+      } else {
+        const client = await clientRepository.findOne({ where: { id: userId } });
+        if (client) {
+          console.log(`✅ Client trouvé: ${client.interlocuteur || ''} ${client.nom}`);
+          return {
+            id: client.id,
+            nom: client.nom,
+            prenom: client.interlocuteur || '', // Utiliser interlocuteur
+            email: client.email,
+            chat_avatar: null, // Pas d'avatar pour les clients
+            avatar: null,
+            societe: client.nom || null, // La société est dans nom
+            charge_com: client.charge_com || null,
+          };
+        }
+        console.log(`⚠️ Client ${userId} non trouvé dans ${databaseName}`);
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`❌ [getUserDetails] Erreur:`, error);
+      return null;
+    }
   }
 
   // Nouvelles méthodes pour les règles de visibilité
@@ -1514,17 +1796,28 @@ export class VechatService {
 
   // === Méthodes utilitaires pour le WebSocket Gateway ===
 
-  async getMessagesByIds(messageIds: number[]): Promise<VechatMessage[]> {
-    return await this.messageRepository.find({
+  async getMessagesByIds(
+    messageIds: number[],
+    databaseName: string
+  ): Promise<VechatMessage[]> {
+    const { messageRepository } = await this.getRepositories(databaseName);
+    return await messageRepository.find({
       where: { id: In(messageIds) }
     });
   }
 
-  async getUnreadCountsForUser(userId: number, userType: 'personnel' | 'client'): Promise<{ [conversationId: number]: number }> {
+  async getUnreadCountsForUser(
+    userId: number, 
+    userType: 'personnel' | 'client',
+    databaseName: string
+  ): Promise<{ [conversationId: number]: number }> {
     console.log('🔢 Calcul compteurs non lus pour:', userId, userType);
     
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
+    
     // Récupérer toutes les conversations de cet utilisateur
-    const conversations = await this.conversationRepository.find({
+    const conversations = await conversationRepository.find({
       where: [
         { participant1_id: userId, participant1_type: userType },
         { participant2_id: userId, participant2_type: userType }
@@ -1550,17 +1843,28 @@ export class VechatService {
     return unreadCounts;
   }
 
-  async getConversationById(conversationId: number): Promise<VechatConversation | null> {
-    return await this.conversationRepository.findOne({
+  async getConversationById(
+    conversationId: number,
+    databaseName: string
+  ): Promise<VechatConversation | null> {
+    const { conversationRepository } = await this.getRepositories(databaseName);
+    return await conversationRepository.findOne({
       where: { id: conversationId }
     });
   }
 
-  async getConversationsForUser(userId: number, userType: 'personnel' | 'client'): Promise<any[]> {
+  async getConversationsForUser(
+    userId: number, 
+    userType: 'personnel' | 'client',
+    databaseName: string
+  ): Promise<any[]> {
     console.log('📋 Récupération conversations complètes pour:', userId, userType);
     
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository } = await this.getRepositories(databaseName);
+    
     // Récupérer toutes les conversations de l'utilisateur avec détails
-    const conversations = await this.conversationRepository
+    const conversations = await conversationRepository
       .createQueryBuilder('conv')
       .where(
         '(conv.participant1_id = :userId AND conv.participant1_type = :userType) OR ' +
@@ -1573,8 +1877,8 @@ export class VechatService {
     // Enrichir chaque conversation avec les détails des participants
     const enrichedConversations = await Promise.all(
       conversations.map(async (conv) => {
-        const participant1 = await this.getUserDetails(conv.participant1_id, conv.participant1_type);
-        const participant2 = await this.getUserDetails(conv.participant2_id, conv.participant2_type);
+        const participant1 = await this.getUserDetails(conv.participant1_id, conv.participant1_type, databaseName);
+        const participant2 = await this.getUserDetails(conv.participant2_id, conv.participant2_type, databaseName);
         
         return {
           ...conv,
@@ -1595,12 +1899,16 @@ export class VechatService {
   async getUnreadMessagesForUserInConversation(
     conversationId: number, 
     userId: number, 
-    userType: 'personnel' | 'client'
+    userType: 'personnel' | 'client',
+    databaseName: string
   ): Promise<VechatMessage[]> {
     console.log('🔍 Recherche messages non lus pour utilisateur:', { conversationId, userId, userType });
     
+    // 🔄 Obtenir les repositories dynamiques
+    const { conversationRepository, messageRepository } = await this.getRepositories(databaseName);
+    
     // Récupérer la conversation pour connaître les participants
-    const conversation = await this.conversationRepository.findOne({
+    const conversation = await conversationRepository.findOne({
       where: { id: conversationId }
     });
 
@@ -1610,7 +1918,7 @@ export class VechatService {
     }
 
     // Chercher les messages non lus reçus par cet utilisateur dans cette conversation
-    const unreadMessages = await this.messageRepository.find({
+    const unreadMessages = await messageRepository.find({
       where: [
         {
           receiver_id: userId,

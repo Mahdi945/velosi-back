@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsEmail, IsIn, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsEmail, IsIn, MaxLength, ValidateIf } from 'class-validator';
 
 export class CreateFournisseurDto {
   @IsOptional()
@@ -90,6 +90,7 @@ export class CreateFournisseurDto {
   fax?: string;
 
   @IsOptional()
+  @ValidateIf((o) => o.email !== '' && o.email !== null && o.email !== undefined)
   @IsEmail({}, { message: 'Format email invalide' })
   @MaxLength(50)
   email?: string;

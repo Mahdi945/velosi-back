@@ -1,5 +1,5 @@
-import {
-  Injectable,
+﻿import {
+  Injectable, Scope,
   ConflictException,
   NotFoundException,
   Logger,
@@ -14,6 +14,8 @@ import { ObjectifCom } from '../entities/objectif-com.entity';
 import { ContactClient } from '../entities/contact-client.entity';
 import { KeycloakService } from '../auth/keycloak.service';
 import { EmailService } from '../services/email.service';
+import { TenantRepositoryService } from '../common/tenant-repository.service';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 export interface CreateClientDto {
   nom: string;
@@ -94,7 +96,7 @@ export interface CreatePersonnelDto {
   objectif_description?: string;
 }
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
@@ -111,15 +113,26 @@ export class UsersService {
     private keycloakService: KeycloakService,
     private configService: ConfigService,
     private emailService: EmailService,
+    private tenantRepositoryService: TenantRepositoryService,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
-  async createClient(createClientDto: CreateClientDto): Promise<Client> {
-    // Vérifier si le client existe déjà
-    const existingClient = await this.clientRepository.findOne({
-      where: { nom: createClientDto.nom },
-    });
+  /**
+   * Créer un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async createClient(databaseName: string, organisationId: number, createClientDto: CreateClientDto): Promise<Client> {
+    console.log(`🔍 [createClient] DB: ${databaseName}, Org: ${organisationId}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    if (existingClient) {
+    // Vérifier si le client existe déjà
+    const existingClients = await connection.query(
+      `SELECT * FROM client WHERE nom = $1 LIMIT 1`,
+      [createClientDto.nom]
+    );
+
+    if (existingClients && existingClients.length > 0) {
       throw new ConflictException('Un client avec ce nom existe déjà');
     }
 
@@ -139,23 +152,27 @@ export class UsersService {
 
         // Vérifier l'unicité dans la table des contacts clients
         const telFieldName = phoneField.replace('contact_', ''); // tel1, tel2, tel3
-        const existingPhoneClient = await this.clientRepository.createQueryBuilder('client')
-          .leftJoin('client.contacts', 'contact')
-          .where(`contact.${telFieldName} = :phone`, { phone: phoneValue })
-          .getOne();
+        const existingPhoneClientRows = await connection.query(
+          `SELECT c.* FROM client c
+           LEFT JOIN contact_client cc ON cc.id_client = c.id
+           WHERE cc.${telFieldName} = $1
+           LIMIT 1`,
+          [phoneValue]
+        );
 
-        if (existingPhoneClient) {
+        if (existingPhoneClientRows && existingPhoneClientRows.length > 0) {
           throw new ConflictException(
             `Ce numéro de téléphone est déjà utilisé par un autre client`
           );
         }
 
         // Vérifier aussi dans la table du personnel
-        const existingPhonePersonnel = await this.personnelRepository.findOne({
-          where: { telephone: phoneValue },
-        });
+        const existingPhonePersonnelRows = await connection.query(
+          `SELECT * FROM personnel WHERE telephone = $1 LIMIT 1`,
+          [phoneValue]
+        );
 
-        if (existingPhonePersonnel) {
+        if (existingPhonePersonnelRows && existingPhonePersonnelRows.length > 0) {
           throw new ConflictException(
             `Ce numéro de téléphone est déjà utilisé par un personnel`
           );
@@ -171,38 +188,55 @@ export class UsersService {
       hashedPassword = await bcrypt.hash(createClientDto.mot_de_passe, 12);
     }
 
-    // Créer le client
-    const client = this.clientRepository.create({
-      ...createClientDto,
-      mot_de_passe: hashedPassword,
-      is_permanent: createClientDto.is_permanent || false,
-      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
-    });
+    // Créer le client avec organisation_id
+    const insertResult = await connection.query(
+      `INSERT INTO client (
+        organisation_id, nom, interlocuteur, mot_de_passe, adresse, ville, pays, code_postal,
+        type_client, is_permanent, photo
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *`,
+      [
+        organisationId, // 🆕 Ajouter l'organisation_id
+        createClientDto.nom,
+        createClientDto.interlocuteur,
+        hashedPassword,
+        createClientDto.adresse,
+        createClientDto.ville,
+        createClientDto.pays,
+        createClientDto.code_postal,
+        createClientDto.type_client,
+        createClientDto.is_permanent || false,
+        'uploads/profiles/default-avatar.png'
+      ]
+    );
 
-    const savedClient = await this.clientRepository.save(client);
+    const savedClient = insertResult[0];
     
     console.log(`📝 Client créé: ${savedClient.nom} (ID: ${savedClient.id})`);
     console.log(`🔐 Type d'accès: ${savedClient.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}`);
+    console.log(`✅ Données complètes du client créé:`, JSON.stringify(savedClient, null, 2));
 
     // 🆕 Créer automatiquement le contact principal basé sur l'interlocuteur
     if (savedClient.id) {
       try {
-        const principalContact = this.contactClientRepository.create({
-          id_client: savedClient.id,
-          nom: '', // Nom vide pour le contact principal
-          prenom: createClientDto.interlocuteur || 'Contact principal', // Prénom = interlocuteur
-          tel1: createClientDto.contact_tel1 || '',
-          tel2: createClientDto.contact_tel2 || '',
-          tel3: createClientDto.contact_tel3 || '',
-          fax: createClientDto.contact_fax || '',
-          mail1: createClientDto.contact_mail1 || '',
-          mail2: createClientDto.contact_mail2 || '',
-          fonction: createClientDto.contact_fonction || createClientDto.interlocuteur || 'Interlocuteur',
-          is_principal: true, // Contact principal
-          client: savedClient,
-        });
-
-        await this.contactClientRepository.save(principalContact);
+        await connection.query(
+          `INSERT INTO contact_client (
+            id_client, nom, prenom, tel1, tel2, tel3, fax, mail1, mail2, fonction, is_principal
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            savedClient.id,
+            '', // Nom vide pour le contact principal
+            createClientDto.interlocuteur || 'Contact principal',
+            createClientDto.contact_tel1 || '',
+            createClientDto.contact_tel2 || '',
+            createClientDto.contact_tel3 || '',
+            createClientDto.contact_fax || '',
+            createClientDto.contact_mail1 || '',
+            createClientDto.contact_mail2 || '',
+            createClientDto.contact_fonction || createClientDto.interlocuteur || 'Interlocuteur',
+            true
+          ]
+        );
         console.log(`✅ Contact principal créé pour le client ${savedClient.id}`);
       } catch (error) {
         console.warn(`⚠️ Erreur lors de la création du contact principal pour le client ${savedClient.id}:`, error.message);
@@ -263,20 +297,28 @@ export class UsersService {
     return savedClient;
   }
 
+  /**
+   * Créer un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
   async createPersonnel(
+    databaseName: string,
+    organisationId: number,
     createPersonnelDto: CreatePersonnelDto,
   ): Promise<Personnel> {
+    console.log('🔍 [createPersonnel] DB:', databaseName, 'Org:', organisationId, 'Personnel:', createPersonnelDto.nom_utilisateur);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Vérifier si le personnel existe déjà - insensible à la casse
-    const existingPersonnel = await this.personnelRepository
-      .createQueryBuilder('personnel')
-      .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { 
-        username: createPersonnelDto.nom_utilisateur 
-      })
-      .getOne();
+    const existingPersonnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE LOWER(nom_utilisateur) = LOWER($1) LIMIT 1`,
+      [createPersonnelDto.nom_utilisateur]
+    );
 
-    if (existingPersonnel) {
+    if (existingPersonnelRows && existingPersonnelRows.length > 0) {
       throw new ConflictException(
-        "Un utilisateur avec ce nom d'utilisateur existe déjà",
+        `Un utilisateur avec le nom d'utilisateur "${createPersonnelDto.nom_utilisateur}" existe déjà`,
       );
     }
 
@@ -291,25 +333,24 @@ export class UsersService {
         );
       }
 
-      const existingPhonePersonnel = await this.personnelRepository.findOne({
-        where: { telephone: createPersonnelDto.telephone },
-      });
+      const existingPhonePersonnelRows = await connection.query(
+        `SELECT * FROM personnel WHERE telephone = $1 LIMIT 1`,
+        [createPersonnelDto.telephone]
+      );
 
-      if (existingPhonePersonnel) {
+      if (existingPhonePersonnelRows && existingPhonePersonnelRows.length > 0) {
         throw new ConflictException(
           'Ce numéro de téléphone est déjà utilisé par un autre personnel'
         );
       }
 
       // Vérifier aussi dans la table des contacts clients
-      const existingPhoneClient = await this.clientRepository.createQueryBuilder('client')
-        .leftJoin('client.contacts', 'contact')
-        .where('contact.tel1 = :phone', { phone: createPersonnelDto.telephone })
-        .orWhere('contact.tel2 = :phone', { phone: createPersonnelDto.telephone })
-        .orWhere('contact.tel3 = :phone', { phone: createPersonnelDto.telephone })
-        .getOne();
+      const existingPhoneClientRows = await connection.query(
+        `SELECT * FROM contact_client WHERE tel1 = $1 OR tel2 = $1 OR tel3 = $1 LIMIT 1`,
+        [createPersonnelDto.telephone]
+      );
 
-      if (existingPhoneClient) {
+      if (existingPhoneClientRows && existingPhoneClientRows.length > 0) {
         throw new ConflictException(
           'Ce numéro de téléphone est déjà utilisé par un client'
         );
@@ -323,13 +364,29 @@ export class UsersService {
     );
 
     // Créer le personnel
-    const personnel = this.personnelRepository.create({
-      ...createPersonnelDto,
-      mot_de_passe: hashedPassword,
-      photo: 'uploads/profiles/default-avatar.png', // Assigner l'avatar par défaut
-    });
+    const insertResult = await connection.query(
+      `INSERT INTO personnel (
+        nom, prenom, nom_utilisateur, role, mot_de_passe, telephone, email,
+        genre, statut, is_superviseur, photo
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *`,
+      [
+        createPersonnelDto.nom,
+        createPersonnelDto.prenom,
+        createPersonnelDto.nom_utilisateur,
+        createPersonnelDto.role,
+        hashedPassword,
+        createPersonnelDto.telephone,
+        createPersonnelDto.email,
+        createPersonnelDto.genre,
+        createPersonnelDto.statut || 'actif',
+        createPersonnelDto.is_superviseur || false,
+        'uploads/profiles/default-avatar.png'
+      ]
+    );
 
-    const savedPersonnel = await this.personnelRepository.save(personnel);
+    const savedPersonnel = insertResult[0];
+    console.log('✅ [createPersonnel] Personnel créé:', savedPersonnel.id, savedPersonnel.nom_utilisateur);
 
     // Créer l'utilisateur dans Keycloak
     try {
@@ -344,9 +401,10 @@ export class UsersService {
 
       // Mettre à jour l'ID Keycloak
       if (keycloakId) {
-        await this.personnelRepository.update(savedPersonnel.id, {
-          keycloak_id: keycloakId,
-        });
+        await connection.query(
+          `UPDATE personnel SET keycloak_id = $1 WHERE id = $2`,
+          [keycloakId, savedPersonnel.id]
+        );
         savedPersonnel.keycloak_id = keycloakId;
 
         // Assigner le rôle dans Keycloak
@@ -361,19 +419,23 @@ export class UsersService {
     // Créer l'objectif commercial si les données sont fournies
     if (createPersonnelDto.objectif_titre && (savedPersonnel.role === 'Commercial' || savedPersonnel.role === 'Manager')) {
       try {
-        const objectifCom = this.objectifComRepository.create({
-          id_personnel: savedPersonnel.id,
-          titre: createPersonnelDto.objectif_titre,
-          description: createPersonnelDto.objectif_description || '',
-          objectif_ca: createPersonnelDto.objectif_ca || 0,
-          objectif_clients: createPersonnelDto.objectif_clients || 0,
-          date_debut: new Date(),
-          date_fin: createPersonnelDto.objectif_date_fin ? new Date(createPersonnelDto.objectif_date_fin) : null,
-          statut: 'en_cours',
-          progression: 0,
-        });
-
-        await this.objectifComRepository.save(objectifCom);
+        await connection.query(
+          `INSERT INTO objectif_com (
+            personnel_id, titre, description, objectif_ca, objectif_clients,
+            date_debut, date_fin, statut, progres
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            savedPersonnel.id,
+            createPersonnelDto.objectif_titre,
+            createPersonnelDto.objectif_description || '',
+            createPersonnelDto.objectif_ca || 0,
+            createPersonnelDto.objectif_clients || 0,
+            new Date(),
+            createPersonnelDto.objectif_date_fin ? new Date(createPersonnelDto.objectif_date_fin) : null,
+            'en_cours',
+            0
+          ]
+        );
         this.logger.log(`Objectif commercial créé pour ${savedPersonnel.nom_utilisateur}: ${createPersonnelDto.objectif_titre}`);
       } catch (error) {
         this.logger.warn(`Erreur lors de la création de l'objectif commercial: ${error.message}`);
@@ -408,7 +470,10 @@ export class UsersService {
       console.log('🔍 [getAllClients] Début de la récupération des clients...');
       console.log('👤 [getAllClients] Utilisateur connecté:', user?.username || user?.nom_utilisateur, 'Rôle:', user?.role);
       
-      let query = this.clientRepository
+      // 🏢 Utiliser le repository multi-tenant
+      const clientRepository = await this.tenantRepositoryService.getClientRepository();
+      
+      let query = clientRepository
         .createQueryBuilder('client')
         .leftJoinAndSelect('client.contacts', 'contact')
         .select([
@@ -535,70 +600,48 @@ export class UsersService {
     }
   }
 
-  async getAllPersonnel(): Promise<Personnel[]> {
-    return this.personnelRepository.find({
-      select: [
-        'id',
-        'nom',
-        'prenom',
-        'nom_utilisateur',
-        'role',
-        'telephone',
-        'email',
-        'statut',
-        'photo',
-        'genre',
-        'created_at',
-        'is_superviseur',
-        'latitude',
-        'longitude',
-        'last_location_update',
-        'location_accuracy',
-        'location_source',
-        'is_location_active',
-        'location_tracking_enabled',
-        'statut_en_ligne',
-        'last_activity',
-      ],
-      order: {
-        id: 'DESC', // 🆕 Tri décroissant par ID
-      },
-    });
-  }
+  // ✅ Méthodes getAllPersonnel et getPersonnelByRole déplacées vers la fin du fichier
+  // avec support optionnel de databaseName pour plus de flexibilité
 
-  async getPersonnelByRole(roles: string[]): Promise<Personnel[]> {
-    return this.personnelRepository.find({
-      where: roles.map(role => ({ role })),
-      select: [
-        'id',
-        'nom',
-        'prenom',
-        'nom_utilisateur',
-        'role',
-        'telephone',
-        'email',
-        'statut',
-      ],
-    });
-  }
-
-  async getClientWithContactData(clientId: number): Promise<any> {
-    console.log(`🔍 [getClientWithContactData] Récupération client ID: ${clientId}`);
+  /**
+   * Récupérer un client avec ses contacts
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async getClientWithContactData(databaseName: string, organisationId: number, clientId: number): Promise<any> {
+    console.log(`🔍 [getClientWithContactData] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${clientId}`);
     
     try {
-      const client = await this.clientRepository
-        .createQueryBuilder('client')
-        .leftJoinAndSelect('client.contacts', 'contact')
-        .where('client.id = :id', { id: clientId })
-        .getOne();
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
+      // Récupérer le client avec ses contacts
+      const clientRows = await connection.query(
+        `SELECT c.*, 
+                (SELECT json_agg(json_build_object(
+                  'id', cc.id,
+                  'mail1', cc.mail1,
+                  'mail2', cc.mail2,
+                  'tel1', cc.tel1,
+                  'tel2', cc.tel2,
+                  'tel3', cc.tel3,
+                  'fax', cc.fax,
+                  'fonction', cc.fonction,
+                  'is_principal', cc.is_principal
+                ))
+                FROM contact_client cc WHERE cc.id_client = c.id) as contacts
+         FROM client c
+         WHERE c.id = $1 LIMIT 1`,
+        [clientId]
+      );
 
-      if (!client) {
+      if (!clientRows || clientRows.length === 0) {
         throw new NotFoundException('Client non trouvé');
       }
+      
+      const client = clientRows[0];
 
       console.log(`📋 [getClientWithContactData] Client trouvé: ${client.nom}`);
       console.log(`📋 [getClientWithContactData] Charge commercial: ${client.charge_com}`);
-      console.log(`📋 [getClientWithContactData] Charge commercial IDs:`, client.charge_com_ids); // 🆕
+      console.log(`📋 [getClientWithContactData] Charge commercial IDs:`, client.charge_com_ids);
       console.log(`📋 [getClientWithContactData] Contacts: ${client.contacts?.length || 0}`);
 
       // Mapper les données comme pour getAllClients
@@ -615,12 +658,12 @@ export class UsersService {
         mail1: contact?.mail1 || '',
         mail2: contact?.mail2 || '',
         fonction: contact?.fonction || '',
-        charge_com: client.charge_com, // S'assurer que charge_com est bien inclus
-        charge_com_ids: client.charge_com_ids || [] // 🆕 Ajouter le champ multi-commerciaux
+        charge_com: client.charge_com,
+        charge_com_ids: client.charge_com_ids || []
       };
 
       console.log(`✅ [getClientWithContactData] Client mappé - charge_com: "${mappedClient.charge_com}"`);
-      console.log(`✅ [getClientWithContactData] Client mappé - charge_com_ids:`, mappedClient.charge_com_ids); // 🆕
+      console.log(`✅ [getClientWithContactData] Client mappé - charge_com_ids:`, mappedClient.charge_com_ids);
       return mappedClient;
 
     } catch (error) {
@@ -629,39 +672,56 @@ export class UsersService {
     }
   }
 
-  async getClientById(id: number): Promise<Client> {
-    const client = await this.clientRepository.findOne({
-      where: { id },
-      select: [
-        'id',
-        'nom',
-        'interlocuteur',
-        'adresse',
-        'ville',
-        'pays',
-        'created_at',
-        'blocage',
-      ],
-    });
+  /**
+   * Récupérer un client par ID
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async getClientById(databaseName: string, organisationId: number, id: number): Promise<Client> {
+    console.log(`🔍 [getClientById] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    // ✅ MULTI-TENANT: Vérifier l'organisation_id pour isoler les données
+    const clientRows = await connection.query(
+      `SELECT c.id, c.nom, c.interlocuteur, c.adresse, c.ville, c.pays, c.created_at, c.blocage, c.photo,
+              cc.tel1, cc.tel2, cc.tel3, cc.fax, cc.mail1, cc.mail2
+       FROM client c
+       LEFT JOIN contact_client cc ON cc.id_client = c.id
+       WHERE c.id = $1 AND c.organisation_id = $2 LIMIT 1`,
+      [id, organisationId]
+    );
 
-    if (!client) {
+    if (!clientRows || clientRows.length === 0) {
+      console.error(`❌ [getClientById] Client ${id} non trouvé dans organisation ${organisationId}`);
       throw new NotFoundException('Client non trouvé');
     }
 
+    const client = clientRows[0];
+    console.log(`✅ [getClientById] Client récupéré: ${client.nom} (Org: ${organisationId})`);
     return client;
   }
 
-  async updateClient(id: number, updateClientDto: UpdateClientDto): Promise<Client> {
-    // Vérifier que le client existe
-    const existingClient = await this.clientRepository.findOne({
-      where: { id }
-    });
+  /**
+   * Mettre à jour un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async updateClient(databaseName: string, organisationId: number, id: number, updateClientDto: UpdateClientDto): Promise<Client> {
+    console.log(`🔄 [updateClient] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    if (!existingClient) {
+    // Vérifier que le client existe
+    const existingClientRows = await connection.query(
+      `SELECT * FROM client WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (!existingClientRows || existingClientRows.length === 0) {
       throw new NotFoundException('Client non trouvé');
     }
 
-    console.log('🔄 [updateClient] Mise à jour du client ID:', id);
+    const existingClient = existingClientRows[0];
+
     console.log('🔄 [updateClient] Données reçues:', updateClientDto);
 
     try {
@@ -680,10 +740,29 @@ export class UsersService {
         date_fin: clientData.date_fin === '' ? null : clientData.date_fin,
       };
 
-      console.log('🔄 [updateClient] Données client nettoyées à mettre à jour:', cleanedClientData);
+      console.log('🔄 [updateClient] Données client nettoyées:', cleanedClientData);
 
-      // Mettre à jour le client
-      await this.clientRepository.update(id, cleanedClientData);
+      // Construire la requête de mise à jour dynamiquement
+      const updateFields: string[] = [];
+      const updateValues: any[] = [];
+      let paramIndex = 1;
+
+      Object.keys(cleanedClientData).forEach(key => {
+        if (cleanedClientData[key] !== undefined) {
+          updateFields.push(`${key} = $${paramIndex}`);
+          updateValues.push(cleanedClientData[key]);
+          paramIndex++;
+        }
+      });
+
+      if (updateFields.length > 0) {
+        updateValues.push(id);
+        await connection.query(
+          `UPDATE client SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+          updateValues
+        );
+        console.log('✅ [updateClient] Client mis à jour dans la base');
+      }
 
       // Préparer les données de contact
       const contactData = {
@@ -691,88 +770,121 @@ export class UsersService {
         tel2: tel2 || null,
         tel3: tel3 || null,
         fax: fax || null,
-        mail1: email || mail1 || null, // Utiliser email ou mail1
+        mail1: email || mail1 || null,
         mail2: mail2 || null,
       };
 
-      console.log('🔄 [updateClient] Données contact à mettre à jour:', contactData);
+      console.log('🔄 [updateClient] Données contact:', contactData);
 
-      // Mettre à jour ou créer le contact
       // Vérifier si un contact existe déjà
-      const existingContact = await this.contactClientRepository.findOne({
-        where: { id_client: id }
-      });
+      const existingContactRows = await connection.query(
+        `SELECT * FROM contact_client WHERE id_client = $1 LIMIT 1`,
+        [id]
+      );
 
-      if (existingContact) {
+      if (existingContactRows && existingContactRows.length > 0) {
         // Mettre à jour le contact existant
-        await this.contactClientRepository.update({ id_client: id }, contactData);
-        console.log('✅ [updateClient] Contact mis à jour');
+        const contactUpdateFields: string[] = [];
+        const contactUpdateValues: any[] = [];
+        let contactParamIndex = 1;
+
+        Object.keys(contactData).forEach(key => {
+          if (contactData[key] !== undefined) {
+            contactUpdateFields.push(`${key} = $${contactParamIndex}`);
+            contactUpdateValues.push(contactData[key]);
+            contactParamIndex++;
+          }
+        });
+
+        if (contactUpdateFields.length > 0) {
+          contactUpdateValues.push(id);
+          await connection.query(
+            `UPDATE contact_client SET ${contactUpdateFields.join(', ')} WHERE id_client = $${contactParamIndex}`,
+            contactUpdateValues
+          );
+          console.log('✅ [updateClient] Contact mis à jour');
+        }
       } else {
         // Créer un nouveau contact
-        await this.contactClientRepository.save({
-          id_client: id,
-          ...contactData
-        });
+        await connection.query(
+          `INSERT INTO contact_client (id_client, tel1, tel2, tel3, fax, mail1, mail2)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [id, contactData.tel1, contactData.tel2, contactData.tel3, contactData.fax, contactData.mail1, contactData.mail2]
+        );
         console.log('✅ [updateClient] Contact créé');
       }
 
       // Récupérer le client mis à jour
-      const updatedClient = await this.clientRepository.findOne({
-        where: { id }
-      });
+      const updatedClientRows = await connection.query(
+        `SELECT * FROM client WHERE id = $1 LIMIT 1`,
+        [id]
+      );
 
+      const updatedClient = updatedClientRows[0];
       console.log('✅ [updateClient] Client mis à jour avec succès:', updatedClient?.nom);
-      return updatedClient!;
+      return updatedClient;
 
     } catch (error) {
-      console.error('❌ [updateClient] Erreur lors de la mise à jour:', error);
+      console.error('❌ [updateClient] Erreur:', error);
       throw new Error(`Impossible de mettre à jour le client: ${error.message}`);
     }
   }
 
-  async getPersonnelById(id: number): Promise<Personnel> {
-    const personnel = await this.personnelRepository.findOne({
-      where: { id },
-      select: [
-        'id',
-        'nom',
-        'prenom',
-        'nom_utilisateur',
-        'role',
-        'telephone',
-        'email',
-        'statut',
-        'created_at',
-      ],
-    });
+  /**
+   * Récupérer un personnel par ID
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async getPersonnelById(databaseName: string, organisationId: number, id: number): Promise<Personnel> {
+    console.log(`🔍 [getPersonnelById] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const personnelRows = await connection.query(
+      `SELECT id, nom, prenom, nom_utilisateur, role, telephone, email, statut, created_at
+       FROM personnel WHERE id = $1 AND organisation_id = $2 LIMIT 1`,
+      [id, organisationId]
+    );
 
-    if (!personnel) {
+    if (!personnelRows || personnelRows.length === 0) {
+      console.error(`❌ [getPersonnelById] Personnel ${id} non trouvé dans organisation ${organisationId}`);
       throw new NotFoundException('Personnel non trouvé');
     }
 
+    const personnel = personnelRows[0];
+    console.log(`✅ [getPersonnelById] Personnel récupéré: ${personnel.nom_utilisateur} (Org: ${organisationId})`);
     return personnel;
   }
 
-  async updatePersonnel(id: number, updateData: Partial<CreatePersonnelDto>): Promise<Personnel> {
+  /**
+   * Mettre à jour un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async updatePersonnel(databaseName: string, organisationId: number, id: number, updateData: Partial<CreatePersonnelDto>): Promise<Personnel> {
+    console.log('🔄 [updatePersonnel] DB:', databaseName, 'Org:', organisationId, 'Personnel ID:', id);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Vérifier que le personnel existe
-    const existingPersonnel = await this.personnelRepository.findOne({
-      where: { id }
-    });
+    const existingPersonnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
 
-    if (!existingPersonnel) {
+    if (!existingPersonnelRows || existingPersonnelRows.length === 0) {
+      console.error('❌ [updatePersonnel] Personnel non trouvé');
       throw new NotFoundException('Personnel non trouvé');
     }
 
+    const existingPersonnel = existingPersonnelRows[0];
+
     // Vérifier l'unicité du nom d'utilisateur si modifié - insensible à la casse
     if (updateData.nom_utilisateur && updateData.nom_utilisateur.toLowerCase() !== existingPersonnel.nom_utilisateur.toLowerCase()) {
-      const existingUser = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .where('LOWER(personnel.nom_utilisateur) = LOWER(:username)', { 
-          username: updateData.nom_utilisateur 
-        })
-        .getOne();
+      const existingUserRows = await connection.query(
+        `SELECT * FROM personnel WHERE LOWER(nom_utilisateur) = LOWER($1) LIMIT 1`,
+        [updateData.nom_utilisateur]
+      );
 
-      if (existingUser) {
+      if (existingUserRows && existingUserRows.length > 0) {
         throw new ConflictException('Ce nom d\'utilisateur est déjà utilisé');
       }
     }
@@ -788,25 +900,24 @@ export class UsersService {
         );
       }
 
-      const existingPhonePersonnel = await this.personnelRepository.findOne({
-        where: { telephone: updateData.telephone },
-      });
+      const existingPhonePersonnelRows = await connection.query(
+        `SELECT * FROM personnel WHERE telephone = $1 LIMIT 1`,
+        [updateData.telephone]
+      );
 
-      if (existingPhonePersonnel && existingPhonePersonnel.id !== id) {
+      if (existingPhonePersonnelRows && existingPhonePersonnelRows.length > 0 && existingPhonePersonnelRows[0].id !== id) {
         throw new ConflictException(
           'Ce numéro de téléphone est déjà utilisé par un autre personnel'
         );
       }
 
       // Vérifier aussi dans la table des contacts clients
-      const existingPhoneClient = await this.clientRepository.createQueryBuilder('client')
-        .leftJoin('client.contacts', 'contact')
-        .where('contact.tel1 = :phone', { phone: updateData.telephone })
-        .orWhere('contact.tel2 = :phone', { phone: updateData.telephone })
-        .orWhere('contact.tel3 = :phone', { phone: updateData.telephone })
-        .getOne();
+      const existingPhoneClientRows = await connection.query(
+        `SELECT * FROM contact_client WHERE tel1 = $1 OR tel2 = $1 OR tel3 = $1 LIMIT 1`,
+        [updateData.telephone]
+      );
 
-      if (existingPhoneClient) {
+      if (existingPhoneClientRows && existingPhoneClientRows.length > 0) {
         throw new ConflictException(
           'Ce numéro de téléphone est déjà utilisé par un client'
         );
@@ -814,23 +925,72 @@ export class UsersService {
     }
 
     // Préparer les données de mise à jour
-    const updateFields: Partial<Personnel> = {};
+    const updateFieldsArray: string[] = [];
+    const updateValues: any[] = [];
+    let paramIndex = 1;
     
-    if (updateData.nom) updateFields.nom = updateData.nom;
-    if (updateData.prenom) updateFields.prenom = updateData.prenom;
-    if (updateData.nom_utilisateur) updateFields.nom_utilisateur = updateData.nom_utilisateur;
-    if (updateData.role) updateFields.role = updateData.role;
-    if (updateData.telephone) updateFields.telephone = updateData.telephone;
-    if (updateData.email) updateFields.email = updateData.email;
-    if (updateData.genre) updateFields.genre = updateData.genre;
-    if (updateData.statut) updateFields.statut = updateData.statut;
-    if (updateData.is_superviseur !== undefined) updateFields.is_superviseur = updateData.is_superviseur;
+    if (updateData.nom) {
+      updateFieldsArray.push(`nom = $${paramIndex}`);
+      updateValues.push(updateData.nom);
+      paramIndex++;
+    }
+    if (updateData.prenom) {
+      updateFieldsArray.push(`prenom = $${paramIndex}`);
+      updateValues.push(updateData.prenom);
+      paramIndex++;
+    }
+    if (updateData.nom_utilisateur) {
+      updateFieldsArray.push(`nom_utilisateur = $${paramIndex}`);
+      updateValues.push(updateData.nom_utilisateur);
+      paramIndex++;
+    }
+    if (updateData.role) {
+      updateFieldsArray.push(`role = $${paramIndex}`);
+      updateValues.push(updateData.role);
+      paramIndex++;
+    }
+    if (updateData.telephone) {
+      updateFieldsArray.push(`telephone = $${paramIndex}`);
+      updateValues.push(updateData.telephone);
+      paramIndex++;
+    }
+    if (updateData.email) {
+      updateFieldsArray.push(`email = $${paramIndex}`);
+      updateValues.push(updateData.email);
+      paramIndex++;
+    }
+    if (updateData.genre) {
+      updateFieldsArray.push(`genre = $${paramIndex}`);
+      updateValues.push(updateData.genre);
+      paramIndex++;
+    }
+    if (updateData.statut) {
+      updateFieldsArray.push(`statut = $${paramIndex}`);
+      updateValues.push(updateData.statut);
+      paramIndex++;
+    }
+    if (updateData.is_superviseur !== undefined) {
+      updateFieldsArray.push(`is_superviseur = $${paramIndex}`);
+      updateValues.push(updateData.is_superviseur);
+      paramIndex++;
+    }
 
     // Effectuer la mise à jour
-    await this.personnelRepository.update(id, updateFields);
+    if (updateFieldsArray.length > 0) {
+      updateValues.push(id);
+      await connection.query(
+        `UPDATE personnel SET ${updateFieldsArray.join(', ')} WHERE id = $${paramIndex}`,
+        updateValues
+      );
+      console.log('✅ [updatePersonnel] Personnel mis à jour dans la base');
+    }
 
     // Récupérer le personnel mis à jour
-    const updatedPersonnel = await this.getPersonnelById(id);
+    const updatedPersonnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    const updatedPersonnel = updatedPersonnelRows[0];
 
     // Synchroniser avec Keycloak - créer l'utilisateur s'il n'existe pas
     if (!updatedPersonnel.keycloak_id) {
@@ -847,7 +1007,10 @@ export class UsersService {
         
         if (keycloakId) {
           // Mettre à jour l'ID dans la base
-          await this.personnelRepository.update(id, { keycloak_id: keycloakId });
+          await connection.query(
+            `UPDATE personnel SET keycloak_id = $1 WHERE id = $2`,
+            [keycloakId, id]
+          );
           // Assigner le rôle
           await this.keycloakService.updateUserRole(keycloakId, updatedPersonnel.role);
           this.logger.log(`Utilisateur créé dans Keycloak avec ID: ${keycloakId}`);
@@ -883,19 +1046,6 @@ export class UsersService {
           this.logger.log(`Utilisateur ${updatedPersonnel.nom_utilisateur} activé dans Keycloak`);
         }
 
-        // Vérifier immédiatement que les changements ont été appliqués
-        await new Promise(resolve => setTimeout(resolve, 500)); // Attendre 500ms
-        
-        // TODO: Implémenter getUserById dans KeycloakService
-        // const verificationUser = await this.keycloakService.getUserById(updatedPersonnel.keycloak_id);
-        // if (verificationUser) {
-        //   this.logger.log(`✅ Vérification Keycloak réussie pour ${updatedPersonnel.nom_utilisateur}:`);
-        //   this.logger.log(`   - Email: ${verificationUser.email}`);
-        //   this.logger.log(`   - FirstName: ${verificationUser.firstName}`);
-        //   this.logger.log(`   - LastName: ${verificationUser.lastName}`);
-        //   this.logger.log(`   - Enabled: ${verificationUser.enabled}`);
-        // }
-        
         this.logger.log(`Utilisateur ${updatedPersonnel.nom_utilisateur} synchronisé avec Keycloak`);
       } catch (error) {
         this.logger.warn('Erreur lors de la synchronisation avec Keycloak:', error.message);
@@ -906,23 +1056,35 @@ export class UsersService {
     return updatedPersonnel;
   }
 
-  async updateClientPassword(id: number, newPassword: string): Promise<void> {
-    // Récupérer l'utilisateur pour obtenir le keycloak_id
-    const client = await this.clientRepository.findOne({ where: { id } });
+  /**
+   * Mettre à jour le mot de passe d'un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async updateClientPassword(databaseName: string, organisationId: number, id: number, newPassword: string): Promise<void> {
+    console.log(`🔐 [updateClientPassword] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
     
-    if (!client) {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    // Récupérer l'utilisateur pour obtenir le keycloak_id
+    const clientRows = await connection.query(
+      `SELECT * FROM client WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!clientRows || clientRows.length === 0) {
       throw new NotFoundException('Client non trouvé');
     }
+    
+    const client = clientRows[0];
 
     // Mettre à jour le mot de passe en base
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-    const result = await this.clientRepository.update(id, {
-      mot_de_passe: hashedPassword,
-    });
+    await connection.query(
+      `UPDATE client SET mot_de_passe = $1 WHERE id = $2`,
+      [hashedPassword, id]
+    );
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Client non trouvé');
-    }
+    console.log('✅ [updateClientPassword] Mot de passe mis à jour en base');
 
     // Synchroniser avec Keycloak si l'utilisateur a un keycloak_id
     if (client.keycloak_id) {
@@ -936,26 +1098,40 @@ export class UsersService {
     }
   }
 
+  /**
+   * Mettre à jour le mot de passe d'un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
   async updatePersonnelPassword(
+    databaseName: string,
+    organisationId: number,
     id: number,
     newPassword: string,
   ): Promise<void> {
-    // Récupérer l'utilisateur pour obtenir le keycloak_id
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
+    console.log(`🔐 [updatePersonnelPassword] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
     
-    if (!personnel) {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    // Récupérer l'utilisateur pour obtenir le keycloak_id
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
 
     // Mettre à jour le mot de passe en base
     const hashedPassword = await bcrypt.hash(newPassword, 12);
-    const result = await this.personnelRepository.update(id, {
-      mot_de_passe: hashedPassword,
-    });
+    await connection.query(
+      `UPDATE personnel SET mot_de_passe = $1 WHERE id = $2`,
+      [hashedPassword, id]
+    );
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé');
-    }
+    console.log('✅ [updatePersonnelPassword] Mot de passe mis à jour en base');
 
     // Synchroniser avec Keycloak si l'utilisateur a un keycloak_id
     if (personnel.keycloak_id) {
@@ -969,38 +1145,77 @@ export class UsersService {
     }
   }
 
-  async blockClient(id: number): Promise<void> {
-    const result = await this.clientRepository.update(id, { blocage: true });
+  /**
+   * Bloquer un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async blockClient(databaseName: string, organisationId: number, id: number): Promise<void> {
+    console.log(`🚫 [blockClient] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `UPDATE client SET blocage = true WHERE id = $1`,
+      [id]
+    );
 
-    if (result.affected === 0) {
+    if (result[1] === 0) {
       throw new NotFoundException('Client non trouvé');
     }
+    
+    console.log('✅ [blockClient] Client bloqué');
   }
 
-  async unblockClient(id: number): Promise<void> {
-    const result = await this.clientRepository.update(id, { blocage: false });
+  /**
+   * Débloquer un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async unblockClient(databaseName: string, organisationId: number, id: number): Promise<void> {
+    console.log(`✅ [unblockClient] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `UPDATE client SET blocage = false WHERE id = $1`,
+      [id]
+    );
 
-    if (result.affected === 0) {
+    if (result[1] === 0) {
       throw new NotFoundException('Client non trouvé');
     }
+    
+    console.log('✅ [unblockClient] Client débloqué');
   }
 
-  async deactivatePersonnel(id: number, reason?: string): Promise<void> {
+  /**
+   * Désactiver un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async deactivatePersonnel(databaseName: string, organisationId: number, id: number, reason?: string): Promise<void> {
+    console.log(`🔴 [deactivatePersonnel] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du personnel avant désactivation
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
-
+    
+    const personnel = personnelRows[0];
+    
     // Mettre à jour le statut
-    const result = await this.personnelRepository.update(id, {
-      statut: 'inactif',
-    });
+    await connection.query(
+      `UPDATE personnel SET statut = 'inactif' WHERE id = $1`,
+      [id]
+    );
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé');
-    }
-
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} désactivé. Raison: ${reason || 'Non spécifiée'}`);
+    
     // Synchroniser avec Keycloak - désactiver l'utilisateur
     if (personnel.keycloak_id) {
       try {
@@ -1029,22 +1244,35 @@ export class UsersService {
     }
   }
 
-  async suspendPersonnel(id: number, reason?: string): Promise<void> {
+  /**
+   * Suspendre un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async suspendPersonnel(databaseName: string, organisationId: number, id: number, reason?: string): Promise<void> {
+    console.log(`⏸️ [suspendPersonnel] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du personnel avant suspension
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
-
+    
+    const personnel = personnelRows[0];
+    
     // Mettre à jour le statut
-    const result = await this.personnelRepository.update(id, {
-      statut: 'suspendu',
-    });
+    await connection.query(
+      `UPDATE personnel SET statut = 'suspendu' WHERE id = $1`,
+      [id]
+    );
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé');
-    }
-
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} suspendu. Raison: ${reason || 'Non spécifiée'}`);
+    
     // Synchroniser avec Keycloak - désactiver l'utilisateur suspendu
     if (personnel.keycloak_id) {
       try {
@@ -1073,21 +1301,35 @@ export class UsersService {
     }
   }
 
-  async activatePersonnel(id: number): Promise<void> {
+  /**
+   * Activer un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async activatePersonnel(databaseName: string, organisationId: number, id: number): Promise<void> {
+    console.log(`✅ [activatePersonnel] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du personnel
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
+    
+    // Mettre à jour le statut
+    await connection.query(
+      `UPDATE personnel SET statut = 'actif' WHERE id = $1`,
+      [id]
+    );
 
-    const result = await this.personnelRepository.update(id, {
-      statut: 'actif',
-    });
-
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé');
-    }
-
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} activé`);
+    
     // Synchroniser avec Keycloak - activer l'utilisateur
     if (personnel.keycloak_id) {
       try {
@@ -1100,22 +1342,35 @@ export class UsersService {
     }
   }
 
-  async reactivatePersonnel(id: number): Promise<void> {
+  /**
+   * Réactiver un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async reactivatePersonnel(databaseName: string, organisationId: number, id: number): Promise<void> {
+    console.log(`♻️ [reactivatePersonnel] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du personnel avant réactivation
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
-
+    
+    const personnel = personnelRows[0];
+    
     // Mettre à jour le statut
-    const result = await this.personnelRepository.update(id, {
-      statut: 'actif',
-    });
+    await connection.query(
+      `UPDATE personnel SET statut = 'actif' WHERE id = $1`,
+      [id]
+    );
 
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé');
-    }
-
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} réactivé`);
+    
     // Synchroniser avec Keycloak - réactiver l'utilisateur
     if (personnel.keycloak_id) {
       try {
@@ -1142,12 +1397,26 @@ export class UsersService {
     }
   }
 
-  async deletePersonnel(id: number, reason?: string): Promise<void> {
+  /**
+   * Supprimer un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async deletePersonnel(databaseName: string, organisationId: number, id: number, reason?: string): Promise<void> {
+    console.log(`🗑️ [deletePersonnel] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du personnel avant suppression
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
 
     // Supprimer l'utilisateur de Keycloak d'abord
     if (personnel.keycloak_id) {
@@ -1178,27 +1447,43 @@ export class UsersService {
 
     // Supprimer les objectifs commerciaux associés
     try {
-      await this.objectifComRepository.delete({ id_personnel: id });
+      await connection.query(
+        `DELETE FROM objectif_com WHERE id_personnel = $1`,
+        [id]
+      );
       this.logger.log(`Objectifs commerciaux supprimés pour le personnel ${id}`);
     } catch (error) {
       this.logger.warn(`Erreur suppression objectifs pour personnel ${id}:`, error.message);
     }
 
-    // Supprimer le personnel de la base de données
-    const result = await this.personnelRepository.delete(id);
-    if (result.affected === 0) {
-      throw new NotFoundException('Personnel non trouvé pour suppression');
-    }
+    // Soft delete du personnel
+    await connection.query(
+      `UPDATE personnel SET deleted_at = NOW(), statut = 'supprime' WHERE id = $1`,
+      [id]
+    );
 
-    this.logger.log(`Personnel ${personnel.nom_utilisateur} supprimé avec succès`);
+    this.logger.log(`Personnel ${personnel.nom_utilisateur} supprimé. Raison: ${reason || 'Non spécifiée'}`);
   }
 
-  // Obtenir l'activité d'un personnel depuis Keycloak
-  async getPersonnelActivity(id: number): Promise<any> {
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+  /**
+   * Obtenir l'activité d'un personnel depuis Keycloak
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async getPersonnelActivity(databaseName: string, organisationId: number, id: number): Promise<any> {
+    console.log(`📊 [getPersonnelActivity] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
 
     if (!personnel.keycloak_id) {
       return {
@@ -1236,12 +1521,25 @@ export class UsersService {
     }
   }
 
-  // Obtenir les sessions actives d'un personnel
-  async getPersonnelSessions(id: number): Promise<any> {
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+  /**
+   * Obtenir les sessions actives d'un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async getPersonnelSessions(databaseName: string, organisationId: number, id: number): Promise<any> {
+    console.log(`🔐 [getPersonnelSessions] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
 
     if (!personnel.keycloak_id) {
       return {
@@ -1284,12 +1582,25 @@ export class UsersService {
     }
   }
 
-  // Déconnecter toutes les sessions d'un personnel
-  async logoutAllPersonnelSessions(id: number): Promise<any> {
-    const personnel = await this.personnelRepository.findOne({ where: { id } });
-    if (!personnel) {
+  /**
+   * Déconnecter toutes les sessions d'un personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async logoutAllPersonnelSessions(databaseName: string, organisationId: number, id: number): Promise<any> {
+    console.log(`🚪 [logoutAllPersonnelSessions] DB: ${databaseName}, Org: ${organisationId}, Personnel ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const personnelRows = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!personnelRows || personnelRows.length === 0) {
       throw new NotFoundException('Personnel non trouvé');
     }
+    
+    const personnel = personnelRows[0];
 
     if (!personnel.keycloak_id) {
       return {
@@ -1316,143 +1627,234 @@ export class UsersService {
     }
   }
 
-  async deactivateClient(id: number, statut: string, motif: string, notifyByEmail: boolean): Promise<void> {
+  /**
+   * Désactiver ou suspendre un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async deactivateClient(databaseName: string, organisationId: number, id: number, statut: string, motif: string, notifyByEmail: boolean): Promise<void> {
+    console.log(`🔴 [deactivateClient] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}, Statut: ${statut}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du client avec ses contacts
-    const client = await this.clientRepository.findOne({ 
-      where: { id },
-      relations: ['contacts']
-    });
-    if (!client) {
+    const clientRows = await connection.query(
+      `SELECT c.*, 
+              (SELECT json_agg(json_build_object('mail1', cc.mail1, 'mail2', cc.mail2, 'is_principal', cc.is_principal))
+               FROM contact_client cc WHERE cc.id_client = c.id) as contacts
+       FROM client c
+       WHERE c.id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!clientRows || clientRows.length === 0) {
       throw new NotFoundException('Client non trouvé');
     }
-
+    
+    const client = clientRows[0];
+    
     // Log de débogage pour vérifier les contacts
     this.logger.log(`🔍 Client trouvé: ${client.nom}, Nombre de contacts: ${client.contacts?.length || 0}`);
     if (client.contacts && client.contacts.length > 0) {
-      client.contacts.forEach((contact, index) => {
+      client.contacts.forEach((contact: any, index: number) => {
         this.logger.log(`📧 Contact ${index + 1}: mail1=${contact.mail1}, mail2=${contact.mail2}`);
       });
     }
-
+    
     // Mettre à jour le statut
-    const result = await this.clientRepository.update(id, {
-      statut: statut, // 'desactive' ou 'suspendu'
-    });
-
-    if (result.affected === 0) {
-      throw new NotFoundException('Client non trouvé');
-    }
-
-    // Envoyer un email de notification (toujours activé)
-    try {
-      // 🆕 Priorité au contact principal (is_principal = true)
-      let emailToUse = null;
-      
-      // 1. Chercher le contact principal
-      if (client.contacts && client.contacts.length > 0) {
-        const principalContact = client.contacts.find(c => c.is_principal);
-        const contactToUse = principalContact || client.contacts[0]; // Fallback sur le premier contact
-        emailToUse = contactToUse.mail1 || contactToUse.mail2;
-        this.logger.log(`Email trouvé dans contact_client ${principalContact ? '(principal)' : '(premier)'}: ${emailToUse} pour client ${client.nom}`);
-      }
-      
-      // 2. Fallback sur client.email si pas d'email dans les contacts
-      if (!emailToUse && client.email) {
-        emailToUse = client.email;
-        this.logger.log(`Email trouvé dans client: ${emailToUse} pour client ${client.nom}`);
-      }
-
-      if (emailToUse) {
-        this.logger.log(`Tentative d'envoi d'email de ${statut} à ${emailToUse} pour client ${client.nom}`);
-        
-        const emailSent = await this.emailService.sendClientDeactivationEmail(
-          emailToUse,
-          client.nom,
-          statut as 'desactive' | 'suspendu',
-          motif
-        );
-        
-        if (emailSent) {
-          this.logger.log(`✅ Email de notification envoyé avec succès à ${emailToUse} pour ${statut} du client ${client.nom}`);
-        } else {
-          this.logger.error(`❌ Échec de l'envoi de l'email de notification à ${emailToUse}`);
-        }
-      } else {
-        this.logger.error(`❌ Aucun email trouvé pour le client ${client.nom} (ID: ${id}) - Vérifiez la table contact_client`);
-      }
-    } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi de l'email de notification: ${error.message}`, error.stack);
-    }
-
+    await connection.query(
+      `UPDATE client SET statut = $1 WHERE id = $2`,
+      [statut, id]
+    );
+    
     this.logger.log(`Client ${client.nom} ${statut === 'desactive' ? 'désactivé' : 'suspendu'}. Motif: ${motif}`);
+    
+    // Envoyer email de notification si demandé
+    if (notifyByEmail && client.contacts && client.contacts.length > 0) {
+      try {
+        const principalContact = client.contacts.find((c: any) => c.is_principal);
+        const contactToUse = principalContact || client.contacts[0];
+        const emailToUse = contactToUse.mail1 || contactToUse.mail2;
+        
+        if (emailToUse) {
+          await this.emailService.sendClientDeactivationEmail(
+            emailToUse,
+            client.nom,
+            statut as 'desactive' | 'suspendu',
+            motif
+          );
+          this.logger.log(`✅ Email de notification envoyé à ${emailToUse}`);
+        }
+      } catch (error) {
+        this.logger.error(`Erreur lors de l'envoi de l'email: ${error.message}`);
+      }
+    }
   }
 
-  async reactivateClient(id: number, notifyByEmail: boolean): Promise<void> {
+  /**
+   * Réactiver un client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  async reactivateClient(databaseName: string, organisationId: number, id: number, notifyByEmail: boolean): Promise<void> {
+    console.log(`✅ [reactivateClient] DB: ${databaseName}, Org: ${organisationId}, Client ID: ${id}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer les informations du client avec ses contacts
-    const client = await this.clientRepository.findOne({ 
-      where: { id },
-      relations: ['contacts']
-    });
-    if (!client) {
+    const clientRows = await connection.query(
+      `SELECT c.*, 
+              (SELECT json_agg(json_build_object('mail1', cc.mail1, 'mail2', cc.mail2, 'is_principal', cc.is_principal))
+               FROM contact_client cc WHERE cc.id_client = c.id) as contacts
+       FROM client c
+       WHERE c.id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!clientRows || clientRows.length === 0) {
       throw new NotFoundException('Client non trouvé');
     }
-
+    
+    const client = clientRows[0];
+    
     // Log de débogage pour vérifier les contacts
     this.logger.log(`🔍 Client trouvé: ${client.nom}, Nombre de contacts: ${client.contacts?.length || 0}`);
     if (client.contacts && client.contacts.length > 0) {
-      client.contacts.forEach((contact, index) => {
+      client.contacts.forEach((contact: any, index: number) => {
         this.logger.log(`📧 Contact ${index + 1}: mail1=${contact.mail1}, mail2=${contact.mail2}`);
       });
     }
-
+    
     // Mettre à jour le statut
-    const result = await this.clientRepository.update(id, {
-      statut: 'actif',
-    });
-
-    if (result.affected === 0) {
-      throw new NotFoundException('Client non trouvé');
-    }
-
-    // Envoyer un email de notification (toujours activé)
-    try {
-      // 🆕 Priorité au contact principal (is_principal = true)
-      let emailToUse = null;
-      
-      // 1. Chercher le contact principal
-      if (client.contacts && client.contacts.length > 0) {
-        const principalContact = client.contacts.find(c => c.is_principal);
-        const contactToUse = principalContact || client.contacts[0]; // Fallback sur le premier contact
-        emailToUse = contactToUse.mail1 || contactToUse.mail2;
-        this.logger.log(`Email trouvé dans contact_client ${principalContact ? '(principal)' : '(premier)'}: ${emailToUse} pour client ${client.nom}`);
-      }
-      
-      // 2. Fallback sur client.email si pas d'email dans les contacts
-      if (!emailToUse && client.email) {
-        emailToUse = client.email;
-        this.logger.log(`Email trouvé dans client: ${emailToUse} pour client ${client.nom}`);
-      }
-
-      if (emailToUse) {
-        this.logger.log(`Tentative d'envoi d'email de réactivation à ${emailToUse} pour client ${client.nom}`);
-        
-        const emailSent = await this.emailService.sendClientReactivationEmail(
-          emailToUse,
-          client.nom
-        );
-        
-        if (emailSent) {
-          this.logger.log(`✅ Email de réactivation envoyé avec succès à ${emailToUse} pour le client ${client.nom}`);
-        } else {
-          this.logger.error(`❌ Échec de l'envoi de l'email de réactivation à ${emailToUse}`);
-        }
-      } else {
-        this.logger.error(`❌ Aucun email trouvé pour le client ${client.nom} (ID: ${id}) - Vérifiez la table contact_client`);
-      }
-    } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi de l'email de réactivation: ${error.message}`, error.stack);
-    }
-
+    await connection.query(
+      `UPDATE client SET statut = 'actif' WHERE id = $1`,
+      [id]
+    );
+    
     this.logger.log(`Client ${client.nom} réactivé avec succès`);
+    
+    // Envoyer email de notification si demandé
+    if (notifyByEmail && client.contacts && client.contacts.length > 0) {
+      try {
+        const principalContact = client.contacts.find((c: any) => c.is_principal);
+        const contactToUse = principalContact || client.contacts[0];
+        const emailToUse = contactToUse.mail1 || contactToUse.mail2;
+        
+        if (emailToUse) {
+          await this.emailService.sendClientReactivationEmail(
+            emailToUse,
+            client.nom
+          );
+          this.logger.log(`✅ Email de réactivation envoyé à ${emailToUse}`);
+        }
+      } catch (error) {
+        this.logger.error(`Erreur lors de l'envoi de l'email: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * 📋 Récupérer tout le personnel
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId depuis le contexte de la requête
+   */
+  async getAllPersonnel(databaseName?: string, organisationId?: number): Promise<Personnel[]> {
+    try {
+      // Si databaseName est fourni, utiliser la connexion multi-tenant
+      if (databaseName) {
+        console.log(`🏢 [getAllPersonnel] Utilisation connexion multi-tenant: ${databaseName}, Org: ${organisationId}`);
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+        
+        // ✅ CORRECTION: Ajouter le filtre organisation_id
+        let query = `SELECT * FROM personnel`;
+        const params: any[] = [];
+        
+        if (organisationId) {
+          query += ` WHERE organisation_id = $1`;
+          params.push(organisationId);
+          console.log(`🔍 [getAllPersonnel] Requête SQL: ${query} avec params: [${params.join(', ')}]`);
+        } else {
+          console.warn(`⚠️ [getAllPersonnel] ATTENTION: organisationId est undefined/null, pas de filtre multi-tenant appliqué!`);
+        }
+        
+        query += ` ORDER BY id DESC`;
+        
+        const personnel = await connection.query(query, params);
+        console.log(`✅ [getAllPersonnel] ${personnel.length} personnel(s) trouvé(s) depuis ${databaseName} (Org: ${organisationId})`);
+        console.log(`📋 [getAllPersonnel] IDs retournés:`, personnel.map(p => p.id).join(', '));
+        return personnel;
+      }
+      
+      // Sinon, utiliser le repository multi-tenant (récupère le databaseName du contexte)
+      console.log('🔍 [getAllPersonnel] Utilisation tenantRepositoryService (contexte requête)');
+      const personnelRepository = await this.tenantRepositoryService.getPersonnelRepository();
+      const personnel = await personnelRepository.find({
+        select: [
+          'id',
+          'nom',
+          'prenom',
+          'nom_utilisateur',
+          'role',
+          'telephone',
+          'email',
+          'statut',
+          'photo',
+          'genre',
+          'created_at',
+          'is_superviseur',
+          'latitude',
+          'longitude',
+          'last_location_update',
+          'location_accuracy',
+          'location_source',
+          'is_location_active',
+          'location_tracking_enabled',
+          'statut_en_ligne',
+          'last_activity',
+        ],
+        order: { id: 'DESC' }
+      });
+      console.log(`✅ [getAllPersonnel] ${personnel.length} personnel(s) trouvé(s)`);
+      return personnel;
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération du personnel: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 👥 Récupérer le personnel par rôle
+   * ✅ MULTI-TENANT: Utilise databaseName depuis le contexte de la requête
+   */
+  async getPersonnelByRole(roles: string[], databaseName?: string): Promise<Personnel[]> {
+    try {
+      // Si databaseName est fourni, utiliser la connexion multi-tenant
+      if (databaseName) {
+        console.log(`🏢 [getPersonnelByRole] Utilisation connexion multi-tenant: ${databaseName}`);
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+        const placeholders = roles.map((_, i) => `$${i + 1}`).join(', ');
+        const personnel = await connection.query(
+          `SELECT * FROM personnel 
+           WHERE LOWER(role) IN (${placeholders}) 
+           ORDER BY nom, prenom`,
+          roles.map(r => r.toLowerCase())
+        );
+        console.log(`✅ [getPersonnelByRole] ${personnel.length} personnel(s) trouvé(s) depuis ${databaseName}`);
+        return personnel;
+      }
+      
+      // Sinon, utiliser le repository multi-tenant (récupère le databaseName du contexte)
+      console.log('🔍 [getPersonnelByRole] Utilisation tenantRepositoryService (contexte requête)');
+      const personnelRepository = await this.tenantRepositoryService.getPersonnelRepository();
+      const normalizedRoles = roles.map(r => r.toLowerCase());
+      const personnel = await personnelRepository
+        .createQueryBuilder('personnel')
+        .where('LOWER(personnel.role) IN (:...roles)', { roles: normalizedRoles })
+        .orderBy('personnel.nom', 'ASC')
+        .addOrderBy('personnel.prenom', 'ASC')
+        .getMany();
+      console.log(`✅ [getPersonnelByRole] ${personnel.length} personnel(s) trouvé(s)`);
+      return personnel;
+    } catch (error) {
+      this.logger.error(`Erreur lors de la récupération du personnel par rôle: ${error.message}`);
+      throw error;
+    }
   }
 }

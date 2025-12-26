@@ -9,9 +9,11 @@ import {
   Query,
   UseGuards,
   ParseIntPipe,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 import { PortsService } from '../services/ports.service';
 import { CreatePortDto, UpdatePortDto } from '../dto/port.dto';
 import { Port } from '../entities/port.entity';
@@ -27,8 +29,9 @@ export class PortsController {
   @ApiOperation({ summary: 'Créer un nouveau port' })
   @ApiResponse({ status: 201, description: 'Port créé avec succès', type: Port })
   @ApiResponse({ status: 409, description: 'L\'abréviation existe déjà' })
-  async create(@Body() createPortDto: CreatePortDto): Promise<Port> {
-    return await this.portsService.create(createPortDto);
+  async create(@Body() createPortDto: CreatePortDto, @Req() req: any): Promise<Port> {
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.create(databaseName, createPortDto);
   }
 
   @Get()
@@ -47,8 +50,11 @@ export class PortsController {
     @Query('ville') ville?: string,
     @Query('pays') pays?: string,
     @Query('isActive') isActive?: boolean,
+    @Req() req?: any,
   ): Promise<{ data: Port[]; total: number; page: number; limit: number }> {
+    const databaseName = getDatabaseName(req);
     return await this.portsService.findAll(
+      databaseName,
       page || 1,
       limit || 10,
       search,
@@ -61,23 +67,26 @@ export class PortsController {
   @Get('active')
   @ApiOperation({ summary: 'Récupérer tous les ports actifs' })
   @ApiResponse({ status: 200, description: 'Liste des ports actifs', type: [Port] })
-  async findAllActive(): Promise<Port[]> {
-    return await this.portsService.findAllActive();
+  async findAllActive(@Req() req: any): Promise<Port[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.findAllActive(databaseName);
   }
 
   @Get('all')
   @ApiOperation({ summary: 'Récupérer tous les ports (actifs et inactifs)' })
   @ApiResponse({ status: 200, description: 'Liste de tous les ports', type: [Port] })
-  async findAllPorts(): Promise<Port[]> {
-    return await this.portsService.findAllPorts();
+  async findAllPorts(@Req() req: any): Promise<Port[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.findAllPorts(databaseName);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Récupérer un port par ID' })
   @ApiResponse({ status: 200, description: 'Port trouvé', type: Port })
   @ApiResponse({ status: 404, description: 'Port non trouvé' })
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<Port> {
-    return await this.portsService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<Port> {
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.findOne(databaseName, id);
   }
 
   @Put(':id')
@@ -90,8 +99,10 @@ export class PortsController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updatePortDto: UpdatePortDto,
+    @Req() req: any,
   ): Promise<Port> {
-    return await this.portsService.update(id, updatePortDto);
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.update(databaseName, id, updatePortDto);
   }
 
   @Put(':id/toggle-active')
@@ -100,8 +111,9 @@ export class PortsController {
   @ApiOperation({ summary: 'Basculer le statut actif/inactif d\'un port' })
   @ApiResponse({ status: 200, description: 'Statut basculé avec succès', type: Port })
   @ApiResponse({ status: 404, description: 'Port non trouvé' })
-  async toggleActive(@Param('id', ParseIntPipe) id: number): Promise<Port> {
-    return await this.portsService.toggleActive(id);
+  async toggleActive(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<Port> {
+    const databaseName = getDatabaseName(req);
+    return await this.portsService.toggleActive(databaseName, id);
   }
 
   @Delete(':id')
@@ -110,8 +122,9 @@ export class PortsController {
   @ApiOperation({ summary: 'Supprimer un port' })
   @ApiResponse({ status: 200, description: 'Port supprimé avec succès' })
   @ApiResponse({ status: 404, description: 'Port non trouvé' })
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<{ message: string }> {
-    await this.portsService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<{ message: string }> {
+    const databaseName = getDatabaseName(req);
+    await this.portsService.remove(databaseName, id);
     return { message: 'Port supprimé avec succès' };
   }
 }

@@ -3,13 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { Organisation } from '../entities/organisation.entity';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter;
+  private organisationTransporters: Map<number, nodemailer.Transporter> = new Map();
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    @InjectDataSource('default') private dataSource: DataSource,
+    private databaseConnectionService: DatabaseConnectionService,
+  ) {
     this.initializeTransporter();
   }
 
@@ -24,18 +33,21 @@ export class EmailService {
    * Obtenir le nom de l'expéditeur depuis les variables d'environnement
    */
   private getFromName(): string {
-    return this.configService.get<string>('SMTP_FROM_NAME', 'Velosi ERP');
+    return this.configService.get<string>('SMTP_FROM_NAME', 'Shipnology ERP');
   }
 
   /**
-   * Obtenir le chemin du logo de la société
+   * Obtenir le chemin du logo de la société (Logimaster/Shipnology)
    */
   private getLogoPath(): string | null {
     const possiblePaths = [
-      path.join(process.cwd(), 'assets', 'logo_societee.png'),
-      path.join(__dirname, '..', '..', 'assets', 'logo_societee.png'),
-      path.join(__dirname, '..', 'assets', 'logo_societee.png'),
-      path.join(__dirname, '../../../assets', 'logo_societee.png')
+      path.join(process.cwd(), 'assets', 'logimaster.png'),
+      path.join(__dirname, '..', '..', 'assets', 'logimaster.png'),
+      path.join(__dirname, '..', 'assets', 'logimaster.png'),
+      path.join(__dirname, '../../../assets', 'logimaster.png'),
+      // Fallback sur logo_shipnology.png si disponible
+      path.join(process.cwd(), 'assets', 'logo_shipnology.png'),
+      path.join(__dirname, '..', '..', 'assets', 'logo_shipnology.png')
     ];
     
     for (const logoPath of possiblePaths) {
@@ -50,16 +62,19 @@ export class EmailService {
   }
 
   /**
-   * Obtenir le logo de la société en base64
+   * Obtenir le logo de la société en base64 (Shipnology/Logimaster)
    */
   private getCompanyLogoBase64(): string {
     try {
-      // Chemins possibles pour le logo
+      // Chemins possibles pour le logo (essayer logimaster.png et logo_shipnology.png)
       const possiblePaths = [
-        path.join(process.cwd(), 'assets', 'logo_societee.png'),
-        path.join(__dirname, '..', '..', 'assets', 'logo_societee.png'),
-        path.join(__dirname, '..', 'assets', 'logo_societee.png'),
-        path.join(__dirname, '../../../assets', 'logo_societee.png')
+        path.join(process.cwd(), 'assets', 'logimaster.png'),
+        path.join(__dirname, '..', '..', 'assets', 'logimaster.png'),
+        path.join(__dirname, '..', 'assets', 'logimaster.png'),
+        path.join(__dirname, '../../../assets', 'logimaster.png'),
+        // Fallback sur logo_shipnology.png si disponible
+        path.join(process.cwd(), 'assets', 'logo_shipnology.png'),
+        path.join(__dirname, '..', '..', 'assets', 'logo_shipnology.png')
       ];
       
       for (const logoPath of possiblePaths) {
@@ -121,12 +136,239 @@ export class EmailService {
     } catch (error) {
       this.logger.error('❌ Erreur initialisation service email:', error);
       this.transporter = null; // ✅ Continuer sans email au lieu de bloquer
-      this.logger.warn('⚠️ Application démarrée sans service email - Les notifications par email seront désactivées');
     }
   }
 
   /**
-   * Génère un footer simple et unifié pour tous les emails
+   * 🏢 MULTI-TENANT: Obtenir l'organisation depuis la base Shipnology
+   */
+  private async getOrganisation(organisationId: number): Promise<Organisation | null> {
+    try {
+      // Se connecter à la base Shipnology pour récupérer l'organisation
+      const mainConnection = await this.databaseConnectionService.getMainConnection();
+      
+      const result = await mainConnection.query(
+        `SELECT * FROM organisations WHERE id = $1`,
+        [organisationId]
+      );
+      
+      if (result && result.length > 0) {
+        return result[0] as Organisation;
+      }
+      
+      this.logger.warn(`⚠️ Organisation avec ID ${organisationId} introuvable`);
+      return null;
+    } catch (error) {
+      this.logger.error(`❌ Erreur lors de la récupération de l'organisation ${organisationId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 🏢 MULTI-TENANT: Obtenir ou créer un transporter SMTP pour une organisation
+   */
+  private async getTransporterForOrganisation(organisationId?: number): Promise<nodemailer.Transporter> {
+    // Si pas d'organisationId, utiliser le transporter global
+    if (!organisationId) {
+      return this.transporter;
+    }
+
+    // Vérifier si un transporter existe déjà en cache
+    if (this.organisationTransporters.has(organisationId)) {
+      return this.organisationTransporters.get(organisationId);
+    }
+
+    // Charger l'organisation
+    const organisation = await this.getOrganisation(organisationId);
+    
+    // Si l'organisation n'existe pas ou n'a pas de config SMTP, utiliser le global
+    if (!organisation || !organisation.smtp_enabled || !organisation.smtp_host) {
+      this.logger.log(`Organisation ${organisationId} utilise le SMTP global`);
+      return this.transporter;
+    }
+
+    // Créer un transporter personnalisé pour cette organisation
+    try {
+      const smtpPort = organisation.smtp_port || 587;
+      // Pour port 465: secure = true (SSL direct)
+      // Pour port 587: secure = false (STARTTLS)
+      const isSecure = smtpPort === 465;
+      
+      this.logger.log(`🔧 Configuration SMTP pour ${organisation.nom}:`, {
+        host: organisation.smtp_host,
+        port: smtpPort,
+        secure: isSecure,
+        user: organisation.smtp_user,
+        smtp_use_tls: organisation.smtp_use_tls,
+        smtp_from_email: organisation.smtp_from_email
+      });
+
+      const customTransporter = nodemailer.createTransport({
+        host: organisation.smtp_host,
+        port: smtpPort,
+        secure: isSecure, // true pour SSL (465), false pour TLS/STARTTLS (587)
+        auth: {
+          user: organisation.smtp_user,
+          pass: organisation.smtp_password,
+        },
+        tls: {
+          rejectUnauthorized: false,
+          ciphers: 'SSLv3' // Compatible avec Gmail
+        },
+      });
+
+      // Mettre en cache
+      this.organisationTransporters.set(organisationId, customTransporter);
+      
+      this.logger.log(`✅ Transporter SMTP créé pour organisation ${organisation.nom}: ${organisation.smtp_host}:${smtpPort} (secure: ${isSecure})`);
+      
+      return customTransporter;
+    } catch (error) {
+      this.logger.error(`❌ Erreur création transporter pour organisation ${organisationId}:`, error);
+      return this.transporter; // Fallback sur le global
+    }
+  }
+
+  /**
+   * 🏢 MULTI-TENANT: Obtenir le logo de l'organisation (ou logo par défaut)
+   */
+  private async getOrganisationLogoBase64(organisationId?: number): Promise<string> {
+    if (!organisationId) {
+      return this.getCompanyLogoBase64(); // Logo par défaut
+    }
+
+    const organisation = await this.getOrganisation(organisationId);
+    
+    if (!organisation || !organisation.logo_url) {
+      return this.getCompanyLogoBase64(); // Logo par défaut
+    }
+
+    try {
+      // Le logo_url peut être un chemin local ou une URL
+      let logoPath = organisation.logo_url;
+      
+      // Si c'est un chemin relatif, le transformer en absolu
+      if (!logoPath.startsWith('http') && !path.isAbsolute(logoPath)) {
+        logoPath = path.join(process.cwd(), 'uploads', logoPath);
+      }
+      
+      // Si c'est un fichier local
+      if (!logoPath.startsWith('http') && fs.existsSync(logoPath)) {
+        const logoData = fs.readFileSync(logoPath);
+        const base64Logo = logoData.toString('base64');
+        const mimeType = this.getMimeType(logoPath);
+        return `data:${mimeType};base64,${base64Logo}`;
+      }
+      
+      // Si c'est une URL, on retourne l'URL directement
+      if (logoPath.startsWith('http')) {
+        return logoPath;
+      }
+      
+      // Sinon, logo par défaut
+      return this.getCompanyLogoBase64();
+    } catch (error) {
+      this.logger.error(`❌ Erreur chargement logo organisation ${organisationId}:`, error);
+      return this.getCompanyLogoBase64();
+    }
+  }
+
+  /**
+   * Obtenir le MIME type d'un fichier
+   */
+  private getMimeType(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: { [key: string]: string } = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+    };
+    return mimeTypes[ext] || 'image/png';
+  }
+
+  /**
+   * 🏢 MULTI-TENANT: Génère un footer personnalisé pour l'organisation
+   */
+  private async getEmailFooter(organisationId?: number): Promise<string> {
+    if (!organisationId) {
+      // Footer par défaut sans organisation
+      return `
+        <div class="footer" style="
+          background-color: #f8f9fa;
+          padding: 20px;
+          text-align: center;
+          border-top: 1px solid #e9ecef;
+          margin-top: 30px;
+          color: #6c757d;
+          font-size: 12px;
+          line-height: 1.5;
+        ">
+          <p style="margin: 0 0 10px 0; font-weight: 500; color: #495057;">
+            © ${new Date().getFullYear()} Shipnology ERP - Tous droits réservés
+          </p>
+          <p style="margin: 0; font-size: 10px; color: #868e96;">
+            Cet email a été envoyé automatiquement. Merci de ne pas répondre à cette adresse.
+          </p>
+        </div>
+      `;
+    }
+
+    const organisation = await this.getOrganisation(organisationId);
+    
+    if (!organisation) {
+      return this.getEmailFooter(); // Footer par défaut si organisation introuvable
+    }
+
+    const nomAffiche = organisation.nom_affichage || organisation.nom;
+    const emailServiceTechnique = organisation.email_service_technique || '';
+    const siteWeb = organisation.site_web || '';
+    
+    // Construire la liste des téléphones disponibles (tel1 | tel2 | tel3)
+    const phones = [organisation.tel1, organisation.tel2, organisation.tel3].filter(Boolean);
+    const telephonesStr = phones.length > 0 ? phones.join(' | ') : '';
+    
+    return `
+      <div class="footer" style="
+        background-color: #f8f9fa;
+        padding: 25px 20px;
+        text-align: center;
+        border-top: 1px solid #e9ecef;
+        margin-top: 30px;
+        color: #6c757d;
+        font-size: 12px;
+        line-height: 1.6;
+      ">
+        <p style="margin: 0 0 10px 0; font-weight: 600; color: #2c3e50; font-size: 14px;">
+          ${nomAffiche}
+        </p>
+        ${telephonesStr ? `<p style="margin: 0 0 5px 0; color: #495057;">
+          📞 ${telephonesStr}
+        </p>` : ''}
+        ${siteWeb ? `<p style="margin: 0 0 10px 0; color: #495057;">
+          🌐 <a href="${siteWeb.startsWith('http') ? siteWeb : 'https://' + siteWeb}" target="_blank" style="color: #5e72e4; text-decoration: none;">${siteWeb}</a>
+        </p>` : ''}
+        ${emailServiceTechnique ? `<p style="margin: 10px 0 5px 0; color: #495057; font-size: 13px;">
+          💬 <strong>Besoin d'aide?</strong> Contactez-nous: <a href="mailto:${emailServiceTechnique}" style="color: #5e72e4; text-decoration: none; font-weight: 600;">${emailServiceTechnique}</a>
+        </p>` : ''}
+        <hr style="border: none; border-top: 1px solid #dee2e6; margin: 15px 0;" />
+        <p style="margin: 0 0 5px 0; font-size: 11px; color: #6c757d;">
+          Propulsé par <strong style="color: #5e72e4;">Shipnology ERP</strong>
+        </p>
+        <p style="margin: 0; font-size: 10px; color: #868e96;">
+          © ${new Date().getFullYear()} - Tous droits réservés
+        </p>
+        <p style="margin: 5px 0 0 0; font-size: 10px; color: #adb5bd;">
+          Cet email a été envoyé automatiquement. Merci de ne pas répondre à cette adresse.
+        </p>
+      </div>
+    `;
+  }
+
+  /**
+   * Génère un footer simple et unifié pour tous les emails (DEPRECATED - Utiliser getEmailFooter)
+   * @deprecated Utiliser getEmailFooter(organisationId) pour un footer personnalisé
    */
   private getSimpleEmailFooter(): string {
     return `
@@ -160,9 +402,12 @@ export class EmailService {
     try {
       // ✅ Vérifier si le transporter est configuré
       if (!this.transporter) {
-        this.logger.warn(`⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré`);
-        return false;
+        const errorMsg = `⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré (SMTP_USER/SMTP_PASSWORD manquants)`;
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
       }
+      
+      this.logger.log(`📧 Envoi d'email à ${to} - Sujet: ${subject}`);
       
       const mailOptions = {
         from: this.configService.get('SMTP_FROM', 'noreply@velosi.com'),
@@ -171,27 +416,28 @@ export class EmailService {
         html: htmlContent,
       };
 
-      await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Email envoyé avec succès à ${to}`);
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email envoyé avec succès à ${to} - ID: ${result.messageId}`);
       return true;
     } catch (error) {
-      this.logger.error(`Erreur lors de l'envoi de l'email à ${to}: ${error.message}`);
-      return false;
+      this.logger.error(`❌ Erreur lors de l'envoi de l'email à ${to}: ${error.message}`);
+      throw error;
     }
   }
-
+  
   /**
-   * Envoyer un code OTP par email
+   * Envoyer un email avec le logo en pièce jointe
    */
-  async sendOtpEmail(email: string, otpCode: string, userName?: string): Promise<boolean> {
+  async sendEmailWithLogo(to: string, subject: string, htmlContent: string): Promise<boolean> {
     try {
       // ✅ Vérifier si le transporter est configuré
       if (!this.transporter) {
-        this.logger.warn(`⚠️ Impossible d'envoyer l'OTP à ${email}: Service email non configuré`);
-        return false;
+        const errorMsg = `⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré (SMTP_USER/SMTP_PASSWORD manquants)`;
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
       }
       
-      const htmlTemplate = this.getOtpEmailTemplate(otpCode, userName);
+      this.logger.log(`📧 Envoi d'email avec logo à ${to} - Sujet: ${subject}`);
       
       // Préparer l'attachment du logo
       const logoPath = this.getLogoPath();
@@ -201,27 +447,214 @@ export class EmailService {
         attachments.push({
           filename: 'logo_velosi.png',
           path: logoPath,
-          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML avec cid:logo_velosi
         });
+        this.logger.log(`✅ Logo attaché depuis: ${logoPath}`);
+      } else {
+        this.logger.warn(`⚠️ Logo non trouvé, email envoyé sans logo`);
       }
       
       const mailOptions = {
         from: {
-          name: `${this.getFromName()} - Récupération de compte`,
-          address: this.getFromEmail()
+          name: this.getFromName(),
+          address: this.configService.get('SMTP_FROM', 'noreply@velosi.com')
         },
-        to: email,
-        subject: `🔐 Code de récupération ${this.getFromName()}`,
-        html: htmlTemplate,
-        text: `Votre code de récupération Velosi ERP est: ${otpCode}. Ce code expire dans 10 minutes.`,
+        to,
+        subject,
+        html: htmlContent,
         attachments: attachments
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Email OTP envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      this.logger.log(`✅ Email envoyé avec succès à ${to} - ID: ${result.messageId}`);
       return true;
     } catch (error) {
-      this.logger.error(`Erreur envoi email OTP à ${email}:`, error);
+      this.logger.error(`❌ Erreur lors de l'envoi de l'email à ${to}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Envoyer un email avec le logo Logimaster (Shipnology)
+   */
+  async sendEmailWithLogimasterLogo(to: string, subject: string, htmlContent: string): Promise<boolean> {
+    try {
+      // ✅ Vérifier si le transporter est configuré
+      if (!this.transporter) {
+        const errorMsg = `⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré (SMTP_USER/SMTP_PASSWORD manquants)`;
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      this.logger.log(`📧 Envoi d'email avec logo Logimaster à ${to} - Sujet: ${subject}`);
+      
+      // Préparer l'attachment du logo Logimaster
+      const possiblePaths = [
+        path.join(process.cwd(), 'assets', 'logimaster.png'),
+        path.join(__dirname, '..', '..', 'assets', 'logimaster.png'),
+        path.join(__dirname, '..', 'assets', 'logimaster.png'),
+        path.join(__dirname, '../../../assets', 'logimaster.png')
+      ];
+      
+      const attachments = [];
+      let logoFound = false;
+      
+      for (const logoPath of possiblePaths) {
+        if (fs.existsSync(logoPath)) {
+          attachments.push({
+            filename: 'logimaster.png',
+            path: logoPath,
+            cid: 'logo_logimaster' // Content-ID pour référencer dans le HTML avec cid:logo_logimaster
+          });
+          this.logger.log(`✅ Logo Logimaster attaché depuis: ${logoPath}`);
+          logoFound = true;
+          break;
+        }
+      }
+      
+      if (!logoFound) {
+        this.logger.warn(`⚠️ Logo Logimaster non trouvé dans les chemins possibles, email envoyé sans logo`);
+      }
+      
+      this.logger.log(`📎 Nombre d'attachments pour cet email: ${attachments.length}`);
+      
+      const mailOptions = {
+        from: {
+          name: this.getFromName(),
+          address: this.configService.get('SMTP_FROM', 'noreply@velosi.com')
+        },
+        to,
+        subject,
+        html: htmlContent,
+        attachments: attachments
+      };
+
+      const result = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email envoyé avec succès à ${to} - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`❌ Erreur lors de l'envoi de l'email à ${to}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * 🏢 MULTI-TENANT: Envoyer un code OTP par email
+   * @param email - Email du destinataire
+   * @param otpCode - Code OTP à 6 chiffres
+   * @param userName - Nom de l'utilisateur (optionnel)
+   * @param organisationId - ID de l'organisation (optionnel, utilise config globale si absent)
+   */
+  async sendOtpEmail(email: string, otpCode: string, userName?: string, organisationId?: number): Promise<boolean> {
+    try {
+      this.logger.log(`📧 Envoi OTP à ${email} (organisationId: ${organisationId || 'Global'})`);
+      
+      // Obtenir le transporter approprié (organisation ou global)
+      const transporter = await this.getTransporterForOrganisation(organisationId);
+      
+      if (!transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer l'OTP à ${email}: Service email non configuré`);
+        return false;
+      }
+      
+      // Charger l'organisation si ID fourni
+      const organisation = organisationId ? await this.getOrganisation(organisationId) : null;
+      
+      if (organisation) {
+        this.logger.log(`🏢 Organisation: ${organisation.nom}`, {
+          smtp_enabled: organisation.smtp_enabled,
+          smtp_host: organisation.smtp_host,
+          smtp_port: organisation.smtp_port,
+          smtp_user: organisation.smtp_user,
+          smtp_from_email: organisation.smtp_from_email
+        });
+      }
+      
+      // Obtenir le logo de l'organisation
+      const logoBase64 = await this.getOrganisationLogoBase64(organisationId);
+      
+      // Obtenir le footer personnalisé
+      const footer = await this.getEmailFooter(organisationId);
+      
+      // Générer le template avec les infos de l'organisation
+      const htmlTemplate = await this.getOtpEmailTemplate(otpCode, userName, organisation, footer, logoBase64);
+      
+      // Déterminer l'expéditeur
+      const fromName = organisation?.smtp_from_name || organisation?.nom_affichage || organisation?.nom || this.getFromName();
+      const fromEmail = organisation?.smtp_from_email || this.getFromEmail();
+      
+      this.logger.log(`📨 Expéditeur: ${fromName} <${fromEmail}>`);
+      
+      // Préparer les pièces jointes
+      const attachments = [];
+      
+      // Ajouter le logo comme pièce jointe avec CID
+      if (organisation?.logo_url && !organisation.logo_url.startsWith('http')) {
+        // Logo de l'organisation - nettoyer le chemin
+        let logoRelativePath = organisation.logo_url;
+        // Supprimer le préfixe /uploads/ ou uploads/ ou / (pour éviter uploads/uploads/ ou chemins absolus)
+        if (logoRelativePath.startsWith('/uploads/')) {
+          logoRelativePath = logoRelativePath.substring('/uploads/'.length);
+        } else if (logoRelativePath.startsWith('uploads/')) {
+          logoRelativePath = logoRelativePath.substring('uploads/'.length);
+        } else if (logoRelativePath.startsWith('/')) {
+          logoRelativePath = logoRelativePath.substring(1);
+        }
+        // Toujours pointer vers le dossier uploads du projet
+        const logoPath = path.join(process.cwd(), 'uploads', logoRelativePath.replace(/\\/g, '/'));
+        this.logger.log(`🔍 Recherche logo organisation: ${organisation.logo_url} -> ${logoPath}`);
+        if (fs.existsSync(logoPath)) {
+          this.logger.log(`📎 Ajout du logo organisation comme pièce jointe: ${logoPath}`);
+          attachments.push({
+            filename: path.basename(logoPath),
+            path: logoPath,
+            cid: 'logo_organisation'
+          });
+        } else {
+          this.logger.warn(`⚠️ Logo organisation introuvable: ${logoPath}`);
+          // Fallback sur le logo par défaut
+          const defaultLogoPath = this.getLogoPath();
+          if (defaultLogoPath && fs.existsSync(defaultLogoPath)) {
+            this.logger.log(`📎 Utilisation du logo par défaut: ${defaultLogoPath}`);
+            attachments.push({
+              filename: path.basename(defaultLogoPath),
+              path: defaultLogoPath,
+              cid: 'logo_organisation' // Garder le même CID
+            });
+          }
+        }
+      } else if (!organisation || !organisation.logo_url) {
+        // Logo par défaut Shipnology/Logimaster
+        const logoPath = this.getLogoPath();
+        if (logoPath && fs.existsSync(logoPath)) {
+          this.logger.log(`📎 Ajout du logo par défaut comme pièce jointe: ${logoPath}`);
+          attachments.push({
+            filename: path.basename(logoPath),
+            path: logoPath,
+            cid: 'logo_shipnology'
+          });
+        } else {
+          this.logger.warn(`⚠️ Logo par défaut introuvable`);
+        }
+      }
+      
+      const mailOptions = {
+        from: {
+          name: `${fromName} - Récupération de compte`,
+          address: fromEmail
+        },
+        to: email,
+        subject: `🔐 Code de récupération ${fromName}`,
+        html: htmlTemplate,
+        text: `Votre code de récupération est: ${otpCode}. Ce code expire dans 10 minutes.`,
+        attachments: attachments
+      };
+
+      const result = await transporter.sendMail(mailOptions);
+      this.logger.log(`✅ OTP envoyé avec succès à ${email} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
+      return true;
+    } catch (error) {
+      this.logger.error(`❌ Erreur lors de l'envoi de l'OTP à ${email}:`, error);
       return false;
     }
   }
@@ -245,9 +678,9 @@ export class EmailService {
       
       if (logoPath && fs.existsSync(logoPath)) {
         attachments.push({
-          filename: 'logo_velosi.png',
+          filename: path.basename(logoPath),
           path: logoPath,
-          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
+          cid: 'logo_shipnology'
         });
       }
       
@@ -275,23 +708,29 @@ export class EmailService {
   /**
    * Envoyer notification de réinitialisation de mot de passe par administrateur
    */
-  async sendPasswordResetByAdminEmail(email: string, userName: string, userType: 'personnel' | 'client', newPassword: string): Promise<boolean> {
+  async sendPasswordResetByAdminEmail(
+    email: string, 
+    userName: string, 
+    userType: 'personnel' | 'client', 
+    newPassword: string,
+    adminName?: string
+  ): Promise<boolean> {
     try {
       if (!this.transporter) {
         this.logger.warn(`⚠️ Impossible d'envoyer la notification à ${email}: Service email non configuré`);
         return false;
       }
 
-      const htmlTemplate = this.getAdminResetEmailTemplate(userName, userType, newPassword);
+      const htmlTemplate = this.getAdminResetEmailTemplate(userName, userType, newPassword, adminName);
       
       const logoPath = this.getLogoPath();
       const attachments = [];
       
       if (logoPath && fs.existsSync(logoPath)) {
         attachments.push({
-          filename: 'logo_velosi.png',
+          filename: path.basename(logoPath),
           path: logoPath,
-          cid: 'logo_velosi'
+          cid: 'logo_shipnology'
         });
       }
       
@@ -301,7 +740,7 @@ export class EmailService {
           address: this.getFromEmail()
         },
         to: email,
-        subject: '🔐 Réinitialisation de votre mot de passe - Velosi ERP',
+        subject: '🔐 Réinitialisation de votre mot de passe - Shipnology ERP',
         html: htmlTemplate,
         text: `Votre mot de passe Velosi ERP a été réinitialisé par un administrateur. Votre nouveau mot de passe temporaire est: ${newPassword}. Veuillez le changer lors de votre première connexion.`,
         attachments: attachments
@@ -317,10 +756,19 @@ export class EmailService {
   }
 
   /**
-   * Template HTML pour l'email OTP
+   * 🏢 MULTI-TENANT: Template HTML pour l'email OTP
    */
-  private getOtpEmailTemplate(otpCode: string, userName?: string): string {
+  private async getOtpEmailTemplate(
+    otpCode: string, 
+    userName?: string, 
+    organisation?: Organisation | null,
+    footer?: string,
+    logoBase64?: string
+  ): Promise<string> {
     const displayName = userName || 'Utilisateur';
+    const orgName = organisation?.nom_affichage || organisation?.nom || 'Shipnology ERP';
+    const logoCid = organisation?.logo_url ? 'logo_organisation' : 'logo_shipnology';
+    const finalFooter = footer || await this.getEmailFooter(organisation?.id);
     
     return `
     <!DOCTYPE html>
@@ -328,7 +776,7 @@ export class EmailService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Code de récupération Velosi ERP</title>
+        <title>Code de récupération ${orgName}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
             
@@ -596,9 +1044,9 @@ export class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
+                <img src="cid:${logoCid}" alt="Logo ${orgName}" style="max-width:180px; max-height:80px; display:block; margin:0 auto 18px;" />
                 <h1>🔐 Code de Récupération</h1>
-                <p>Récupération sécurisée de votre compte ERP</p>
+                <p>Récupération sécurisée de votre compte</p>
             </div>
             
             <div class="content">
@@ -606,7 +1054,7 @@ export class EmailService {
                     Bonjour <strong>${displayName}</strong>,
                 </div>
                 
-                <p>Vous avez demandé la récupération de votre mot de passe pour votre compte <strong>Velosi ERP</strong>.</p>
+                <p>Vous avez demandé la récupération de votre mot de passe pour votre compte <strong>${orgName}</strong>.</p>
                 
                 <div class="otp-section">
                     <div class="otp-label">Votre code de vérification :</div>
@@ -631,7 +1079,7 @@ export class EmailService {
                     <h3>🛡️ Sécurité :</h3>
                     <p><strong>Ne partagez jamais ce code</strong> avec qui que ce soit.</p>
                     <p>Si vous n'avez pas demandé cette récupération, ignorez cet email et contactez immédiatement votre administrateur.</p>
-                    <p>Velosi ne vous demandera jamais votre code par téléphone ou email.</p>
+                    <p>${orgName} ne vous demandera jamais votre code par téléphone ou email.</p>
                 </div>
                 
                 <p style="margin-top: 30px; color: #4a5568;">
@@ -639,7 +1087,7 @@ export class EmailService {
                 </p>
             </div>
             
-            ${this.getSimpleEmailFooter()}
+            ${finalFooter}
         </div>
     </body>
     </html>
@@ -760,8 +1208,9 @@ export class EmailService {
   /**
    * Template HTML pour notification de réinitialisation par admin
    */
-  private getAdminResetEmailTemplate(userName: string, userType: 'personnel' | 'client', newPassword: string): string {
+  private getAdminResetEmailTemplate(userName: string, userType: 'personnel' | 'client', newPassword: string, adminName?: string): string {
     const userTypeLabel = userType === 'personnel' ? 'Personnel' : 'Client';
+    const adminInfo = adminName ? `par <strong>${adminName}</strong>` : 'par un administrateur';
     
     return `
     <!DOCTYPE html>
@@ -855,6 +1304,21 @@ export class EmailService {
             .alert-box p {
                 color: #92400e;
                 font-weight: 500;
+                margin: 0;
+            }
+            
+            .admin-info-box {
+                background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+                border-left: 4px solid #6366f1;
+                padding: 15px 20px;
+                margin: 20px 0;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
+            }
+            
+            .admin-info-box p {
+                color: #312e81;
+                font-size: 14px;
                 margin: 0;
             }
             
@@ -971,11 +1435,23 @@ export class EmailService {
                 
                 <div class="alert-box">
                     <p>
-                        <strong>⚠️ Important:</strong> Votre mot de passe a été réinitialisé par un administrateur.
+                        <strong>⚠️ Important:</strong> Votre mot de passe a été réinitialisé ${adminInfo}.
                     </p>
                 </div>
                 
-                <p style="margin: 20px 0;">Pour des raisons de sécurité, un administrateur a réinitialisé votre mot de passe Velosi ERP.</p>
+                ${adminName ? `
+                <div class="admin-info-box">
+                    <p>
+                        👤 <strong>Action effectuée par:</strong> ${adminName}<br>
+                        📅 <strong>Date:</strong> ${new Date().toLocaleString('fr-FR', {
+                          dateStyle: 'full',
+                          timeStyle: 'short'
+                        })}
+                    </p>
+                </div>
+                ` : ''}
+                
+                <p style="margin: 20px 0;">Pour des raisons de sécurité, votre mot de passe Velosi ERP a été réinitialisé.</p>
                 
                 <div class="password-box">
                     <h3>🔑 Votre Nouveau Mot de Passe Temporaire</h3>
@@ -1007,11 +1483,7 @@ export class EmailService {
                 
                 <div class="info-footer">
                     <p style="margin: 0;">
-                        <strong>Type de compte:</strong> ${userTypeLabel}<br>
-                        <strong>Date de réinitialisation:</strong> ${new Date().toLocaleString('fr-FR', {
-                          dateStyle: 'full',
-                          timeStyle: 'short'
-                        })}
+                        <strong>Type de compte:</strong> ${userTypeLabel}
                     </p>
                 </div>
             </div>
@@ -1133,60 +1605,102 @@ export class EmailService {
   }
 
   /**
-   * Envoyer les informations de connexion au nouveau personnel
+   * 🏢 MULTI-TENANT: Envoyer les informations de connexion au nouveau personnel
    */
   async sendPersonnelCredentialsEmail(
     email: string, 
     userName: string, 
     password: string, 
     fullName: string,
-    role: string
+    role: string,
+    organisationId?: number
   ): Promise<boolean> {
     try {
-      const htmlTemplate = this.getPersonnelCredentialsTemplate(userName, password, fullName, role);
+      // Obtenir le transporter approprié
+      const transporter = await this.getTransporterForOrganisation(organisationId);
       
-      // Préparer l'attachment du logo
-      const logoPath = this.getLogoPath();
+      if (!transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer l'email à ${email}: Service email non configuré`);
+        return false;
+      }
+      
+      const organisation = organisationId ? await this.getOrganisation(organisationId) : null;
+      const footer = await this.getEmailFooter(organisationId);
+      const logoBase64 = await this.getOrganisationLogoBase64(organisationId);
+      
+      const htmlTemplate = await this.getPersonnelCredentialsTemplate(
+        userName, 
+        password, 
+        fullName, 
+        role, 
+        organisation, 
+        footer,
+        logoBase64
+      );
+      
+      const fromName = organisation?.smtp_from_name || organisation?.nom_affichage || organisation?.nom || this.getFromName();
+      const fromEmail = organisation?.smtp_from_email || this.getFromEmail();
+      const orgName = organisation?.nom_affichage || organisation?.nom || 'Shipnology ERP';
+      
+      // Préparer les pièces jointes
       const attachments = [];
       
-      if (logoPath && fs.existsSync(logoPath)) {
-        attachments.push({
-          filename: 'logo_velosi.png',
-          path: logoPath,
-          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
-        });
+      if (organisation?.logo_url && !organisation.logo_url.startsWith('http')) {
+        const logoPath = path.isAbsolute(organisation.logo_url) 
+          ? organisation.logo_url 
+          : path.join(process.cwd(), 'uploads', organisation.logo_url);
+        
+        if (fs.existsSync(logoPath)) {
+          attachments.push({
+            filename: path.basename(logoPath),
+            path: logoPath,
+            cid: 'logo_organisation'
+          });
+        }
+      } else if (!organisation) {
+        const logoPath = this.getLogoPath();
+        if (logoPath && fs.existsSync(logoPath)) {
+          attachments.push({
+            filename: 'logo_velosi.png',
+            path: logoPath,
+            cid: 'logo_velosi'
+          });
+        }
       }
       
       const mailOptions = {
         from: {
-          name: `${this.getFromName()} - Bienvenue`,
-          address: this.getFromEmail()
+          name: `${fromName} - Bienvenue`,
+          address: fromEmail
         },
         to: email,
-        subject: '🎉 Bienvenue dans Velosi ERP - Vos informations de connexion',
+        subject: `🎉 Bienvenue dans ${orgName} - Vos informations de connexion`,
         html: htmlTemplate,
-        text: `Bienvenue ${fullName}! Vos informations de connexion Velosi ERP: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
+        text: `Bienvenue ${fullName}! Vos informations de connexion ${orgName}: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
         attachments: attachments
       };
 
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Email informations personnel envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      const result = await transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email informations personnel envoyé à ${email} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
       return true;
     } catch (error) {
-      this.logger.error(`Erreur envoi email informations personnel à ${email}:`, error);
+      this.logger.error(`❌ Erreur envoi email informations personnel à ${email}:`, error);
       return false;
     }
   }
 
   /**
-   * Template HTML pour les informations de connexion du personnel
+   * 🏢 MULTI-TENANT: Template HTML pour les informations de connexion du personnel
    */
-  private getPersonnelCredentialsTemplate(
+  private async getPersonnelCredentialsTemplate(
     userName: string, 
     password: string, 
     fullName: string, 
-    role: string
-  ): string {
+    role: string,
+    organisation?: Organisation | null,
+    footer?: string,
+    logoBase64?: string
+  ): Promise<string> {
     const roleDisplayNames = {
       'commercial': 'Commercial',
       'admin': 'Administrateur',
@@ -1195,6 +1709,9 @@ export class EmailService {
     };
     
     const displayRole = roleDisplayNames[role] || role;
+    const orgName = organisation?.nom_affichage || organisation?.nom || 'Shipnology ERP';
+    const logoCid = organisation?.logo_url ? 'logo_organisation' : 'logo_velosi';
+    const finalFooter = footer || await this.getEmailFooter(organisation?.id);
     
     return `
     <!DOCTYPE html>
@@ -1202,7 +1719,7 @@ export class EmailService {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Bienvenue dans Velosi ERP</title>
+        <title>Bienvenue dans ${orgName}</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
             
@@ -1476,16 +1993,16 @@ export class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <img src="cid:logo_velosi" alt="Logo Velosi" width="200" height="auto" />
+                <img src="cid:${logoCid}" alt="Logo ${orgName}" width="200" height="auto" />
               
-                <h1>Bienvenue dans Velosi ERP !</h1>
+                <h1>Bienvenue dans ${orgName} !</h1>
                 <p>Votre compte a été créé avec succès</p>
             </div>
             
             <div class="content">
                 <div class="greeting">
                     <h2>Bonjour ${fullName} !</h2>
-                    <p>Nous sommes ravis de vous accueillir dans l'équipe Velosi.</p>
+                    <p>Nous sommes ravis de vous accueillir dans l'équipe ${orgName}.</p>
                     <p>Votre compte a été créé en tant que :</p>
                     <div class="role-badge">${displayRole}</div>
                 </div>
@@ -1519,7 +2036,7 @@ export class EmailService {
                 <div class="instructions">
                     <h3>📋 Première connexion</h3>
                     <ol>
-                        <li>Rendez-vous sur le portail Velosi ERP</li>
+                        <li>Rendez-vous sur le portail ${orgName}</li>
                         <li>Utilisez les informations ci-dessus pour vous connecter</li>
                         <li>Le système vous demandera de changer votre mot de passe</li>
                         <li>Complétez votre profil si nécessaire</li>
@@ -1529,20 +2046,14 @@ export class EmailService {
                 
                 <div class="contact-section">
                     <h3>💬 Besoin d'aide ?</h3>
-                    <p><strong>Support IT Velosi</strong></p>
-                    <p>📧 Email: support.it@velosi.com</p>
-                    <p>📞 Téléphone: +33 (0)1 23 45 67 89</p>
+                    <p><strong>Support ${orgName}</strong></p>
+                    ${organisation?.email_service_technique ? `<p>📧 Email: ${organisation.email_service_technique}</p>` : ''}
+                    ${organisation?.tel1 ? `<p>📞 Téléphone: ${organisation.tel1}</p>` : ''}
                     <p>🕒 Disponible du lundi au vendredi, 8h30 - 18h00</p>
                 </div>
             </div>
             
-            <div class="footer">
-            
-                <p style="font-size: 12px; margin-top: 20px;">
-                    © ${new Date().getFullYear()} Velosi ERP. Tous droits réservés.<br>
-                    Cet email contient des informations confidentielles.
-                </p>
-            ${this.getSimpleEmailFooter()}
+            ${finalFooter}
         </div>
     </body>
     </html>
@@ -2098,61 +2609,104 @@ export class EmailService {
   }
 
   /**
-   * Envoyer les informations de connexion au nouveau client
+   * 🏢 MULTI-TENANT: Envoyer les informations de connexion au nouveau client
    */
   async sendClientCredentialsEmail(
     email: string, 
     userName: string, 
     password: string, 
     companyName: string,
-    interlocuteur?: string
+    interlocuteur?: string,
+    organisationId?: number
   ): Promise<boolean> {
     try {
-      const htmlTemplate = this.getClientCredentialsTemplate(userName, password, companyName, interlocuteur);
+      const transporter = await this.getTransporterForOrganisation(organisationId);
       
-      // Préparer l'attachment du logo
-      const logoPath = this.getLogoPath();
+      if (!transporter) {
+        this.logger.warn(`⚠️ Impossible d'envoyer l'email à ${email}: Service email non configuré`);
+        return false;
+      }
+      
+      const organisation = organisationId ? await this.getOrganisation(organisationId) : null;
+      const footer = await this.getEmailFooter(organisationId);
+      const logoBase64 = await this.getOrganisationLogoBase64(organisationId);
+      
+      const htmlTemplate = await this.getClientCredentialsTemplate(
+        userName, 
+        password, 
+        companyName, 
+        interlocuteur,
+        organisation,
+        footer,
+        logoBase64
+      );
+      
+      const fromName = organisation?.smtp_from_name || organisation?.nom_affichage || organisation?.nom || this.getFromName();
+      const fromEmail = organisation?.smtp_from_email || this.getFromEmail();
+      const orgName = organisation?.nom_affichage || organisation?.nom || 'Shipnology ERP';
+      
       const attachments = [];
       
-      if (logoPath && fs.existsSync(logoPath)) {
-        attachments.push({
-          filename: 'logo_velosi.png',
-          path: logoPath,
-          cid: 'logo_velosi' // Content-ID pour référencer dans le HTML
-        });
+      if (organisation?.logo_url && !organisation.logo_url.startsWith('http')) {
+        const logoPath = path.isAbsolute(organisation.logo_url) 
+          ? organisation.logo_url 
+          : path.join(process.cwd(), 'uploads', organisation.logo_url);
+        
+        if (fs.existsSync(logoPath)) {
+          attachments.push({
+            filename: path.basename(logoPath),
+            path: logoPath,
+            cid: 'logo_organisation'
+          });
+        }
+      } else if (!organisation) {
+        const logoPath = this.getLogoPath();
+        if (logoPath && fs.existsSync(logoPath)) {
+          attachments.push({
+            filename: 'logo_velosi.png',
+            path: logoPath,
+            cid: 'logo_velosi'
+          });
+        }
       }
       
       const mailOptions = {
         from: {
-          name: `${this.getFromName()} - Bienvenue Client`,
-          address: this.getFromEmail()
+          name: `${fromName} - Bienvenue Client`,
+          address: fromEmail
         },
         to: email,
-        subject: `🎉 Bienvenue chez ${this.getFromName()} - Accès client créé`,
+        subject: `🎉 Bienvenue chez ${orgName} - Accès client créé`,
         html: htmlTemplate,
-        text: `Bienvenue ${companyName}! Votre accès client Velosi ERP a été créé: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
+        text: `Bienvenue ${companyName}! Votre accès client ${orgName} a été créé: Nom d'utilisateur: ${userName}, Mot de passe: ${password}. Veuillez changer votre mot de passe lors de votre première connexion.`,
         attachments: attachments
       };
 
-      const result = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Email informations client envoyé avec succès à ${email} - ID: ${result.messageId}`);
+      const result = await transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Email informations client envoyé à ${email} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
       return true;
     } catch (error) {
-      this.logger.error(`Erreur envoi email informations client à ${email}:`, error);
+      this.logger.error(`❌ Erreur envoi email informations client à ${email}:`, error);
       return false;
     }
   }
 
   /**
-   * Template HTML pour les informations de connexion du client
+   * 🏢 MULTI-TENANT: Template HTML pour les informations de connexion du client
    */
-  private getClientCredentialsTemplate(
+  private async getClientCredentialsTemplate(
     userName: string, 
     password: string, 
     companyName: string, 
-    interlocuteur?: string
-  ): string {
+    interlocuteur?: string,
+    organisation?: Organisation | null,
+    footer?: string,
+    logoBase64?: string
+  ): Promise<string> {
     const displayName = interlocuteur ? `${companyName} (${interlocuteur})` : companyName;
+    const orgName = organisation?.nom_affichage || organisation?.nom || 'Shipnology ERP';
+    const logoCid = organisation?.logo_url ? 'logo_organisation' : 'logo_velosi';
+    const finalFooter = footer || await this.getEmailFooter(organisation?.id);
     
     return `
     <!DOCTYPE html>

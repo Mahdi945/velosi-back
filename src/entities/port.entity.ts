@@ -17,7 +17,7 @@ export class Port {
   @Column({ type: 'varchar', length: 100 })
   pays: string;
 
-  @Column({ type: 'boolean', default: false, name: 'isactive' })
+  @Column({ type: 'boolean', default: true, name: 'isactive' })
   isActive: boolean;
 
   @CreateDateColumn({ name: 'createdat' })

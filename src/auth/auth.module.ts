@@ -26,7 +26,7 @@ import { BiometricController } from './biometric.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Client, Personnel, ContactClient, ObjectifCom, BiometricCredential, LoginHistory]),
-    PassportModule.register({ defaultStrategy: 'jwt' }),
+    PassportModule.register({ defaultStrategy: 'jwt', session: false }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

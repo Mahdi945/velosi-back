@@ -1,12 +1,29 @@
 import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
+import { IS_PUBLIC_KEY } from './public.decorator';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private reflector: Reflector) {
+    super();
+  }
+  
   canActivate(
     context: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
+    // ✅ Vérifier si la route est marquée comme publique
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    
+    if (isPublic) {
+      console.log('🔓 [JWT Auth Guard] Route publique détectée - Authentification bypassée');
+      return true;
+    }
+    
     console.log('🔐 [JWT Auth Guard] Vérification de l\'authentification');
     const request = context.switchToHttp().getRequest();
     const authHeader = request.headers.authorization;
@@ -88,7 +105,20 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     
     // Ajouter des informations de debug à la requête
     request.tokenInfo = user.tokenInfo;
-    console.log('✅ [JWT Auth Guard] Authentification réussie pour:', user.username);
+    
+    // 🏢 CORRECTION MULTI-TENANT: Remplir req.organisationDatabase et req.organisationId
+    // pour que getDatabaseName() et getOrganisationId() fonctionnent correctement
+    if (user.databaseName) {
+      request.organisationDatabase = user.databaseName;
+    }
+    if (user.organisationId) {
+      request.organisationId = user.organisationId;
+    }
+    
+    console.log('✅ [JWT Auth Guard] Authentification réussie pour:', user.username, {
+      organisationDatabase: request.organisationDatabase,
+      organisationId: request.organisationId
+    });
     
     return user;
   }

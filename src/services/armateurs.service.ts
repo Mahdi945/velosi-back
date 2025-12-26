@@ -1,39 +1,86 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere } from 'typeorm';
 import { Armateur } from '../entities/armateur.entity';
 import { CreateArmateurDto } from '../dto/create-armateur.dto';
 import { UpdateArmateurDto } from '../dto/update-armateur.dto';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 @Injectable()
 export class ArmateursService {
   constructor(
-    @InjectRepository(Armateur)
-    private readonly armateurRepository: Repository<Armateur>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
-  async create(createArmateurDto: CreateArmateurDto): Promise<Armateur> {
+  /**
+   * Créer un nouvel armateur
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async create(databaseName: string, createArmateurDto: CreateArmateurDto): Promise<Armateur> {
     try {
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // Générer automatiquement le code si non fourni
       let code = createArmateurDto.code;
       if (!code) {
-        code = await this.generateArmateurCode();
+        code = await this.generateArmateurCode(databaseName);
       }
 
       // Vérifier si le code existe déjà
-      const existingArmateur = await this.armateurRepository.findOne({
-        where: { code },
-      });
+      const existing = await connection.query(
+        `SELECT * FROM armateurs WHERE code = $1 LIMIT 1`,
+        [code]
+      );
 
-      if (existingArmateur) {
+      if (existing && existing.length > 0) {
         throw new ConflictException(`Un armateur avec le code "${code}" existe déjà`);
       }
 
-      const armateur = this.armateurRepository.create({
-        ...createArmateurDto,
-        code,
-      });
-      return await this.armateurRepository.save(armateur);
+      const results = await connection.query(
+        `INSERT INTO armateurs (code, nom, adresse, ville, pays, codepostal, 
+         telephone, telephonesecondaire, fax, email, siteweb,
+         logo, notes, isactive)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [
+          code,
+          createArmateurDto.nom,
+          createArmateurDto.adresse || null,
+          createArmateurDto.ville || null,
+          createArmateurDto.pays || null,
+          createArmateurDto.codePostal || null,
+          createArmateurDto.telephone || null,
+          createArmateurDto.telephoneSecondaire || null,
+          createArmateurDto.fax || null,
+          createArmateurDto.email || null,
+          createArmateurDto.siteWeb || null,
+          createArmateurDto.logo || null,
+          createArmateurDto.notes || null,
+          createArmateurDto.isActive !== undefined ? createArmateurDto.isActive : true
+        ]
+      );
+      const row = results[0];
+      return {
+        id: row.id,
+        code: row.code,
+        nom: row.nom,
+        abreviation: row.abreviation,
+        adresse: row.adresse,
+        ville: row.ville,
+        pays: row.pays,
+        codePostal: row.codepostal,
+        telephone: row.telephone,
+        telephoneSecondaire: row.telephonesecondaire,
+        fax: row.fax,
+        email: row.email,
+        siteWeb: row.siteweb,
+        tarif20Pieds: row.tarif20pieds,
+        tarif40Pieds: row.tarif40pieds,
+        tarif45Pieds: row.tarif45pieds,
+        logo: row.logo,
+        notes: row.notes,
+        isActive: row.isactive,
+        createdAt: row.createdat,
+        updatedAt: row.updatedat
+      };
     } catch (error) {
       if (error instanceof ConflictException) {
         throw error;
@@ -44,21 +91,22 @@ export class ArmateursService {
 
   /**
    * Génère un code armateur unique au format ARM001, ARM002, etc.
+   * ✅ MULTI-TENANT: Utilise databaseName
    */
-  private async generateArmateurCode(): Promise<string> {
+  private async generateArmateurCode(databaseName: string): Promise<string> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer le dernier armateur créé
-    const lastArmateur = await this.armateurRepository
-      .createQueryBuilder('armateur')
-      .where("armateur.code LIKE 'ARM%'")
-      .orderBy('armateur.id', 'DESC')
-      .getOne();
+    const lastArmateur = await connection.query(
+      `SELECT code FROM armateurs WHERE code LIKE 'ARM%' ORDER BY id DESC LIMIT 1`
+    );
 
-    if (!lastArmateur) {
+    if (!lastArmateur || lastArmateur.length === 0) {
       return 'ARM001';
     }
 
     // Extraire le numéro du dernier code
-    const lastCode = lastArmateur.code;
+    const lastCode = lastArmateur[0].code;
     const match = lastCode.match(/ARM(\d+)/);
     
     if (match) {
@@ -68,11 +116,17 @@ export class ArmateursService {
     }
 
     // Si le format ne correspond pas, chercher le plus grand ID
-    const count = await this.armateurRepository.count();
+    const countResult = await connection.query(`SELECT COUNT(*) as count FROM armateurs`);
+    const count = parseInt(countResult[0].count);
     return `ARM${(count + 1).toString().padStart(3, '0')}`;
   }
 
+  /**
+   * Récupérer tous les armateurs
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
   async findAll(
+    databaseName: string,
     page: number = 1,
     limit: number = 10,
     search?: string,
@@ -80,17 +134,54 @@ export class ArmateursService {
     pays?: string,
     isActive?: boolean,
   ): Promise<{ data: Armateur[]; total: number; page: number; limit: number }> {
-    const where: FindOptionsWhere<Armateur> = {};
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    let whereConditions = [];
+    let params: any[] = [];
+    let paramIndex = 1;
 
     // Filtre par statut uniquement (recherche côté client)
     if (isActive !== undefined && isActive !== null) {
-      where.isActive = isActive;
+      whereConditions.push(`isactive = $${paramIndex}`);
+      params.push(isActive);
+      paramIndex++;
     }
 
-    const [data, total] = await this.armateurRepository.findAndCount({
-      where,
-      order: { id: 'DESC' }, // Ordre décroissant (les plus récents en premier)
-    });
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    // Compter le total
+    const countQuery = `SELECT COUNT(*) as total FROM armateurs ${whereClause}`;
+    const countResult = await connection.query(countQuery, params);
+    const total = parseInt(countResult[0].total);
+
+    // Récupérer les données (tous les armateurs sans pagination)
+    const dataQuery = `SELECT * FROM armateurs ${whereClause} ORDER BY id DESC`;
+    const rawData = await connection.query(dataQuery, params);
+
+    // Mapper snake_case vers camelCase
+    const data = rawData.map(row => ({
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    }));
 
     return {
       data,
@@ -100,111 +191,343 @@ export class ArmateursService {
     };
   }
 
-  async findOne(id: number): Promise<Armateur> {
-    const armateur = await this.armateurRepository.findOne({ where: { id } });
-    if (!armateur) {
+  /**
+   * Récupérer un armateur par ID
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findOne(databaseName: string, id: number): Promise<Armateur> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const results = await connection.query(
+      `SELECT * FROM armateurs WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (!results || results.length === 0) {
       throw new NotFoundException(`Armateur avec l'ID ${id} non trouvé`);
     }
-    return armateur;
+    
+    const row = results[0];
+    return {
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    };
   }
 
-  async findByCode(code: string): Promise<Armateur> {
-    const armateur = await this.armateurRepository.findOne({ where: { code } });
-    if (!armateur) {
+  /**
+   * Récupérer un armateur par code
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findByCode(databaseName: string, code: string): Promise<Armateur> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const results = await connection.query(
+      `SELECT * FROM armateurs WHERE code = $1 LIMIT 1`,
+      [code]
+    );
+    
+    if (!results || results.length === 0) {
       throw new NotFoundException(`Armateur avec le code ${code} non trouvé`);
     }
-    return armateur;
+    
+    const row = results[0];
+    return {
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    };
   }
 
-  async update(id: number, updateArmateurDto: UpdateArmateurDto): Promise<Armateur> {
-    const armateur = await this.findOne(id);
+  /**
+   * Mettre à jour un armateur
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async update(databaseName: string, id: number, updateArmateurDto: UpdateArmateurDto): Promise<Armateur> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const armateur = await this.findOne(databaseName, id);
 
     // Si le code est modifié, vérifier qu'il n'existe pas déjà
     if (updateArmateurDto.code && updateArmateurDto.code !== armateur.code) {
-      const existingArmateur = await this.armateurRepository.findOne({
-        where: { code: updateArmateurDto.code },
-      });
+      const existing = await connection.query(
+        `SELECT * FROM armateurs WHERE code = $1 AND id != $2 LIMIT 1`,
+        [updateArmateurDto.code, id]
+      );
 
-      if (existingArmateur) {
+      if (existing && existing.length > 0) {
         throw new ConflictException(`Un armateur avec le code "${updateArmateurDto.code}" existe déjà`);
       }
     }
 
-    // Nettoyer les champs auto-générés qui ne doivent pas être mis à jour
-    const { ...cleanData } = updateArmateurDto;
-    delete (cleanData as any).id;
-    delete (cleanData as any).createdAt;
-    delete (cleanData as any).updatedAt;
+    // Construire la requête UPDATE dynamiquement
+    const fields = [];
+    const values = [];
+    let paramIndex = 1;
 
-    Object.assign(armateur, cleanData);
-    return await this.armateurRepository.save(armateur);
+    // Mapping camelCase vers snake_case pour les colonnes de la base
+    const columnMapping: Record<string, string> = {
+      'code': 'code',
+      'nom': 'nom',
+      'abreviation': 'abreviation',
+      'adresse': 'adresse',
+      'ville': 'ville',
+      'pays': 'pays',
+      'codePostal': 'codepostal',
+      'telephone': 'telephone',
+      'telephoneSecondaire': 'telephonesecondaire',
+      'fax': 'fax',
+      'email': 'email',
+      'siteWeb': 'siteweb',
+      'tarif20Pieds': 'tarif20pieds',
+      'tarif40Pieds': 'tarif40pieds',
+      'tarif45Pieds': 'tarif45pieds',
+      'logo': 'logo',
+      'notes': 'notes',
+      'isActive': 'isactive'
+    };
+
+    Object.keys(updateArmateurDto).forEach((key) => {
+      if (key !== 'id' && key !== 'createdAt' && key !== 'updatedAt' && updateArmateurDto[key] !== undefined) {
+        const dbColumnName = columnMapping[key] || key;
+        fields.push(`${dbColumnName} = $${paramIndex}`);
+        values.push(updateArmateurDto[key]);
+        paramIndex++;
+      }
+    });
+
+    if (fields.length === 0) {
+      return armateur;
+    }
+
+    values.push(id);
+    const query = `UPDATE armateurs SET ${fields.join(', ')}, updatedat = CURRENT_TIMESTAMP WHERE id = $${paramIndex} RETURNING *`;
+    
+    const results = await connection.query(query, values);
+    const row = results[0];
+    return {
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    };
   }
 
-  async toggleActive(id: number): Promise<Armateur> {
-    const armateur = await this.findOne(id);
-    armateur.isActive = !armateur.isActive;
-    return await this.armateurRepository.save(armateur);
+  /**
+   * Activer/Désactiver un armateur
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async toggleActive(databaseName: string, id: number): Promise<Armateur> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const armateur = await this.findOne(databaseName, id);
+    
+    const results = await connection.query(
+      `UPDATE armateurs SET isactive = $1, updatedat = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [!armateur.isActive, id]
+    );
+    
+    const row = results[0];
+    return {
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    };
   }
 
-  async remove(id: number): Promise<void> {
-    const armateur = await this.findOne(id);
-    await this.armateurRepository.remove(armateur);
+  /**
+   * Supprimer un armateur
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async remove(databaseName: string, id: number): Promise<void> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    await this.findOne(databaseName, id);
+    
+    await connection.query(
+      `DELETE FROM armateurs WHERE id = $1`,
+      [id]
+    );
   }
 
-  async updateLogo(id: number, logoUrl: string): Promise<Armateur> {
-    const armateur = await this.findOne(id);
-    armateur.logo = logoUrl;
-    return await this.armateurRepository.save(armateur);
+  /**
+   * Mettre à jour le logo d'un armateur
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async updateLogo(databaseName: string, id: number, logoUrl: string): Promise<Armateur> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    await this.findOne(databaseName, id);
+    
+    const results = await connection.query(
+      `UPDATE armateurs SET logo = $1, updatedat = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+      [logoUrl, id]
+    );
+    
+    const row = results[0];
+    return {
+      id: row.id,
+      code: row.code,
+      nom: row.nom,
+      abreviation: row.abreviation,
+      adresse: row.adresse,
+      ville: row.ville,
+      pays: row.pays,
+      codePostal: row.codepostal,
+      telephone: row.telephone,
+      telephoneSecondaire: row.telephonesecondaire,
+      fax: row.fax,
+      email: row.email,
+      siteWeb: row.siteweb,
+      tarif20Pieds: row.tarif20pieds,
+      tarif40Pieds: row.tarif40pieds,
+      tarif45Pieds: row.tarif45pieds,
+      logo: row.logo,
+      notes: row.notes,
+      isActive: row.isactive,
+      createdAt: row.createdat,
+      updatedAt: row.updatedat
+    };
   }
 
-  async getStats(): Promise<{
+  /**
+   * Obtenir les statistiques des armateurs
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async getStats(databaseName: string): Promise<{
     total: number;
     actifs: number;
     inactifs: number;
     parPays: { pays: string; count: number }[];
   }> {
-    const total = await this.armateurRepository.count();
-    const actifs = await this.armateurRepository.count({ where: { isActive: true } });
-    const inactifs = await this.armateurRepository.count({ where: { isActive: false } });
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const stats = await connection.query(
+      `SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN isactive = true THEN 1 ELSE 0 END) as actifs,
+        SUM(CASE WHEN isactive = false THEN 1 ELSE 0 END) as inactifs
+       FROM armateurs`
+    );
 
-    // Statistiques par pays
-    const parPaysRaw = await this.armateurRepository
-      .createQueryBuilder('armateur')
-      .select('armateur.pays', 'pays')
-      .addSelect('COUNT(*)', 'count')
-      .where('armateur.pays IS NOT NULL')
-      .groupBy('armateur.pays')
-      .orderBy('count', 'DESC')
-      .limit(10)
-      .getRawMany();
+    const parPaysRaw = await connection.query(
+      `SELECT pays, COUNT(*) as count
+       FROM armateurs
+       WHERE pays IS NOT NULL
+       GROUP BY pays
+       ORDER BY count DESC
+       LIMIT 10`
+    );
 
     const parPays = parPaysRaw.map(item => ({
       pays: item.pays,
       count: parseInt(item.count, 10),
     }));
 
-    return { total, actifs, inactifs, parPays };
+    return {
+      total: parseInt(stats[0].total),
+      actifs: parseInt(stats[0].actifs),
+      inactifs: parseInt(stats[0].inactifs),
+      parPays
+    };
   }
 
-  async getVilles(): Promise<string[]> {
-    const result = await this.armateurRepository
-      .createQueryBuilder('armateur')
-      .select('DISTINCT armateur.ville', 'ville')
-      .where('armateur.ville IS NOT NULL')
-      .orderBy('armateur.ville', 'ASC')
-      .getRawMany();
+  /**
+   * Obtenir la liste des villes
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async getVilles(databaseName: string): Promise<string[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const results = await connection.query(
+      `SELECT DISTINCT ville FROM armateurs 
+       WHERE ville IS NOT NULL 
+       ORDER BY ville ASC`
+    );
 
-    return result.map(item => item.ville);
+    return results.map(item => item.ville);
   }
 
-  async getPays(): Promise<string[]> {
-    const result = await this.armateurRepository
-      .createQueryBuilder('armateur')
-      .select('DISTINCT armateur.pays', 'pays')
-      .where('armateur.pays IS NOT NULL')
-      .orderBy('armateur.pays', 'ASC')
-      .getRawMany();
+  /**
+   * Obtenir la liste des pays
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async getPays(databaseName: string): Promise<string[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const results = await connection.query(
+      `SELECT DISTINCT pays FROM armateurs 
+       WHERE pays IS NOT NULL 
+       ORDER BY pays ASC`
+    );
 
-    return result.map(item => item.pays);
+    return results.map(item => item.pays);
   }
 }

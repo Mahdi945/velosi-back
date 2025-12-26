@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Logo Danino</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 800px;
+            margin: 0 auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #2196f3;
+            padding-bottom: 10px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196f3;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #2196f3;
+        }
+        img {
+            max-width: 300px;
+            height: auto;
+            border: 2px solid #ddd;
+            padding: 10px;
+            background: white;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .url {
+            background: #f0f0f0;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 Test d'accès au logo Danino</h1>
+        
+        <div class="test-section">
+            <h3>📍 URL du logo depuis la base de données</h3>
+            <div class="url">/uploads/logos/logo-1766148618622-46573257.png</div>
+        </div>
+
+        <div class="test-section">
+            <h3>🔗 Test 1: URL relative (Backend)</h3>
+            <div class="url">http://localhost:3000/uploads/logos/logo-1766148618622-46573257.png</div>
+            <img 
+                src="http://localhost:3000/uploads/logos/logo-1766148618622-46573257.png" 
+                alt="Logo Danino - Backend"
+                onload="document.getElementById('test1-status').innerHTML = '✅ <span class=success>SUCCÈS</span> - Image chargée depuis le backend'"
+                onerror="document.getElementById('test1-status').innerHTML = '❌ <span class=error>ÉCHEC</span> - Image non accessible depuis le backend'"
+            >
+            <div id="test1-status" style="margin-top: 10px;">⏳ Chargement...</div>
+        </div>
+
+        <div class="test-section">
+            <h3>🔗 Test 2: URL relative (Frontend)</h3>
+            <div class="url">http://localhost:4200/uploads/logos/logo-1766148618622-46573257.png</div>
+            <img 
+                src="http://localhost:4200/uploads/logos/logo-1766148618622-46573257.png" 
+                alt="Logo Danino - Frontend"
+                onload="document.getElementById('test2-status').innerHTML = '✅ <span class=success>SUCCÈS</span> - Image chargée depuis le frontend'"
+                onerror="document.getElementById('test2-status').innerHTML = '❌ <span class=error>ÉCHEC</span> - Image non accessible depuis le frontend (NORMAL)'"
+            >
+            <div id="test2-status" style="margin-top: 10px;">⏳ Chargement...</div>
+        </div>
+
+        <div class="test-section">
+            <h3>📋 Résumé</h3>
+            <ul>
+                <li><strong>Backend URL:</strong> http://localhost:3000</li>
+                <li><strong>Frontend URL:</strong> http://localhost:4200</li>
+                <li><strong>Chemin du logo:</strong> /uploads/logos/logo-1766148618622-46573257.png</li>
+                <li><strong>URL correcte pour l'impression:</strong> Backend URL + Chemin = <code>http://localhost:3000/uploads/logos/logo-1766148618622-46573257.png</code></li>
+            </ul>
+        </div>
+
+        <div class="test-section" style="background: #fff3cd; border-left-color: #ffc107;">
+            <h3>💡 Conclusion</h3>
+            <p>Les fichiers uploads sont stockés et servis par le <strong>backend (port 3000)</strong>.</p>
+            <p>Le template d'impression doit donc utiliser <code>backendUrl + logo_url</code> au lieu de <code>window.location.origin + logo_url</code>.</p>
+            <p>✅ Cette modification a été appliquée dans <code>quote-print.service.ts</code></p>
+        </div>
+    </div>
+</body>
+</html>

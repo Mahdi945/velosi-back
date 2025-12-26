@@ -22,6 +22,7 @@ import { StatsController } from './controllers/stats.controller';
 import { DashboardController } from './controllers/dashboard.controller';
 import { LoginHistoryController } from './controllers/login-history.controller';
 import { typeOrmConfig } from './config/database.config';
+import { shipnologyConfig } from './config/shipnology.config';
 import { SchedulerService } from './services/scheduler.service';
 import { DashboardService } from './services/dashboard.service';
 import { LoginHistoryService } from './services/login-history.service';
@@ -41,9 +42,12 @@ import { EmailService } from './services/email.service';
 import { PersonnelService } from './services/personnel.service';
 import { ContactController } from './contact/contact.controller';
 import { LocationModule } from './modules/location.module';
+import { LocationSchedulerService } from './services/location-scheduler.service';
 import { VechatModule } from './vechat/vechat.module';
 import { ClientTVAModule } from './modules/client-tva.module';
 import { ImportDataModule } from './modules/import-data.module';
+import { DatabaseModule } from './common/database.module';
+import { AdminMspModule } from './admin-msp/admin-msp.module';
 
 @Module({
   imports: [
@@ -59,10 +63,18 @@ import { ImportDataModule } from './modules/import-data.module';
       useFactory: typeOrmConfig,
       inject: [ConfigService],
     }),
+    TypeOrmModule.forRootAsync({
+      name: 'shipnology',
+      imports: [ConfigModule],
+      useFactory: shipnologyConfig,
+      inject: [ConfigService],
+    }),
     ScheduleModule.forRoot(),
-
+    
+    DatabaseModule,
     AuthModule,
     UsersModule,
+    AdminMspModule,
     CrmModule,
   EnginModule,
   ArmateursModule,
@@ -80,6 +92,6 @@ import { ImportDataModule } from './modules/import-data.module';
   TypeOrmModule.forFeature([Personnel, Client, AutorisationTVA, BCsusTVA, Lead, Opportunity, Quote, ObjectifCom, Navire, BiometricCredential, LoginHistory]), // Ajout Navire pour le SchedulerService, StatsController et DashboardService et BiometricCredential pour l'authentification biométrique et LoginHistory pour l'historique de connexion
   ],
   controllers: [AppController, DiagnosticController, CleanupController, StatsController, DashboardController, ContactController, LoginHistoryController],
-  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService, LoginHistoryService],
+  providers: [AppService, SchedulerService, DashboardService, KeycloakService, EmailService, PersonnelService, LoginHistoryService, LocationSchedulerService],
 })
 export class AppModule {}

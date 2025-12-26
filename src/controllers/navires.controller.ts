@@ -11,12 +11,17 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Req,
 } from '@nestjs/common';
 import { NaviresService } from '../services/navires.service';
 import { CreateNavireDto } from '../dto/create-navire.dto';
 import { UpdateNavireDto } from '../dto/update-navire.dto';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { UseGuards } from '@nestjs/common';
 
 @Controller('navires')
+@UseGuards(JwtAuthGuard)
 export class NaviresController {
   private readonly logger = new Logger(NaviresController.name);
 
@@ -27,9 +32,10 @@ export class NaviresController {
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async create(@Body() createNavireDto: CreateNavireDto) {
+  async create(@Body() createNavireDto: CreateNavireDto, @Req() req: any) {
     this.logger.log(`Création d'un navire`);
-    return this.naviresService.create(createNavireDto);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.create(databaseName, createNavireDto);
   }
 
   /**
@@ -42,40 +48,45 @@ export class NaviresController {
     @Query('search') search?: string,
     @Query('statut') statut?: string,
     @Query('armateurId') armateurId?: string,
+    @Req() req?: any,
   ) {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 10;
     const armateurIdNum = armateurId ? parseInt(armateurId, 10) : undefined;
     
     this.logger.log(`Récupération des navires - Page: ${pageNum}, Limite: ${limitNum}`);
-    return this.naviresService.findAll(pageNum, limitNum, search, statut, armateurIdNum);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.findAll(databaseName, pageNum, limitNum, search, statut, armateurIdNum);
   }
 
   /**
    * Récupérer tous les navires actifs (pour les dropdowns)
    */
   @Get('active')
-  async findAllActive() {
+  async findAllActive(@Req() req: any) {
     this.logger.log('Récupération des navires actifs');
-    return this.naviresService.findAllActive();
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.findAllActive(databaseName);
   }
 
   /**
    * Récupérer les navires par armateur
    */
   @Get('armateur/:armateurId')
-  async findByArmateur(@Param('armateurId', ParseIntPipe) armateurId: number) {
+  async findByArmateur(@Param('armateurId', ParseIntPipe) armateurId: number, @Req() req: any) {
     this.logger.log(`Récupération des navires de l'armateur ${armateurId}`);
-    return this.naviresService.findByArmateur(armateurId);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.findByArmateur(databaseName, armateurId);
   }
 
   /**
    * Récupérer un navire par son ID
    */
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     this.logger.log(`Récupération du navire ${id}`);
-    return this.naviresService.findOne(id);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.findOne(databaseName, id);
   }
 
   /**
@@ -85,9 +96,11 @@ export class NaviresController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateNavireDto: UpdateNavireDto,
+    @Req() req: any,
   ) {
     this.logger.log(`Mise à jour du navire ${id}`);
-    return this.naviresService.update(id, updateNavireDto);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.update(databaseName, id, updateNavireDto);
   }
 
   /**
@@ -95,26 +108,29 @@ export class NaviresController {
    */
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     this.logger.log(`Suppression du navire ${id}`);
-    await this.naviresService.remove(id);
+    const databaseName = getDatabaseName(req);
+    await this.naviresService.remove(databaseName, id);
   }
 
   /**
    * Activer un navire
    */
   @Put(':id/activate')
-  async activate(@Param('id', ParseIntPipe) id: number) {
+  async activate(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     this.logger.log(`Activation du navire ${id}`);
-    return this.naviresService.activate(id);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.activate(databaseName, id);
   }
 
   /**
    * Désactiver un navire
    */
   @Put(':id/deactivate')
-  async deactivate(@Param('id', ParseIntPipe) id: number) {
+  async deactivate(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     this.logger.log(`Désactivation du navire ${id}`);
-    return this.naviresService.deactivate(id);
+    const databaseName = getDatabaseName(req);
+    return this.naviresService.deactivate(databaseName, id);
   }
 }

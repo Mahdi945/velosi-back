@@ -5,15 +5,21 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { ObjectifCom } from './objectif-com.entity';
 import { BiometricCredential } from './biometric-credential.entity';
 
 @Entity('personnel')
+@Index('idx_personnel_org_username', ['organisation_id', 'nom_utilisateur'], { unique: true })
+@Index('idx_personnel_org_email', ['organisation_id', 'email'], { unique: true })
 export class Personnel {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ type: 'integer', nullable: false })
+  organisation_id: number; // ID de l'organisation (référence vers shipnology.organisations)
 
   @Column({ type: 'varchar', nullable: false })
   nom: string;
@@ -21,8 +27,8 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: false })
   prenom: string;
 
-  @Column({ type: 'varchar', nullable: false, unique: true })
-  nom_utilisateur: string;
+  @Column({ type: 'varchar', nullable: false })
+  nom_utilisateur: string; // UNIQUE par organisation (voir @Index en haut)
 
   @Column({ type: 'varchar', nullable: false })
   role: string;
@@ -30,8 +36,8 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: true })
   telephone: string;
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  email: string;
+  @Column({ type: 'varchar', nullable: true })
+  email: string; // UNIQUE par organisation (voir @Index en haut)
 
   @Column({ type: 'varchar', nullable: false, default: 'Homme' })
   genre: string;
@@ -49,8 +55,8 @@ export class Personnel {
   @Column({ type: 'varchar', nullable: false })
   mot_de_passe: string;
 
-  @Column({ type: 'uuid', nullable: true, unique: true })
-  keycloak_id: string;
+  @Column({ type: 'uuid', nullable: true })
+  keycloak_id: string; // Pas unique car peut être null pour plusieurs utilisateurs
 
   @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
   photo: string; // URL ou chemin vers la photo de profil

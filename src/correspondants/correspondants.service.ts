@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Scope, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In } from 'typeorm';
 import { Correspondant } from './entities/correspondant.entity';
@@ -7,7 +7,7 @@ import { UpdateCorrespondantDto } from './dto/update-correspondant.dto';
 import * as fs from 'fs';
 import * as path from 'path';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class CorrespondantsService {
   constructor(
     @InjectRepository(Correspondant)

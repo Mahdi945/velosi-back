@@ -38,6 +38,8 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     userId: number;
     userType: 'personnel' | 'client';
     role?: string;
+    databaseName: string;
+    organisationId: number;
   }>();
 
   constructor(
@@ -65,6 +67,15 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       const userId = payload.sub;
       const userType = payload.userType || 'personnel';
       const role = payload.role;
+      // 🏢 MULTI-TENANT: Extraire les informations d'organisation
+      const databaseName = payload.databaseName;
+      const organisationId = payload.organisationId;
+
+      if (!databaseName || !organisationId) {
+        this.logger.error(`JWT manque databaseName ou organisationId pour user ${userId}`);
+        socket.disconnect();
+        return;
+      }
 
       // Stocker les informations de l'utilisateur
       this.connectedUsers.set(socket.id, {
@@ -72,13 +83,22 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         userId,
         userType,
         role,
+        databaseName,
+        organisationId,
       });
 
       // Rejoindre une room personnelle pour recevoir les messages
       socket.join(`user_${userType}_${userId}`);
 
       // Mettre à jour le statut en ligne
-      await this.vechatService.updatePresence(userId, userType, 'online', { id: userId, userType });
+      await this.vechatService.updatePresence(
+        userId,
+        userType,
+        'online',
+        { id: userId, userType },
+        databaseName,
+        organisationId
+      );
 
       // Notifier les autres utilisateurs du statut en ligne
       socket.broadcast.emit('userOnlineStatus', {
@@ -99,10 +119,17 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     const userInfo = this.connectedUsers.get(socket.id);
     
     if (userInfo) {
-      const { userId, userType } = userInfo;
+      const { userId, userType, databaseName, organisationId } = userInfo;
       
       // Mettre à jour le statut hors ligne
-      await this.vechatService.updatePresence(userId, userType, 'offline', { id: userId, userType });
+      await this.vechatService.updatePresence(
+        userId,
+        userType,
+        'offline',
+        { id: userId, userType },
+        databaseName,
+        organisationId
+      );
 
       // Notifier les autres utilisateurs du statut hors ligne
       socket.broadcast.emit('userOnlineStatus', {
@@ -135,7 +162,7 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         return;
       }
 
-      const { userId, userType } = userInfo;
+      const { userId, userType, databaseName, organisationId } = userInfo;
 
       // Envoyer le message via le service
       const messageDto = {
@@ -144,7 +171,12 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         content: data.content,
         type: data.type || 'text'
       };
-      const message = await this.vechatService.sendMessage(messageDto, { id: userId, userType });
+      const message = await this.vechatService.sendMessage(
+        messageDto,
+        { id: userId, userType },
+        databaseName,
+        organisationId
+      );
 
       // Envoyer le message à l'expéditeur (confirmation)
       socket.emit('messageSent', message);
@@ -173,10 +205,15 @@ export class VechatGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         return;
       }
 
-      const { userId, userType } = userInfo;
+      const { userId, userType, databaseName, organisationId } = userInfo;
 
       // Marquer le message comme lu
-      await this.vechatService.markMessagesAsRead([data.messageId], { id: userId, userType });
+      await this.vechatService.markMessagesAsRead(
+        [data.messageId],
+        { id: userId, userType },
+        databaseName,
+        organisationId
+      );
 
       // Notifier l'expéditeur que le message a été lu
       socket.broadcast.emit('messageRead', {

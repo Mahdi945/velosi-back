@@ -11,7 +11,9 @@ import {
   UploadedFile,
   BadRequestException,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -22,6 +24,7 @@ import { UpdateCorrespondantDto } from './dto/update-correspondant.dto';
 
 @ApiTags('Correspondants')
 @Controller('correspondants')
+@UseGuards(JwtAuthGuard)
 export class CorrespondantsController {
   constructor(private readonly correspondantsService: CorrespondantsService) {}
 

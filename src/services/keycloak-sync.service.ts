@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Scope, Logger } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Personnel } from '../entities/personnel.entity';
@@ -6,7 +6,7 @@ import { Client } from '../entities/client.entity';
 import axios from 'axios';
 import { ConfigService } from '@nestjs/config';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class KeycloakSyncService {
   private readonly logger = new Logger(KeycloakSyncService.name);
   private keycloakAdminToken: string;

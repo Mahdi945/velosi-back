@@ -18,10 +18,12 @@ import { ActivityModule } from './crm/activity.module';
 import { QuoteModule } from './crm/quote.module';
 import { ReportModule } from './crm/report.module';
 import { IndustryModule } from './crm/industry.module';
+import { DatabaseModule } from '../common/database.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ContactClient, ObjectifCom, Client, Personnel]),
+    DatabaseModule, // 🏢 Multi-tenant database support
     LeadModule, // Module pour la gestion des prospects/leads
     OpportunityModule, // Module pour la gestion des opportunités
     PipelineModule, // Module pour le pipeline Kanban

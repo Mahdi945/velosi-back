@@ -11,25 +11,28 @@ import {
   UseGuards,
   HttpStatus,
   HttpException,
+  Req,
 } from '@nestjs/common';
 import { EnginService, CreateEnginDto, UpdateEnginDto, EnginQuery } from '../services/engin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
+import { getDatabaseName } from '../common/helpers/multi-tenant.helper';
 
 @Controller('engins')
-// @UseGuards(JwtAuthGuard, RolesGuard) // Temporairement désactivé pour debug
+@UseGuards(JwtAuthGuard)
 export class EnginController {
   constructor(private readonly enginService: EnginService) {}
 
   /**
    * Récupérer tous les engins avec filtres et pagination
+   * ✅ MULTI-TENANT
    */
   @Get()
-  // // @Roles('administratif', 'commercial') // Temporairement désactivé pour debug
-  async findAll(@Query() query: EnginQuery) {
+  async findAll(@Query() query: EnginQuery, @Req() req: any) {
     try {
-      const result = await this.enginService.findAll(query);
+      const databaseName = getDatabaseName(req);
+      const result = await this.enginService.findAll(databaseName, query);
       return {
         success: true,
         message: 'Engins récupérés avec succès',
@@ -49,12 +52,13 @@ export class EnginController {
 
   /**
    * Récupérer tous les engins actifs (pour les selects)
+   * ✅ MULTI-TENANT
    */
   @Get('active')
-  // // @Roles('administratif', 'commercial') // Temporairement désactivé pour debug
-  async findActive() {
+  async findActive(@Req() req: any) {
     try {
-      const engins = await this.enginService.findActive();
+      const databaseName = getDatabaseName(req);
+      const engins = await this.enginService.findActive(databaseName);
       return {
         success: true,
         message: 'Engins actifs récupérés avec succès',
@@ -74,12 +78,13 @@ export class EnginController {
 
   /**
    * Statistiques des engins
+   * ✅ MULTI-TENANT
    */
   @Get('stats')
-  // @Roles('administratif')
-  async getStats() {
+  async getStats(@Req() req: any) {
     try {
-      const stats = await this.enginService.getStats();
+      const databaseName = getDatabaseName(req);
+      const stats = await this.enginService.getStats(databaseName);
       return {
         success: true,
         message: 'Statistiques des engins récupérées avec succès',
@@ -99,12 +104,13 @@ export class EnginController {
 
   /**
    * Récupérer un engin par ID
+   * ✅ MULTI-TENANT
    */
   @Get(':id')
-  // @Roles('administratif', 'commercial')
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     try {
-      const engin = await this.enginService.findOne(id);
+      const databaseName = getDatabaseName(req);
+      const engin = await this.enginService.findOne(databaseName, id);
       return {
         success: true,
         message: 'Engin récupéré avec succès',
@@ -127,12 +133,13 @@ export class EnginController {
 
   /**
    * Créer un nouvel engin
+   * ✅ MULTI-TENANT
    */
   @Post()
-  // @Roles('administratif')
-  async create(@Body() createEnginDto: CreateEnginDto) {
+  async create(@Body() createEnginDto: CreateEnginDto, @Req() req: any) {
     try {
-      const engin = await this.enginService.create(createEnginDto);
+      const databaseName = getDatabaseName(req);
+      const engin = await this.enginService.create(databaseName, createEnginDto);
       return {
         success: true,
         message: 'Engin créé avec succès',
@@ -152,15 +159,17 @@ export class EnginController {
 
   /**
    * Mettre à jour un engin
+   * ✅ MULTI-TENANT
    */
   @Patch(':id')
-  // @Roles('administratif')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateEnginDto: UpdateEnginDto,
+    @Req() req: any,
   ) {
     try {
-      const engin = await this.enginService.update(id, updateEnginDto);
+      const databaseName = getDatabaseName(req);
+      const engin = await this.enginService.update(databaseName, id, updateEnginDto);
       return {
         success: true,
         message: 'Engin mis à jour avec succès',
@@ -183,12 +192,13 @@ export class EnginController {
 
   /**
    * Désactiver un engin (soft delete)
+   * ✅ MULTI-TENANT
    */
   @Delete(':id')
-  // @Roles('administratif')
-  async remove(@Param('id', ParseIntPipe) id: number) {
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     try {
-      const engin = await this.enginService.remove(id);
+      const databaseName = getDatabaseName(req);
+      const engin = await this.enginService.remove(databaseName, id);
       return {
         success: true,
         message: 'Engin désactivé avec succès',
@@ -211,12 +221,13 @@ export class EnginController {
 
   /**
    * Supprimer définitivement un engin
+   * ✅ MULTI-TENANT
    */
   @Delete(':id/permanent')
-  // @Roles('administratif')
-  async delete(@Param('id', ParseIntPipe) id: number) {
+  async delete(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     try {
-      await this.enginService.delete(id);
+      const databaseName = getDatabaseName(req);
+      await this.enginService.delete(databaseName, id);
       return {
         success: true,
         message: 'Engin supprimé définitivement avec succès'

@@ -14,7 +14,9 @@ import {
   HttpCode,
   Res,
   NotFoundException,
+  Req,
 } from '@nestjs/common';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 import { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,37 +38,44 @@ export class AutorisationTVAController {
   // === ENDPOINTS POUR AUTORISATIONS TVA ===
 
   @Post()
-  async createAutorisation(@Body() createDto: CreateAutorisationTVADto): Promise<AutorisationTVA> {
-    return await this.autorisationTVAService.createAutorisationTVA(createDto);
+  async createAutorisation(@Body() createDto: CreateAutorisationTVADto, @Req() req: any): Promise<AutorisationTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.createAutorisationTVA(databaseName, createDto);
   }
 
   @Get()
-  async findAllAutorisations(): Promise<AutorisationTVA[]> {
-    return await this.autorisationTVAService.findAllAutorisationsTVA();
+  async findAllAutorisations(@Req() req: any): Promise<AutorisationTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findAllAutorisationsTVA(databaseName);
   }
 
   @Get('client/:clientId')
-  async findAutorisationsByClient(@Param('clientId', ParseIntPipe) clientId: number): Promise<AutorisationTVA[]> {
-    return await this.autorisationTVAService.findAutorisationsTVAByClient(clientId);
+  async findAutorisationsByClient(@Param('clientId', ParseIntPipe) clientId: number, @Req() req: any): Promise<AutorisationTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findAutorisationsTVAByClient(databaseName, clientId);
   }
 
   @Get(':id')
-  async findOneAutorisation(@Param('id', ParseIntPipe) id: number): Promise<AutorisationTVA> {
-    return await this.autorisationTVAService.findOneAutorisationTVA(id);
+  async findOneAutorisation(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<AutorisationTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findOneAutorisationTVA(databaseName, id);
   }
 
   @Patch(':id')
   async updateAutorisation(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateAutorisationTVADto,
+    @Req() req: any,
   ): Promise<AutorisationTVA> {
-    return await this.autorisationTVAService.updateAutorisationTVA(id, updateDto);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.updateAutorisationTVA(databaseName, id, updateDto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeAutorisation(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return await this.autorisationTVAService.deleteAutorisationTVA(id);
+  async removeAutorisation(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<void> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.deleteAutorisationTVA(databaseName, id);
   }
 
   @Post(':id/image')
@@ -74,6 +83,7 @@ export class AutorisationTVAController {
   async uploadAutorisationImage(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ): Promise<AutorisationTVA> {
     if (!file) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -91,48 +101,57 @@ export class AutorisationTVAController {
       throw new BadRequestException('Le fichier ne peut pas dépasser 10MB');
     }
 
-    return await this.autorisationTVAService.uploadAutorisationTVAImage(id, file.buffer, file.originalname);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.uploadAutorisationTVAImage(databaseName, id, file.buffer, file.originalname);
   }
 
   // === ENDPOINTS POUR SUSPENSIONS TVA ===
 
   @Post('suspension')
-  async createSuspension(@Body() createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.createSuspensionTVA(createDto);
+  async createSuspension(@Body() createDto: CreateBonCommandeDto, @Req() req: any): Promise<BCsusTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.createSuspensionTVA(databaseName, createDto);
   }
 
   @Get('suspension')
-  async findAllSuspensions(): Promise<BCsusTVA[]> {
-    return await this.autorisationTVAService.findAllSuspensionsTVA();
+  async findAllSuspensions(@Req() req: any): Promise<BCsusTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findAllSuspensionsTVA(databaseName);
   }
 
   @Get('suspension/client/:clientId')
-  async findSuspensionsByClient(@Param('clientId', ParseIntPipe) clientId: number): Promise<BCsusTVA[]> {
-    return await this.autorisationTVAService.findSuspensionsTVAByClient(clientId);
+  async findSuspensionsByClient(@Param('clientId', ParseIntPipe) clientId: number, @Req() req: any): Promise<BCsusTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findSuspensionsTVAByClient(databaseName, clientId);
   }
 
   @Get('suspension/:id')
-  async findOneSuspension(@Param('id', ParseIntPipe) id: number): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.findOneSuspensionTVA(id);
+  async findOneSuspension(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<BCsusTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findOneSuspensionTVA(databaseName, id);
   }
 
   @Patch('suspension/:id')
   async updateSuspension(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateBonCommandeDto,
+    @Req() req: any,
   ): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.updateSuspensionTVA(id, updateDto);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.updateSuspensionTVA(databaseName, id, updateDto);
   }
 
   @Delete('suspension/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeSuspension(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return await this.autorisationTVAService.deleteSuspensionTVA(id);
+  async removeSuspension(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<void> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.deleteSuspensionTVA(databaseName, id);
   }
 
   @Get('suspension/:id/image')
-  async getSuspensionImage(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
-    const suspension = await this.autorisationTVAService.findOneSuspensionTVA(id);
+  async getSuspensionImage(@Param('id', ParseIntPipe) id: number, @Res() res: Response, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    const suspension = await this.autorisationTVAService.findOneSuspensionTVA(databaseName, id);
     
     if (!suspension || !suspension.imagePath) {
       throw new NotFoundException('Image de suspension non trouvée');
@@ -168,37 +187,44 @@ export class AutorisationTVAController {
   // === NOUVEAUX ENDPOINTS POUR BONS DE COMMANDE ===
 
   @Post('bon-commande')
-  async createBonCommande(@Body() createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.createBonCommande(createDto);
+  async createBonCommande(@Body() createDto: CreateBonCommandeDto, @Req() req: any): Promise<BCsusTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.createBonCommande(databaseName, createDto);
   }
 
   @Get('bon-commande')
-  async findAllBonsCommande(): Promise<BCsusTVA[]> {
-    return await this.autorisationTVAService.findAllBonsCommande();
+  async findAllBonsCommande(@Req() req: any): Promise<BCsusTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findAllBonsCommande(databaseName);
   }
 
   @Get('bon-commande/:id')
-  async findOneBonCommande(@Param('id', ParseIntPipe) id: number): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.findOneBonCommande(id);
+  async findOneBonCommande(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<BCsusTVA> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findOneBonCommande(databaseName, id);
   }
 
   @Get('autorisation/:autorisationId/bons-commande')
-  async findBonsCommandeByAutorisation(@Param('autorisationId', ParseIntPipe) autorisationId: number): Promise<BCsusTVA[]> {
-    return await this.autorisationTVAService.findBonsCommandeByAutorisation(autorisationId);
+  async findBonsCommandeByAutorisation(@Param('autorisationId', ParseIntPipe) autorisationId: number, @Req() req: any): Promise<BCsusTVA[]> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.findBonsCommandeByAutorisation(databaseName, autorisationId);
   }
 
   @Patch('bon-commande/:id')
   async updateBonCommande(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateBonCommandeDto,
+    @Req() req: any,
   ): Promise<BCsusTVA> {
-    return await this.autorisationTVAService.updateBonCommande(id, updateDto);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.updateBonCommande(databaseName, id, updateDto);
   }
 
   @Delete('bon-commande/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeBonCommande(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    return await this.autorisationTVAService.deleteBonCommande(id);
+  async removeBonCommande(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<void> {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.deleteBonCommande(databaseName, id);
   }
 
   // === ENDPOINTS POUR UPLOAD D'IMAGES BONS DE COMMANDE ===
@@ -208,6 +234,7 @@ export class AutorisationTVAController {
   async uploadBonCommandeImage(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ): Promise<BCsusTVA> {
     if (!file) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -225,7 +252,8 @@ export class AutorisationTVAController {
       throw new BadRequestException('Le fichier ne peut pas dépasser 10MB');
     }
 
-    return await this.autorisationTVAService.uploadBonCommandeImage(id, file.buffer, file.originalname);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.uploadBonCommandeImage(databaseName, id, file.buffer, file.originalname);
   }
 
   // === ENDPOINTS POUR SERVIR LES FICHIERS ===
@@ -293,6 +321,7 @@ export class AutorisationTVAController {
   async uploadSuspensionImage(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ): Promise<BCsusTVA> {
     if (!file) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -310,18 +339,21 @@ export class AutorisationTVAController {
       throw new BadRequestException('Le fichier ne peut pas dépasser 10MB');
     }
 
-    return await this.autorisationTVAService.uploadSuspensionTVAImage(id, file.buffer, file.originalname);
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.uploadSuspensionTVAImage(databaseName, id, file.buffer, file.originalname);
   }
 
   // === ENDPOINTS UTILITAIRES ===
 
   @Get('client/:clientId/status')
-  async getClientTVAStatus(@Param('clientId', ParseIntPipe) clientId: number) {
-    return await this.autorisationTVAService.getClientTVAStatus(clientId);
+  async getClientTVAStatus(@Param('clientId', ParseIntPipe) clientId: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.getClientTVAStatus(databaseName, clientId);
   }
 
   @Get('client/:clientId/validate')
-  async validateClientTVACoherence(@Param('clientId', ParseIntPipe) clientId: number) {
-    return await this.autorisationTVAService.validateClientTVACoherence(clientId);
+  async validateClientTVACoherence(@Param('clientId', ParseIntPipe) clientId: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return await this.autorisationTVAService.validateClientTVACoherence(databaseName, clientId);
   }
 }

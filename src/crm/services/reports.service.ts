@@ -1,12 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In, IsNull, Not } from 'typeorm';
-import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
-import { Opportunity, OpportunityStage } from '../../entities/crm/opportunity.entity';
-import { Quote, QuoteStatus } from '../entities/quote.entity';
-import { Activity } from '../entities/activity.entity';
-import { Personnel } from '../../entities/personnel.entity';
-import { Client } from '../../entities/client.entity';
+﻿import { Injectable } from '@nestjs/common';
+import { DatabaseConnectionService } from '../../common/database-connection.service';
 import {
   ReportFilterDto,
   CommercialReport,
@@ -22,18 +15,7 @@ import {
 @Injectable()
 export class ReportsService {
   constructor(
-    @InjectRepository(Lead)
-    private leadRepository: Repository<Lead>,
-    @InjectRepository(Opportunity)
-    private opportunityRepository: Repository<Opportunity>,
-    @InjectRepository(Quote)
-    private quoteRepository: Repository<Quote>,
-    @InjectRepository(Activity)
-    private activityRepository: Repository<Activity>,
-    @InjectRepository(Personnel)
-    private personnelRepository: Repository<Personnel>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    private databaseConnectionService: DatabaseConnectionService,
   ) {}
 
   /**
@@ -46,40 +28,34 @@ export class ReportsService {
     const endDate = new Date(endDateStr);
     endDate.setHours(23, 59, 59, 999); // Fin de la journée
     
-    return Between(startDate, endDate);
+    return { start: startDate, end: endDate };
   }
 
   /**
    * Générer un rapport global CRM
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateGlobalReport(filters: ReportFilterDto): Promise<GlobalReport> {
-    const whereClause: any = {};
+  async generateGlobalReport(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<GlobalReport> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
-    // Filtres de période (inclusif: début à 00:00:00, fin à 23:59:59)
-    if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
-    }
-
     // Récupérer tous les commerciaux ou filtrer
-    let commercials: Personnel[];
+    let commercialsQuery = `SELECT * FROM personnel WHERE role = 'commercial'`;
+    const params: any[] = [];
+    
     if (filters.commercialId) {
-      commercials = await this.personnelRepository.find({
-        where: { id: filters.commercialId },
-      });
+      commercialsQuery = `SELECT * FROM personnel WHERE id = $1`;
+      params.push(filters.commercialId);
     } else if (filters.commercialIds && filters.commercialIds.length > 0) {
-      commercials = await this.personnelRepository.find({
-        where: { id: In(filters.commercialIds) },
-      });
-    } else {
-      commercials = await this.personnelRepository.find({
-        where: { role: 'commercial' },
-      });
+      commercialsQuery = `SELECT * FROM personnel WHERE id = ANY($1)`;
+      params.push(filters.commercialIds);
     }
+    
+    const commercials = await connection.query(commercialsQuery, params);
 
     // Générer les rapports par commercial
     const commercialReports: CommercialReport[] = [];
     for (const commercial of commercials) {
-      const report = await this.generateCommercialReport(commercial.id, filters);
+      const report = await this.generateCommercialReport(databaseName, organisationId, commercial.id, filters);
       commercialReports.push(report);
     }
 
@@ -129,80 +105,94 @@ export class ReportsService {
 
   /**
    * Générer un rapport par commercial
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateCommercialReport(commercialId: number, filters: ReportFilterDto): Promise<CommercialReport> {
-    const commercial = await this.personnelRepository.findOne({
-      where: { id: commercialId },
-    });
+  async generateCommercialReport(databaseName: string, organisationId: number, commercialId: number, filters: ReportFilterDto): Promise<CommercialReport> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const commercial = await connection.query(
+      `SELECT * FROM personnel WHERE id = $1`,
+      [commercialId]
+    );
 
-    if (!commercial) {
+    if (!commercial || commercial.length === 0) {
       throw new Error(`Commercial avec ID ${commercialId} introuvable`);
     }
 
-    const whereClause: any = { assignedToId: commercialId };
+    const commercialData = commercial[0];
+    
+    // Construction des conditions de filtrage
+    let dateCondition = '';
+    const params: any[] = [commercialId];
+    let paramIndex = 2;
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      dateCondition = ` AND created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      params.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
 
-    // Prospects
-    const leads = await this.leadRepository.find({
-      where: whereClause,
-      relations: ['assignedTo'],
-    });
+    // Prospects - utiliser assigned_to_ids (array) au lieu de assignedToId
+    const leads = await connection.query(
+      `SELECT * FROM crm_leads 
+       WHERE is_archived = false 
+         AND $1 = ANY(assigned_to_ids)
+         ${dateCondition}`,
+      params
+    );
 
     const totalLeads = leads.length;
-    const newLeads = leads.filter(l => l.status === LeadStatus.NEW).length;
-    const qualifiedLeads = leads.filter(l => l.status === LeadStatus.QUALIFIED).length;
-    const convertedLeads = leads.filter(l => l.status === LeadStatus.CONVERTED).length;
-    const lostLeads = leads.filter(l => l.status === LeadStatus.LOST).length;
+    const newLeads = leads.filter(l => l.status === 'new').length;
+    const qualifiedLeads = leads.filter(l => l.status === 'qualified').length;
+    const convertedLeads = leads.filter(l => l.status === 'converted').length;
+    const lostLeads = leads.filter(l => l.status === 'lost').length;
 
-    // Opportunités
-    const opportunities = await this.opportunityRepository.find({
-      where: whereClause,
-      relations: ['assignedTo'],
-    });
+    // Opportunités - utiliser assigned_to_ids (array)
+    const opportunities = await connection.query(
+      `SELECT * FROM crm_opportunities 
+       WHERE deleted_at IS NULL 
+         AND is_archived = false
+         AND $1 = ANY(assigned_to_ids)
+         ${dateCondition}`,
+      params
+    );
 
     const totalOpportunities = opportunities.length;
     const openOpportunities = opportunities.filter(o => 
-      o.stage !== OpportunityStage.CLOSED_WON && o.stage !== OpportunityStage.CLOSED_LOST
+      !['closed_won', 'closed_lost'].includes(o.stage)
     ).length;
-    const wonOpportunities = opportunities.filter(o => o.stage === OpportunityStage.CLOSED_WON).length;
-    const lostOpportunities = opportunities.filter(o => o.stage === OpportunityStage.CLOSED_LOST).length;
+    const wonOpportunities = opportunities.filter(o => o.stage === 'closed_won').length;
+    const lostOpportunities = opportunities.filter(o => o.stage === 'closed_lost').length;
     const totalOpportunityValue = opportunities.reduce((sum, o) => sum + (Number(o.value) || 0), 0);
     const wonOpportunityValue = opportunities
-      .filter(o => o.stage === OpportunityStage.CLOSED_WON)
+      .filter(o => o.stage === 'closed_won')
       .reduce((sum, o) => sum + (Number(o.value) || 0), 0);
 
-    // Cotations (par commercial assigné - pas créateur car peut être créé par administratif)
-    const quoteWhereClause: any = {
-      commercialId: commercialId,
-    };
-    
-    if (filters.startDate && filters.endDate) {
-      quoteWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
-    }
-
-    const quotes = await this.quoteRepository.find({
-      where: quoteWhereClause,
-      relations: ['commercial', 'creator'],
-    });
+    // Cotations - utiliser commercial_ids (array) au lieu de commercialId
+    const quotesParams = [...params];
+    const quotes = await connection.query(
+      `SELECT * FROM crm_quotes 
+       WHERE $1 = ANY(commercial_ids)
+         ${dateCondition}`,
+      quotesParams
+    );
 
     const totalQuotes = quotes.length;
-    const draftQuotes = quotes.filter(q => q.status === QuoteStatus.DRAFT).length;
-    const sentQuotes = quotes.filter(q => q.status === QuoteStatus.SENT).length;
-    const acceptedQuotes = quotes.filter(q => q.status === QuoteStatus.ACCEPTED).length;
-    const rejectedQuotes = quotes.filter(q => q.status === QuoteStatus.REJECTED).length;
+    const draftQuotes = quotes.filter(q => q.status === 'draft').length;
+    const sentQuotes = quotes.filter(q => q.status === 'sent').length;
+    const acceptedQuotes = quotes.filter(q => q.status === 'accepted').length;
+    const rejectedQuotes = quotes.filter(q => q.status === 'rejected').length;
 
     // Financier
     const totalQuotesValue = quotes.reduce((sum, q) => sum + (Number(q.total) || 0), 0);
     const acceptedQuotesValue = quotes
-      .filter(q => q.status === QuoteStatus.ACCEPTED)
+      .filter(q => q.status === 'accepted')
       .reduce((sum, q) => sum + (Number(q.total) || 0), 0);
-    const totalMargin = quotes.reduce((sum, q) => sum + (Number(q.totalMargin) || 0), 0);
+    const totalMargin = quotes.reduce((sum, q) => sum + (Number(q.total_margin) || 0), 0);
     const acceptedMargin = quotes
-      .filter(q => q.status === QuoteStatus.ACCEPTED)
-      .reduce((sum, q) => sum + (Number(q.totalMargin) || 0), 0);
+      .filter(q => q.status === 'accepted')
+      .reduce((sum, q) => sum + (Number(q.total_margin) || 0), 0);
     const averageQuoteValue = totalQuotes > 0 ? totalQuotesValue / totalQuotes : 0;
 
     // Taux de conversion
@@ -212,19 +202,17 @@ export class ReportsService {
     const overallConversionRate = totalLeads > 0 ? (acceptedQuotes / totalLeads) * 100 : 0;
 
     // Activités
-    const activities = await this.activityRepository.find({
-      where: {
-        assignedTo: commercialId,
-        ...(filters.startDate && filters.endDate && {
-          scheduledAt: this.createDateRange(filters.startDate, filters.endDate),
-        }),
-      },
-    });
+    const activities = await connection.query(
+      `SELECT * FROM crm_activities 
+       WHERE assigned_to = $1
+         ${dateCondition}`,
+      params
+    );
 
     return {
       commercialId,
-      commercialName: `${commercial.prenom} ${commercial.nom}`,
-      commercialEmail: commercial.email,
+      commercialName: `${commercialData.prenom} ${commercialData.nom}`,
+      commercialEmail: commercialData.email,
       totalLeads,
       newLeads,
       qualifiedLeads,
@@ -257,18 +245,19 @@ export class ReportsService {
 
   /**
    * Générer un rapport détaillé avec tous les prospects, opportunités et cotations
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateDetailedReport(filters: ReportFilterDto): Promise<DetailedReport> {
-    const globalStats = await this.generateGlobalReport(filters);
+  async generateDetailedReport(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<DetailedReport> {
+    const globalStats = await this.generateGlobalReport(databaseName, organisationId, filters);
     
     // Rapports par prospect
-    const prospectReports = await this.generateProspectReports(filters);
+    const prospectReports = await this.generateProspectReports(databaseName, organisationId, filters);
     
     // Rapports par opportunité
-    const opportunityReports = await this.generateOpportunityReports(filters);
+    const opportunityReports = await this.generateOpportunityReports(databaseName, organisationId, filters);
     
     // Rapports par cotation
-    const quoteReports = await this.generateQuoteReports(filters);
+    const quoteReports = await this.generateQuoteReports(databaseName, organisationId, filters);
 
     return {
       globalStats,
@@ -280,77 +269,102 @@ export class ReportsService {
 
   /**
    * Générer des rapports par prospect
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateProspectReports(filters: ReportFilterDto): Promise<ProspectReport[]> {
-    const whereClause: any = {};
+  async generateProspectReports(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<ProspectReport[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    let query = `
+      SELECT l.*, 
+             p.nom as assigned_to_name, p.prenom as assigned_to_prenom
+      FROM crm_leads l
+      LEFT JOIN personnel p ON l.assigned_to = p.id
+      WHERE l.is_archived = false
+    `;
+    
+    const params: any[] = [];
+    let paramIndex = 1;
     
     if (filters.commercialId) {
-      whereClause.assignedToId = filters.commercialId;
+      query += ` AND $${paramIndex} = ANY(l.assigned_to_ids)`;
+      params.push(filters.commercialId);
+      paramIndex++;
     } else if (filters.commercialIds && filters.commercialIds.length > 0) {
-      whereClause.assignedToId = In(filters.commercialIds);
+      query += ` AND l.assigned_to_ids && $${paramIndex}`;
+      params.push(filters.commercialIds);
+      paramIndex++;
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      query += ` AND l.created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      params.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
     
     if (filters.status) {
-      whereClause.status = filters.status;
+      query += ` AND l.status = $${paramIndex}`;
+      params.push(filters.status);
+      paramIndex++;
     }
-
-    const leads = await this.leadRepository.find({
-      where: whereClause,
-      relations: ['assignedTo'],
-      order: { createdAt: 'DESC' },
-    });
+    
+    query += ` ORDER BY l.created_at DESC`;
+    
+    const leads = await connection.query(query, params);
 
     const prospectReports: ProspectReport[] = [];
 
     for (const lead of leads) {
       // Opportunités liées
-      const opportunities = await this.opportunityRepository.find({
-        where: { leadId: lead.id },
-      });
+      const opportunities = await connection.query(
+        `SELECT * FROM crm_opportunities WHERE lead_id = $1 AND deleted_at IS NULL`,
+        [lead.id]
+      );
 
       const opportunitiesCount = opportunities.length;
       const totalOpportunityValue = opportunities.reduce((sum, o) => sum + (Number(o.value) || 0), 0);
 
       // Cotations liées (via lead ou opportunités)
-      const quotes = await this.quoteRepository.find({
-        where: [
-          { leadId: lead.id },
-          { opportunityId: In(opportunities.map(o => o.id)) },
-        ],
-      });
+      const opportunityIds = opportunities.map(o => o.id);
+      let quotesQuery = `SELECT * FROM crm_quotes WHERE lead_id = $1`;
+      const quotesParams = [lead.id];
+      
+      if (opportunityIds.length > 0) {
+        quotesQuery += ` OR opportunity_id = ANY($2)`;
+        quotesParams.push(opportunityIds);
+      }
+      
+      const quotes = await connection.query(quotesQuery, quotesParams);
 
       const quotesCount = quotes.length;
       const totalQuotesValue = quotes.reduce((sum, q) => sum + (Number(q.total) || 0), 0);
       const acceptedQuotesValue = quotes
-        .filter(q => q.status === QuoteStatus.ACCEPTED)
+        .filter(q => q.status === 'accepted')
         .reduce((sum, q) => sum + (Number(q.total) || 0), 0);
 
       // Dernière activité
-      const lastActivity = await this.activityRepository.findOne({
-        where: { leadId: lead.id },
-        order: { scheduledAt: 'DESC' },
-      });
+      const lastActivityResult = await connection.query(
+        `SELECT * FROM crm_activities WHERE lead_id = $1 ORDER BY scheduled_at DESC LIMIT 1`,
+        [lead.id]
+      );
+      const lastActivity = lastActivityResult[0];
 
       prospectReports.push({
         leadId: lead.id,
-        leadName: lead.fullName,
+        leadName: lead.full_name,
         leadEmail: lead.email,
         leadPhone: lead.phone,
         company: lead.company,
         source: lead.source,
         status: lead.status,
-        createdAt: lead.createdAt,
-        assignedTo: lead.assignedTo ? `${lead.assignedTo.prenom} ${lead.assignedTo.nom}` : 'Non assigné',
+        createdAt: lead.created_at,
+        assignedTo: lead.assigned_to_name ? `${lead.assigned_to_prenom} ${lead.assigned_to_name}` : 'Non assigné',
         opportunitiesCount,
         totalOpportunityValue,
         quotesCount,
         totalQuotesValue,
         acceptedQuotesValue,
-        lastActivityDate: lastActivity?.scheduledAt,
+        lastActivityDate: lastActivity?.scheduled_at,
         lastActivityType: lastActivity?.type,
       });
     }
@@ -360,42 +374,64 @@ export class ReportsService {
 
   /**
    * Générer des rapports par opportunité
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateOpportunityReports(filters: ReportFilterDto): Promise<OpportunityReport[]> {
-    const whereClause: any = {};
+  async generateOpportunityReports(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<OpportunityReport[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    let query = `
+      SELECT o.*, 
+             p.nom as assigned_to_name, p.prenom as assigned_to_prenom,
+             l.full_name as lead_name, l.company as lead_company
+      FROM crm_opportunities o
+      LEFT JOIN personnel p ON o.assigned_to = p.id
+      LEFT JOIN crm_leads l ON o.lead_id = l.id
+      WHERE o.deleted_at IS NULL AND o.is_archived = false
+    `;
+    
+    const params: any[] = [];
+    let paramIndex = 1;
     
     if (filters.commercialId) {
-      whereClause.assignedToId = filters.commercialId;
+      query += ` AND $${paramIndex} = ANY(o.assigned_to_ids)`;
+      params.push(filters.commercialId);
+      paramIndex++;
     } else if (filters.commercialIds && filters.commercialIds.length > 0) {
-      whereClause.assignedToId = In(filters.commercialIds);
+      query += ` AND o.assigned_to_ids && $${paramIndex}`;
+      params.push(filters.commercialIds);
+      paramIndex++;
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      query += ` AND o.created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      params.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
     
     if (filters.opportunityStage) {
-      whereClause.stage = filters.opportunityStage;
+      query += ` AND o.stage = $${paramIndex}`;
+      params.push(filters.opportunityStage);
+      paramIndex++;
     }
-
-    const opportunities = await this.opportunityRepository.find({
-      where: whereClause,
-      relations: ['assignedTo', 'lead'],
-      order: { createdAt: 'DESC' },
-    });
+    
+    query += ` ORDER BY o.created_at DESC`;
+    
+    const opportunities = await connection.query(query, params);
 
     const opportunityReports: OpportunityReport[] = [];
 
     for (const opportunity of opportunities) {
       // Cotations liées
-      const quotes = await this.quoteRepository.find({
-        where: { opportunityId: opportunity.id },
-      });
+      const quotes = await connection.query(
+        `SELECT * FROM crm_quotes WHERE opportunity_id = $1`,
+        [opportunity.id]
+      );
 
       const quotesCount = quotes.length;
       const totalQuotesValue = quotes.reduce((sum, q) => sum + (Number(q.total) || 0), 0);
       const acceptedQuotesValue = quotes
-        .filter(q => q.status === QuoteStatus.ACCEPTED)
+        .filter(q => q.status === 'accepted')
         .reduce((sum, q) => sum + (Number(q.total) || 0), 0);
 
       opportunityReports.push({
@@ -404,16 +440,16 @@ export class ReportsService {
         stage: opportunity.stage,
         value: Number(opportunity.value) || 0,
         probability: opportunity.probability,
-        expectedCloseDate: opportunity.expectedCloseDate,
-        assignedTo: opportunity.assignedTo 
-          ? `${opportunity.assignedTo.prenom} ${opportunity.assignedTo.nom}` 
+        expectedCloseDate: opportunity.expected_close_date,
+        assignedTo: opportunity.assigned_to_name 
+          ? `${opportunity.assigned_to_prenom} ${opportunity.assigned_to_name}` 
           : 'Non assigné',
         quotesCount,
         totalQuotesValue,
         acceptedQuotesValue,
-        leadName: opportunity.lead?.fullName || 'N/A',
-        leadCompany: opportunity.lead?.company || 'N/A',
-        createdAt: opportunity.createdAt,
+        leadName: opportunity.lead_name || 'N/A',
+        leadCompany: opportunity.lead_company || 'N/A',
+        createdAt: opportunity.created_at,
       });
     }
 
@@ -422,53 +458,73 @@ export class ReportsService {
 
   /**
    * Générer des rapports par cotation
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateQuoteReports(filters: ReportFilterDto): Promise<QuoteReport[]> {
-    const whereClause: any = {};
+  async generateQuoteReports(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<QuoteReport[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    let query = `
+      SELECT q.*
+      FROM crm_quotes q
+      WHERE 1=1
+    `;
+    
+    const params: any[] = [];
+    let paramIndex = 1;
     
     if (filters.commercialId) {
-      whereClause.commercialId = filters.commercialId;
+      query += ` AND $${paramIndex} = ANY(q.commercial_ids)`;
+      params.push(filters.commercialId);
+      paramIndex++;
     } else if (filters.commercialIds && filters.commercialIds.length > 0) {
-      whereClause.commercialId = In(filters.commercialIds);
+      query += ` AND q.commercial_ids && $${paramIndex}`;
+      params.push(filters.commercialIds);
+      paramIndex++;
     }
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      query += ` AND q.created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      params.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
     
     if (filters.quoteStatus) {
-      whereClause.status = filters.quoteStatus;
+      query += ` AND q.status = $${paramIndex}`;
+      params.push(filters.quoteStatus);
+      paramIndex++;
     }
-
-    const quotes = await this.quoteRepository.find({
-      where: whereClause,
-      relations: ['commercial', 'creator', 'opportunity', 'lead', 'items'], // ✅ Charger les items pour recalculer le total avec TVA par ligne
-      order: { createdAt: 'DESC' },
-    });
+    
+    query += ` ORDER BY q.created_at DESC`;
+    
+    const quotes = await connection.query(query, params);
 
     const quoteReports: QuoteReport[] = [];
 
     for (const quote of quotes) {
-      const marginPercentage = quote.totalOffers > 0 
-        ? ((quote.totalMargin / quote.totalOffers) * 100) 
+      const marginPercentage = quote.total_offers > 0 
+        ? ((quote.total_margin / quote.total_offers) * 100) 
         : 0;
 
-      // Commercial assigné (pas créateur car peut être administratif)
+      // Commercial principal assigné
       let assignedCommercial = 'N/A';
-      if (quote.commercial) {
-        assignedCommercial = `${quote.commercial.prenom} ${quote.commercial.nom}`;
+      if (quote.commercial_id) {
+        const commercial = await connection.query(
+          `SELECT * FROM personnel WHERE id = $1`,
+          [quote.commercial_id]
+        );
+        if (commercial && commercial.length > 0) {
+          assignedCommercial = `${commercial[0].prenom} ${commercial[0].nom}`;
+        }
       }
 
       // ✅ Charger les commerciaux multiples assignés avec leurs noms complets
       let commercialIds = [];
-      if ((quote as any).commercialIds && Array.isArray((quote as any).commercialIds)) {
-        const ids = (quote as any).commercialIds;
-        
-        // Charger les objets personnels complets pour chaque ID
-        const commercials = await this.personnelRepository.find({
-          where: { id: In(ids) },
-          select: ['id', 'nom', 'prenom'],
-        });
+      if (quote.commercial_ids && Array.isArray(quote.commercial_ids)) {
+        const commercials = await connection.query(
+          `SELECT id, nom, prenom FROM personnel WHERE id = ANY($1)`,
+          [quote.commercial_ids]
+        );
         
         // Créer un tableau d'objets avec nom complet
         commercialIds = commercials.map(c => ({
@@ -478,35 +534,41 @@ export class ReportsService {
           nomComplet: `${c.prenom} ${c.nom}`,
         }));
       }
+      
+      // Charger les items de la cotation
+      const items = await connection.query(
+        `SELECT * FROM crm_quote_items WHERE quote_id = $1`,
+        [quote.id]
+      );
 
       quoteReports.push({
         quoteId: quote.id,
-        quoteNumber: quote.quoteNumber,
+        quoteNumber: quote.quote_number,
         status: quote.status,
         title: quote.title,
-        clientName: quote.clientName,
-        clientCompany: quote.clientCompany,
-        clientEmail: quote.clientEmail,
+        clientName: quote.client_name,
+        clientCompany: quote.client_company,
+        clientEmail: quote.client_email,
         subtotal: Number(quote.subtotal) || 0,
-        taxAmount: Number(quote.taxAmount) || 0,
+        taxAmount: Number(quote.tax_amount) || 0,
         total: Number(quote.total) || 0,
-        freightPurchased: Number(quote.freightPurchased) || 0,
-        freightOffered: Number(quote.freightOffered) || 0,
-        freightMargin: Number(quote.freightMargin) || 0,
-        additionalCostsPurchased: Number(quote.additionalCostsPurchased) || 0,
-        additionalCostsOffered: Number(quote.additionalCostsOffered) || 0,
-        totalMargin: Number(quote.totalMargin) || 0,
+        freightPurchased: Number(quote.freight_purchased) || 0,
+        freightOffered: Number(quote.freight_offered) || 0,
+        freightMargin: Number(quote.freight_margin) || 0,
+        additionalCostsPurchased: Number(quote.additional_costs_purchased) || 0,
+        additionalCostsOffered: Number(quote.additional_costs_offered) || 0,
+        totalMargin: Number(quote.total_margin) || 0,
         marginPercentage,
-        leadId: quote.leadId,
-        opportunityId: quote.opportunityId,
+        leadId: quote.lead_id,
+        opportunityId: quote.opportunity_id,
         assignedCommercial,
         commercialIds, // ✅ Ajouter les commerciaux multiples avec leurs noms complets
-        items: quote.items || [], // ✅ Ajouter les items pour le calcul de TVA par ligne côté frontend
-        createdAt: quote.createdAt,
-        sentAt: quote.sentAt,
-        acceptedAt: quote.acceptedAt,
-        rejectedAt: quote.rejectedAt,
-        validUntil: quote.validUntil,
+        items: items || [], // ✅ Ajouter les items pour le calcul de TVA par ligne côté frontend
+        createdAt: quote.created_at,
+        sentAt: quote.sent_at,
+        acceptedAt: quote.accepted_at,
+        rejectedAt: quote.rejected_at,
+        validUntil: quote.valid_until,
       });
     }
 
@@ -515,29 +577,41 @@ export class ReportsService {
 
   /**
    * Obtenir les statistiques financières globales
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async getFinancialStats(filters: ReportFilterDto) {
-    const whereClause: any = {};
+  async getFinancialStats(databaseName: string, organisationId: number, filters: ReportFilterDto) {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    let query = `SELECT * FROM crm_quotes WHERE 1=1`;
+    const params: any[] = [];
+    let paramIndex = 1;
     
     if (filters.startDate && filters.endDate) {
-      whereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      query += ` AND created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      params.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
 
     if (filters.commercialId) {
-      whereClause.createdBy = filters.commercialId;
+      query += ` AND $${paramIndex} = ANY(commercial_ids)`;
+      params.push(filters.commercialId);
+      paramIndex++;
     } else if (filters.commercialIds && filters.commercialIds.length > 0) {
-      whereClause.createdBy = In(filters.commercialIds);
+      query += ` AND commercial_ids && $${paramIndex}`;
+      params.push(filters.commercialIds);
+      paramIndex++;
     }
 
-    const quotes = await this.quoteRepository.find({ where: whereClause });
+    const quotes = await connection.query(query, params);
 
     const totalRevenue = quotes
-      .filter(q => q.status === QuoteStatus.ACCEPTED)
+      .filter(q => q.status === 'accepted')
       .reduce((sum, q) => sum + (Number(q.total) || 0), 0);
 
     const totalMargin = quotes
-      .filter(q => q.status === QuoteStatus.ACCEPTED)
-      .reduce((sum, q) => sum + (Number(q.totalMargin) || 0), 0);
+      .filter(q => q.status === 'accepted')
+      .reduce((sum, q) => sum + (Number(q.total_margin) || 0), 0);
 
     const averageMarginRate = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0;
 
@@ -546,43 +620,48 @@ export class ReportsService {
       totalMargin,
       averageMarginRate,
       quotesCount: quotes.length,
-      acceptedQuotesCount: quotes.filter(q => q.status === QuoteStatus.ACCEPTED).length,
+      acceptedQuotesCount: quotes.filter(q => q.status === 'accepted').length,
     };
   }
 
   /**
    * Générer les rapports d'activités par commercial
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateActivityReports(filters: ReportFilterDto): Promise<ActivityReport[]> {
+  async generateActivityReports(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<ActivityReport[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Récupérer tous les commerciaux actifs ou filtrer par commercialId
-    const commercialsQuery: any = { statut: 'actif', role: 'commercial' };
+    let commercialsQuery = `SELECT * FROM personnel WHERE statut = 'actif' AND role = 'commercial'`;
+    const commercialsParams: any[] = [];
     
     // ✨ Filtrer par commercial si spécifié
     if (filters.commercialId) {
-      commercialsQuery.id = filters.commercialId;
+      commercialsQuery = `SELECT * FROM personnel WHERE id = $1`;
+      commercialsParams.push(filters.commercialId);
     }
     
-    const commercials = await this.personnelRepository.find({
-      where: commercialsQuery,
-    });
+    const commercials = await connection.query(commercialsQuery, commercialsParams);
 
     const activityReports: ActivityReport[] = [];
 
     for (const commercial of commercials) {
       // Filtrer les activités par commercial et période
-      const activityWhereClause: any = {
-        assignedTo: commercial.id,
-      };
+      let activityQuery = `SELECT * FROM crm_activities WHERE assigned_to = $1`;
+      const activityParams: any[] = [commercial.id];
+      let paramIndex = 2;
 
       if (filters.startDate && filters.endDate) {
-        activityWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+        const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+        activityQuery += ` AND created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+        activityParams.push(dateRange.start, dateRange.end);
+        paramIndex += 2;
       }
+      
+      activityQuery += ` ORDER BY created_at DESC`;
 
       // Récupérer toutes les activités du commercial
-      const activities = await this.activityRepository.find({
-        where: activityWhereClause,
-        order: { createdAt: 'DESC' },
-      });
+      const activities = await connection.query(activityQuery, activityParams);
 
       const totalActivities = activities.length;
 
@@ -602,7 +681,7 @@ export class ReportsService {
 
       // Dernière activité
       const lastActivity = activities[0];
-      const lastActivityDate = lastActivity?.createdAt;
+      const lastActivityDate = lastActivity?.created_at;
       const lastActivityType = lastActivity?.type;
       const lastActivityDescription = lastActivity?.description;
 
@@ -653,42 +732,53 @@ export class ReportsService {
 
   /**
    * Générer les rapports par client
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
-  async generateClientReports(filters: ReportFilterDto): Promise<ClientReport[]> {
-    // Récupérer tous les clients
-    const clients = await this.clientRepository.find({
-      relations: ['contacts'],
-      order: { created_at: 'DESC' },
-    });
+  async generateClientReports(databaseName: string, organisationId: number, filters: ReportFilterDto): Promise<ClientReport[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    // Récupérer tous les clients avec leurs contacts
+    const clients = await connection.query(
+      `SELECT c.*, 
+              cc.mail1, cc.mail2, cc.tel1, cc.tel2
+       FROM client c
+       LEFT JOIN contact_client cc ON c.id = cc.id_client
+       ORDER BY c.created_at DESC`
+    );
 
     // Récupérer tous les commerciaux pour optimiser les requêtes
-    const allCommercials = await this.personnelRepository.find({
-      where: { role: 'commercial', statut: 'actif' },
-    });
+    const allCommercials = await connection.query(
+      `SELECT * FROM personnel WHERE role = 'commercial' AND statut = 'actif'`
+    );
     
     // Créer un map username -> commercial pour accès rapide
     const commercialMap = new Map(
-      allCommercials.map(c => [c.username, c])
+      allCommercials.map(c => [c.nom_utilisateur, c])
     );
 
     // Récupérer toutes les cotations en une seule requête
-    const quoteWhereClause: any = {};
+    let quoteQuery = `SELECT * FROM crm_quotes`;
+    const quoteParams: any[] = [];
+    let paramIndex = 1;
+    
     if (filters.startDate && filters.endDate) {
-      quoteWhereClause.createdAt = this.createDateRange(filters.startDate, filters.endDate);
+      const dateRange = this.createDateRange(filters.startDate, filters.endDate);
+      quoteQuery += ` WHERE created_at BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+      quoteParams.push(dateRange.start, dateRange.end);
+      paramIndex += 2;
     }
+    
+    quoteQuery += ` ORDER BY created_at DESC`;
 
-    const allQuotes = await this.quoteRepository.find({
-      where: quoteWhereClause,
-      order: { createdAt: 'DESC' },
-    });
+    const allQuotes = await connection.query(quoteQuery, quoteParams);
 
     // Grouper les cotations par clientId
     const quotesByClient = new Map<number, any[]>();
     allQuotes.forEach(quote => {
-      if (!quotesByClient.has(quote.clientId)) {
-        quotesByClient.set(quote.clientId, []);
+      if (!quotesByClient.has(quote.client_id)) {
+        quotesByClient.set(quote.client_id, []);
       }
-      quotesByClient.get(quote.clientId)!.push(quote);
+      quotesByClient.get(quote.client_id)!.push(quote);
     });
 
     const clientReports: ClientReport[] = [];
@@ -700,18 +790,18 @@ export class ReportsService {
       const quotesCount = quotes.length;
       const totalQuotesValue = quotes.reduce((sum, q) => sum + (Number(q.total) || 0), 0);
       const acceptedQuotesValue = quotes
-        .filter(q => q.status === QuoteStatus.ACCEPTED)
+        .filter(q => q.status === 'accepted')
         .reduce((sum, q) => sum + (Number(q.total) || 0), 0);
       
-      const acceptedQuotesCount = quotes.filter(q => q.status === QuoteStatus.ACCEPTED).length;
-      const rejectedQuotesCount = quotes.filter(q => q.status === QuoteStatus.REJECTED).length;
+      const acceptedQuotesCount = quotes.filter(q => q.status === 'accepted').length;
+      const rejectedQuotesCount = quotes.filter(q => q.status === 'rejected').length;
       const pendingQuotesCount = quotes.filter(q => 
-        q.status === QuoteStatus.SENT || q.status === QuoteStatus.DRAFT
+        q.status === 'sent' || q.status === 'draft'
       ).length;
 
       const totalMargin = quotes
-        .filter(q => q.status === QuoteStatus.ACCEPTED)
-        .reduce((sum, q) => sum + (Number(q.totalMargin) || 0), 0);
+        .filter(q => q.status === 'accepted')
+        .reduce((sum, q) => sum + (Number(q.total_margin) || 0), 0);
 
       const averageQuoteValue = quotesCount > 0 ? totalQuotesValue / quotesCount : 0;
       const acceptanceRate = quotesCount > 0 ? (acceptedQuotesCount / quotesCount) * 100 : 0;
@@ -724,7 +814,7 @@ export class ReportsService {
       let commercialId = 0;
       
       if (client.charge_com) {
-        const commercial = commercialMap.get(client.charge_com);
+        const commercial: any = commercialMap.get(client.charge_com);
         
         if (commercial) {
           assignedCommercial = `${commercial.prenom} ${commercial.nom}`;
@@ -737,10 +827,9 @@ export class ReportsService {
         continue;
       }
 
-      // Récupérer les informations de contact depuis contact_client
-      const contact = client.contacts && client.contacts.length > 0 ? client.contacts[0] : null;
-      const clientEmail = contact?.mail1 || contact?.mail2 || '';
-      const clientPhone = contact?.tel1 || contact?.tel2 || '';
+      // Récupérer les informations de contact
+      const clientEmail = client.mail1 || client.mail2 || '';
+      const clientPhone = client.tel1 || client.tel2 || '';
 
       clientReports.push({
         clientId: client.id,
@@ -762,8 +851,8 @@ export class ReportsService {
         totalMargin,
         averageQuoteValue,
         acceptanceRate,
-        lastQuoteDate: lastQuote?.createdAt,
-        lastQuoteNumber: lastQuote?.quoteNumber,
+        lastQuoteDate: lastQuote?.created_at,
+        lastQuoteNumber: lastQuote?.quote_number,
         lastQuoteStatus: lastQuote?.status,
       });
     }

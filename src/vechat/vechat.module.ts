@@ -5,6 +5,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { VechatController } from './vechat.controller';
 import { VechatService } from './vechat.service';
 import { VechatGateway } from './vechat.gateway';
+import { AuthModule } from '../auth/auth.module';
 
 // Entités VelosiChat
 import { VechatMessage } from './entities/vechat-message.entity';
@@ -27,6 +28,9 @@ import { Client } from '../entities/client.entity';
       Personnel,
       Client,
     ]),
+    
+    // AuthModule pour JwtAuthGuard
+    AuthModule,
 
     // JWT pour l'authentification WebSocket
     JwtModule.register({

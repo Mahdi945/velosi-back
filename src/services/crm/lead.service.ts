@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
+﻿import { Injectable, Scope, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
+import { REQUEST } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In } from 'typeorm';
 import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
@@ -7,8 +8,10 @@ import { Personnel } from '../../entities/personnel.entity';
 import { OpportunityService } from './opportunity.service';
 import { CreateOpportunityDto } from '../../dto/crm/opportunity.dto';
 import { OpportunityStage } from '../../entities/crm/opportunity.entity';
+import { getDatabaseName, getOrganisationId } from '../../common/helpers/multi-tenant.helper';
+import { Request as ExpressRequest } from 'express';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class LeadService {
   constructor(
     @InjectRepository(Lead)
@@ -17,6 +20,7 @@ export class LeadService {
     private personnelRepository: Repository<Personnel>,
     @Inject(forwardRef(() => OpportunityService))
     private opportunityService: OpportunityService,
+    @Inject(REQUEST) private readonly request: ExpressRequest & { organisationDatabase?: string; organisationId?: number; user?: any },
   ) {}
 
   /**
@@ -445,18 +449,23 @@ export class LeadService {
         traffic: convertDto.traffic,
         serviceFrequency: convertDto.serviceFrequency as any,
         specialRequirements: convertDto.specialRequirements,
-        // ✅ CORRECTION: Utiliser tous les commerciaux assignés au prospect
+        // ✅ CORRECTION: Copier UNIQUEMENT les commerciaux assignés du prospect
+        // Ne JAMAIS utiliser userId (créateur) qui peut être un administratif
         assignedToIds: lead.assignedToIds && lead.assignedToIds.length > 0 
           ? lead.assignedToIds 
-          : (lead.assignedToId ? [lead.assignedToId] : [userId]),
-        assignedToId: lead.assignedToId || (lead.assignedToIds && lead.assignedToIds.length > 0 ? lead.assignedToIds[0] : userId),
+          : (lead.assignedToId ? [lead.assignedToId] : []), // Tableau vide si aucun commercial
+        assignedToId: lead.assignedToId || (lead.assignedToIds && lead.assignedToIds.length > 0 ? lead.assignedToIds[0] : null),
         source: 'lead_conversion',
         priority: (convertDto.priority as any) || 'medium',
         tags: [],
         competitors: [],
       };
 
-      const opportunity = await this.opportunityService.create(opportunityData, userId);
+      // Extract multi-tenant info from request
+      const databaseName = getDatabaseName(this.request);
+      const organisationId = getOrganisationId(this.request);
+      
+      const opportunity = await this.opportunityService.create(databaseName, organisationId, opportunityData, userId);
 
       // Mettre à jour le statut du lead
       lead.status = LeadStatus.CONVERTED;

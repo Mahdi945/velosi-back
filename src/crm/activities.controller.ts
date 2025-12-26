@@ -33,9 +33,10 @@ import {
   validateTotalSize,
 } from './config/multer.config';
 import * as path from 'path';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 
 @Controller('crm/activities')
-// @UseGuards(JwtAuthGuard) // Temporairement désactivé pour déboggage - MÊME COMPORTEMENT QUE OPPORTUNITIES
+@UseGuards(JwtAuthGuard)
 export class ActivitiesController {
   constructor(
     private readonly activitiesService: ActivitiesService,
@@ -45,15 +46,13 @@ export class ActivitiesController {
   /**
    * Résout l'ID utilisateur depuis différentes sources
    * Priorité: JWT > Header numérique > Header UUID (recherche dans personnel)
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
    */
   private async resolveUserId(req: any): Promise<number | undefined> {
-    console.log('🔍 [RESOLVE_USER_ID] Début de la résolution');
-    console.log('🔍 [RESOLVE_USER_ID] req.user:', req.user);
-    console.log('🔍 [RESOLVE_USER_ID] headers:', {
-      'x-user-id': req.headers['x-user-id'],
-      'authorization': req.headers['authorization'] ? 'présent' : 'absent',
-      'cookie': req.headers['cookie'] ? 'présent' : 'absent'
-    });
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    console.log('🔍 [RESOLVE_USER_ID] Début de la résolution - DB:', databaseName);
     
     // 1. Depuis JWT (si guard activé)
     if (req.user && req.user.id) {
@@ -68,7 +67,6 @@ export class ActivitiesController {
       
       // Essayer d'abord de parser comme nombre
       const numericId = parseInt(headerValue, 10);
-      console.log('🔍 [RESOLVE_USER_ID] Parse numericId:', numericId, 'isNaN:', isNaN(numericId));
       
       if (!isNaN(numericId) && numericId > 0) {
         console.log('✅ [RESOLVE_USER_ID] ID numérique depuis header:', numericId);
@@ -76,23 +74,15 @@ export class ActivitiesController {
       }
       
       // Si ce n'est pas un nombre, c'est probablement un UUID Keycloak
-      // Chercher dans la table personnel
       console.log('🔍 [RESOLVE_USER_ID] Recherche UUID Keycloak dans personnel:', headerValue);
-      const personnel = await this.activitiesService.findPersonnelByKeycloakId(headerValue);
+      const personnel = await this.activitiesService.findPersonnelByKeycloakId(databaseName, organisationId, headerValue);
       
       if (personnel) {
-        console.log('✅ [RESOLVE_USER_ID] Personnel trouvé:', {
-          id: personnel.id,
-          nom: personnel.nom,
-          prenom: personnel.prenom,
-          keycloak_id: personnel.keycloak_id
-        });
+        console.log('✅ [RESOLVE_USER_ID] Personnel trouvé:', personnel.id);
         return personnel.id;
       }
       
       console.warn('⚠️ [RESOLVE_USER_ID] Aucun personnel trouvé pour UUID:', headerValue);
-    } else {
-      console.warn('⚠️ [RESOLVE_USER_ID] Aucun header X-User-Id trouvé');
     }
     
     console.error('❌ [RESOLVE_USER_ID] Impossible de résoudre l\'ID utilisateur');
@@ -102,108 +92,102 @@ export class ActivitiesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createActivityDto: CreateActivityDto, @Request() req) {
-    // Log pour déboggage
-    console.log('📨 Requête CREATE activité reçue:', {
-      hasUser: !!req.user,
-      userId: req.user?.id,
-      headers: {
-        'x-user-id': req.headers['x-user-id'],
-        'authorization': req.headers['authorization'] ? 'présent' : 'absent'
-      },
-      dto: {
-        createdBy: createActivityDto.createdBy,
-        assignedTo: createActivityDto.assignedTo
-      }
-    });
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    
+    console.log('📨 Requête CREATE activité - DB:', databaseName, 'Org:', organisationId);
     
     // Résoudre l'ID utilisateur
-    // Priorité: DTO > Headers/JWT
     let userId: number | undefined = createActivityDto.createdBy;
     
     if (!userId) {
-      console.log('🔍 CreatedBy non fourni dans DTO, résolution via headers/JWT...');
       userId = await this.resolveUserId(req);
-    } else {
-      console.log('✅ CreatedBy fourni dans DTO:', userId);
     }
     
     if (!userId) {
-      console.error('❌ Impossible de déterminer l\'utilisateur');
       throw new BadRequestException('Impossible de déterminer l\'utilisateur connecté. Veuillez vous reconnecter.');
     }
     
-    console.log('✅ ID utilisateur final:', userId);
-    
-    // Si createdBy n'est pas fourni, utiliser l'utilisateur résolu
     if (!createActivityDto.createdBy) {
       createActivityDto.createdBy = userId;
     }
     
-    // Si assignedTo n'est pas fourni, utiliser l'utilisateur résolu
-    // (pour les activités sans liaison à prospect/opportunité/client)
     if (!createActivityDto.assignedTo) {
       createActivityDto.assignedTo = userId;
     }
     
-    console.log('📝 Création activité:', { 
-      createdBy: createActivityDto.createdBy, 
-      assignedTo: createActivityDto.assignedTo,
-      linkType: createActivityDto.leadId ? 'lead' : createActivityDto.opportunityId ? 'opportunity' : createActivityDto.clientId ? 'client' : 'none'
-    });
-    
-    return this.activitiesService.create(createActivityDto);
+    return this.activitiesService.create(databaseName, organisationId, createActivityDto);
   }
 
   @Get()
-  findAll(@Query() filters: FilterActivityDto) {
-    return this.activitiesService.findAll(filters);
+  findAll(@Query() filters: FilterActivityDto, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    return this.activitiesService.findAll(databaseName, organisationId, filters);
   }
 
   @Get('commercials')
-  getCommercials() {
-    return this.activitiesService.getCommercials();
+  getCommercials(@Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    return this.activitiesService.getCommercials(databaseName, organisationId);
   }
 
   @Get('stats')
-  getStats(@Query('userId') userId?: string) {
+  getStats(@Query('userId') userId: string, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
     const userIdNum = userId ? parseInt(userId, 10) : undefined;
-    return this.activitiesService.getActivitiesStats(userIdNum);
+    return this.activitiesService.getActivitiesStats(databaseName, organisationId, userIdNum);
   }
 
   @Get('upcoming')
   getUpcoming(@Request() req) {
-    return this.activitiesService.getUpcomingActivities(req.user.userId);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    const userId = req.user?.userId;
+    return this.activitiesService.getUpcomingActivities(databaseName, organisationId, userId);
   }
 
   @Get('overdue')
   getOverdue(@Request() req) {
-    return this.activitiesService.getOverdueActivities(req.user.userId);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    const userId = req.user?.userId;
+    return this.activitiesService.getOverdueActivities(databaseName, organisationId, userId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.activitiesService.findOne(+id);
+  findOne(@Param('id') id: string, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    return this.activitiesService.findOne(databaseName, organisationId, +id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateActivityDto: UpdateActivityDto) {
-    console.log('📝 [UPDATE_ACTIVITY] ID:', id);
+  update(@Param('id') id: string, @Body() updateActivityDto: UpdateActivityDto, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    console.log('📝 [UPDATE_ACTIVITY] DB:', databaseName, 'ID:', id);
     console.log('📝 [UPDATE_ACTIVITY] DTO reçu:', JSON.stringify(updateActivityDto, null, 2));
-    console.log('📝 [UPDATE_ACTIVITY] assignedTo dans DTO:', updateActivityDto.assignedTo);
-    return this.activitiesService.update(+id, updateActivityDto);
+    return this.activitiesService.update(databaseName, organisationId, +id, updateActivityDto);
   }
 
   @Patch(':id/complete')
-  markAsCompleted(@Param('id') id: string, @Body('outcome') outcome?: string) {
-    return this.activitiesService.markAsCompleted(+id, outcome);
+  markAsCompleted(@Param('id') id: string, @Body('outcome') outcome: string, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    return this.activitiesService.markAsCompleted(databaseName, organisationId, +id, outcome);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string, @Request() req) {
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
     // Supprimer les fichiers avant de supprimer l'activité
     await this.attachmentsService.deleteAllActivityAttachments(+id);
-    return this.activitiesService.remove(+id);
+    return this.activitiesService.remove(databaseName, organisationId, +id);
   }
 
   // ============= ENDPOINTS POUR LES PIÈCES JOINTES =============
@@ -224,6 +208,7 @@ export class ActivitiesController {
   async uploadAttachments(
     @Param('id') id: string,
     @UploadedFiles() files: Express.Multer.File[],
+    @Request() req,
   ) {
     if (!files || files.length === 0) {
       throw new BadRequestException('Aucun fichier fourni');
@@ -233,10 +218,13 @@ export class ActivitiesController {
       // Valider la taille totale
       validateTotalSize(files);
 
+      const databaseName = getDatabaseName(req);
+
       // Ajouter les fichiers
       const attachments = await this.attachmentsService.addAttachments(
         +id,
         files,
+        databaseName,
       );
 
       return {
@@ -267,6 +255,7 @@ export class ActivitiesController {
     @Param('id') id: string,
     @Param('fileName') fileName: string,
     @Res() res: Response,
+    @Request() req,
   ) {
     const activityId = +id;
 
@@ -277,7 +266,9 @@ export class ActivitiesController {
     const filePath = this.attachmentsService.getFilePath(activityId, fileName);
     
     // Récupérer l'activité pour avoir le nom original
-    const activity = await this.activitiesService.findOne(activityId);
+    const databaseName = getDatabaseName(req);
+    const organisationId = getOrganisationId(req);
+    const activity = await this.activitiesService.findOne(databaseName, organisationId, activityId);
     const attachment = activity.attachments?.find(a => a.fileName === fileName);
     const originalName = attachment?.originalName || fileName;
 
@@ -290,9 +281,11 @@ export class ActivitiesController {
   @Delete(':id/attachments/:fileName')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteAttachment(
+    @Request() req,
     @Param('id') id: string,
     @Param('fileName') fileName: string,
   ) {
-    await this.attachmentsService.deleteAttachment(+id, fileName);
+    const databaseName = getDatabaseName(req);
+    await this.attachmentsService.deleteAttachment(+id, fileName, databaseName);
   }
 }

@@ -1,14 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+﻿import { Injectable, Scope, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ObjectifCom } from '../entities/objectif-com.entity';
 import { Personnel } from '../entities/personnel.entity';
+import { TenantRepositoryService } from '../common/tenant-repository.service';
 import {
   CreateObjectifComDto,
   UpdateObjectifComDto,
 } from '../dto/objectif-com.dto';
 
-@Injectable()
+@Injectable({ scope: Scope.REQUEST })
 export class ObjectifComService {
   constructor(
     @InjectRepository(ObjectifCom)

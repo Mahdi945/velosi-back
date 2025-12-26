@@ -1,144 +1,199 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AutorisationTVA } from '../entities/autorisation-tva.entity';
 import { BCsusTVA } from '../entities/bcsus-tva.entity';
-import { Client } from '../entities/client.entity';
 import { 
   CreateAutorisationTVADto, 
   UpdateAutorisationTVADto, 
   CreateBonCommandeDto, 
   UpdateBonCommandeDto 
 } from '../dto/tva-complete.dto';
+import { DatabaseConnectionService } from '../common/database-connection.service';
 
 @Injectable()
 export class AutorisationTVAService {
   constructor(
-    @InjectRepository(AutorisationTVA)
-    private readonly autorisationTVARepository: Repository<AutorisationTVA>,
-    @InjectRepository(BCsusTVA)
-    private readonly bcsusTVARepository: Repository<BCsusTVA>,
-    @InjectRepository(Client)
-    private readonly clientRepository: Repository<Client>,
+    private databaseConnectionService: DatabaseConnectionService,
+    private configService: ConfigService,
   ) {}
 
   // ===========================
   // MÉTHODES POUR AUTORISATIONS TVA
   // ===========================
 
-  async createAutorisationTVA(createDto: CreateAutorisationTVADto): Promise<AutorisationTVA> {
+  /**
+   * Créer une autorisation TVA
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async createAutorisationTVA(databaseName: string, createDto: CreateAutorisationTVADto): Promise<AutorisationTVA> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Vérifier que le client existe
-    const client = await this.clientRepository.findOne({
-      where: { id: createDto.clientId }
-    });
+    const client = await connection.query(
+      `SELECT * FROM clients WHERE id = $1 LIMIT 1`,
+      [createDto.clientId]
+    );
 
-    if (!client) {
+    if (!client || client.length === 0) {
       throw new NotFoundException(`Client avec l'ID ${createDto.clientId} non trouvé`);
     }
 
     // Vérifier qu'il n'existe pas déjà une autorisation avec le même numéro
-    const existingAutorisation = await this.autorisationTVARepository.findOne({
-      where: {
-        numeroAutorisation: createDto.numeroAutorisation,
-        is_active: true,
-      },
-    });
+    const existingAutorisation = await connection.query(
+      `SELECT * FROM autorisations_tva WHERE numero_autorisation = $1 AND is_active = true LIMIT 1`,
+      [createDto.numeroAutorisation]
+    );
 
-    if (existingAutorisation) {
+    if (existingAutorisation && existingAutorisation.length > 0) {
       throw new BadRequestException(
         `Une autorisation TVA avec le numéro ${createDto.numeroAutorisation} existe déjà`
       );
     }
 
-    const autorisation = this.autorisationTVARepository.create({
-      client: client,
-      numeroAutorisation: createDto.numeroAutorisation,
-      dateDebutValidite: createDto.dateDebutValidite ? new Date(createDto.dateDebutValidite) : null,
-      dateFinValidite: createDto.dateFinValidite ? new Date(createDto.dateFinValidite) : null,
-      dateAutorisation: createDto.dateAutorisation ? new Date(createDto.dateAutorisation) : null,
-      typeDocument: createDto.typeDocument,
-      referenceDocument: createDto.referenceDocument,
-      statutAutorisation: createDto.statutAutorisation,
-      is_active: createDto.is_active ?? true
-    });
+    const result = await connection.query(
+      `INSERT INTO autorisations_tva (client_id, numero_autorisation, date_debut_validite, date_fin_validite, 
+                                      date_autorisation, type_document, reference_document, statut_autorisation, 
+                                      is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+       RETURNING *`,
+      [
+        createDto.clientId,
+        createDto.numeroAutorisation,
+        createDto.dateDebutValidite ? new Date(createDto.dateDebutValidite) : null,
+        createDto.dateFinValidite ? new Date(createDto.dateFinValidite) : null,
+        createDto.dateAutorisation ? new Date(createDto.dateAutorisation) : null,
+        createDto.typeDocument || null,
+        createDto.referenceDocument || null,
+        createDto.statutAutorisation || null,
+        createDto.is_active ?? true,
+      ]
+    );
 
-    return await this.autorisationTVARepository.save(autorisation);
+    return result[0];
   }
 
-  async findAllAutorisationsTVA(): Promise<AutorisationTVA[]> {
-    return await this.autorisationTVARepository.find({
-      where: { is_active: true },
-      relations: ['client', 'bonsCommande'],
-      order: { created_at: 'DESC' },
-    });
+  /**
+   * Récupérer toutes les autorisations TVA
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findAllAutorisationsTVA(databaseName: string): Promise<AutorisationTVA[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT at.*, c.id as client_id, c.nom as client_nom
+       FROM autorisations_tva at
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE at.is_active = true
+       ORDER BY at.created_at DESC`
+    );
   }
 
-  async findAutorisationsTVAByClient(clientId: number): Promise<AutorisationTVA[]> {
-    return await this.autorisationTVARepository.find({
-      where: { 
-        client: { id: clientId },
-        is_active: true 
-      },
-      relations: ['client', 'bonsCommande'],
-      order: { created_at: 'DESC' },
-    });
+  /**
+   * Récupérer les autorisations TVA d'un client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findAutorisationsTVAByClient(databaseName: string, clientId: number): Promise<AutorisationTVA[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT at.*, c.id as client_id, c.nom as client_nom
+       FROM autorisations_tva at
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE at.client_id = $1 AND at.is_active = true
+       ORDER BY at.created_at DESC`,
+      [clientId]
+    );
   }
 
-  async findOneAutorisationTVA(id: number): Promise<AutorisationTVA> {
-    const autorisation = await this.autorisationTVARepository.findOne({
-      where: { id, is_active: true },
-      relations: ['client', 'bonsCommande'],
-    });
+  /**
+   * Récupérer une autorisation TVA par ID
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findOneAutorisationTVA(databaseName: string, id: number): Promise<AutorisationTVA> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `SELECT at.*, c.id as client_id, c.nom as client_nom
+       FROM autorisations_tva at
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE at.id = $1 AND at.is_active = true`,
+      [id]
+    );
 
-    if (!autorisation) {
+    if (!result || result.length === 0) {
       throw new NotFoundException(`Autorisation TVA avec l'ID ${id} non trouvée`);
     }
 
-    return autorisation;
+    return result[0];
   }
 
-  async updateAutorisationTVA(id: number, updateDto: UpdateAutorisationTVADto): Promise<AutorisationTVA> {
-    const autorisation = await this.findOneAutorisationTVA(id);
+  /**
+   * Mettre à jour une autorisation TVA
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async updateAutorisationTVA(databaseName: string, id: number, updateDto: UpdateAutorisationTVADto): Promise<AutorisationTVA> {
+    const autorisation = await this.findOneAutorisationTVA(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
     // Vérifier l'unicité du numéro d'autorisation si modifié
     if (updateDto.numeroAutorisation && updateDto.numeroAutorisation !== autorisation.numeroAutorisation) {
-      const existingAutorisation = await this.autorisationTVARepository.findOne({
-        where: {
-          numeroAutorisation: updateDto.numeroAutorisation,
-          is_active: true,
-        },
-      });
+      const existingAutorisation = await connection.query(
+        `SELECT * FROM autorisations_tva WHERE numero_autorisation = $1 AND is_active = true AND id != $2 LIMIT 1`,
+        [updateDto.numeroAutorisation, id]
+      );
 
-      if (existingAutorisation && existingAutorisation.id !== id) {
+      if (existingAutorisation && existingAutorisation.length > 0) {
         throw new BadRequestException(
           `Une autorisation TVA avec le numéro ${updateDto.numeroAutorisation} existe déjà`
         );
       }
     }
 
-    // Mettre à jour les champs
-    if (updateDto.numeroAutorisation) autorisation.numeroAutorisation = updateDto.numeroAutorisation;
-    if (updateDto.dateDebutValidite) autorisation.dateDebutValidite = new Date(updateDto.dateDebutValidite);
-    if (updateDto.dateFinValidite) autorisation.dateFinValidite = new Date(updateDto.dateFinValidite);
-    if (updateDto.dateAutorisation) autorisation.dateAutorisation = new Date(updateDto.dateAutorisation);
-    if (updateDto.typeDocument) autorisation.typeDocument = updateDto.typeDocument;
-    if (updateDto.referenceDocument) autorisation.referenceDocument = updateDto.referenceDocument;
-    if (updateDto.statutAutorisation) autorisation.statutAutorisation = updateDto.statutAutorisation;
-    if (typeof updateDto.is_active === 'boolean') autorisation.is_active = updateDto.is_active;
+    await connection.query(
+      `UPDATE autorisations_tva 
+       SET numero_autorisation = $1, date_debut_validite = $2, date_fin_validite = $3, 
+           date_autorisation = $4, type_document = $5, reference_document = $6, 
+           statut_autorisation = $7, is_active = $8, updated_at = NOW()
+       WHERE id = $9`,
+      [
+        updateDto.numeroAutorisation !== undefined ? updateDto.numeroAutorisation : autorisation.numeroAutorisation,
+        updateDto.dateDebutValidite !== undefined ? new Date(updateDto.dateDebutValidite) : autorisation.dateDebutValidite,
+        updateDto.dateFinValidite !== undefined ? new Date(updateDto.dateFinValidite) : autorisation.dateFinValidite,
+        updateDto.dateAutorisation !== undefined ? new Date(updateDto.dateAutorisation) : autorisation.dateAutorisation,
+        updateDto.typeDocument !== undefined ? updateDto.typeDocument : autorisation.typeDocument,
+        updateDto.referenceDocument !== undefined ? updateDto.referenceDocument : autorisation.referenceDocument,
+        updateDto.statutAutorisation !== undefined ? updateDto.statutAutorisation : autorisation.statutAutorisation,
+        updateDto.is_active !== undefined ? updateDto.is_active : autorisation.is_active,
+        id,
+      ]
+    );
 
-    return await this.autorisationTVARepository.save(autorisation);
+    return this.findOneAutorisationTVA(databaseName, id);
   }
 
-  async deleteAutorisationTVA(id: number): Promise<void> {
-    const autorisation = await this.findOneAutorisationTVA(id);
-    autorisation.is_active = false;
-    await this.autorisationTVARepository.save(autorisation);
+  /**
+   * Supprimer une autorisation TVA (soft delete)
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async deleteAutorisationTVA(databaseName: string, id: number): Promise<void> {
+    const autorisation = await this.findOneAutorisationTVA(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    await connection.query(
+      `UPDATE autorisations_tva SET is_active = false, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
   }
 
-  async uploadAutorisationTVAImage(id: number, imageBuffer: Buffer, originalName?: string): Promise<AutorisationTVA> {
-    const autorisation = await this.findOneAutorisationTVA(id);
+  /**
+   * Upload image pour une autorisation TVA
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async uploadAutorisationTVAImage(databaseName: string, id: number, imageBuffer: Buffer, originalName?: string): Promise<AutorisationTVA> {
+    const autorisation = await this.findOneAutorisationTVA(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
     // Créer le répertoire s'il n'existe pas
     const uploadDir = path.join(process.cwd(), 'uploads', 'autorisations');
@@ -156,125 +211,194 @@ export class AutorisationTVAService {
 
     // Stocker le chemin relatif dans la base de données
     const relativePath = `uploads/autorisations/${fileName}`;
-    autorisation.imagePath = relativePath;
+    await connection.query(
+      `UPDATE autorisations_tva SET image_path = $1, updated_at = NOW() WHERE id = $2`,
+      [relativePath, id]
+    );
     
-    return await this.autorisationTVARepository.save(autorisation);
+    return this.findOneAutorisationTVA(databaseName, id);
   }
 
   // ===========================
   // MÉTHODES POUR BONS DE COMMANDE
   // ===========================
 
-  async createBonCommande(createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
+  /**
+   * Créer un bon de commande
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async createBonCommande(databaseName: string, createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Vérifier que l'autorisation existe
-    const autorisation = await this.autorisationTVARepository.findOne({
-      where: { id: createDto.autorisationId, is_active: true }
-    });
+    const autorisation = await connection.query(
+      `SELECT * FROM autorisations_tva WHERE id = $1 AND is_active = true LIMIT 1`,
+      [createDto.autorisationId]
+    );
 
-    if (!autorisation) {
+    if (!autorisation || autorisation.length === 0) {
       throw new NotFoundException(`Autorisation TVA avec l'ID ${createDto.autorisationId} non trouvée`);
     }
 
     // Vérifier qu'il n'existe pas déjà un bon de commande avec le même numéro pour cette autorisation
-    const existingBonCommande = await this.bcsusTVARepository.findOne({
-      where: {
-        autorisation: { id: createDto.autorisationId },
-        numeroBonCommande: createDto.numeroBonCommande,
-        is_active: true,
-      },
-    });
+    const existingBonCommande = await connection.query(
+      `SELECT * FROM bcsus_tva WHERE autorisation_id = $1 AND numero_bon_commande = $2 AND is_active = true LIMIT 1`,
+      [createDto.autorisationId, createDto.numeroBonCommande]
+    );
 
-    if (existingBonCommande) {
+    if (existingBonCommande && existingBonCommande.length > 0) {
       throw new BadRequestException(
         `Un bon de commande avec le numéro ${createDto.numeroBonCommande} existe déjà pour cette autorisation`
       );
     }
 
-    const bonCommande = this.bcsusTVARepository.create({
-      autorisation: autorisation,
-      numeroBonCommande: createDto.numeroBonCommande,
-      dateBonCommande: new Date(createDto.dateBonCommande),
-      montantBonCommande: createDto.montantBonCommande,
-      description: createDto.description,
-      statut: createDto.statut || 'ACTIF',
-      is_active: createDto.is_active ?? true
-    });
+    const result = await connection.query(
+      `INSERT INTO bcsus_tva (autorisation_id, numero_bon_commande, date_bon_commande, 
+                             montant_bon_commande, description, statut, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       RETURNING *`,
+      [
+        createDto.autorisationId,
+        createDto.numeroBonCommande,
+        new Date(createDto.dateBonCommande),
+        createDto.montantBonCommande || null,
+        createDto.description || null,
+        createDto.statut || 'ACTIF',
+        createDto.is_active ?? true,
+      ]
+    );
 
-    return await this.bcsusTVARepository.save(bonCommande);
+    return result[0];
   }
 
-  async findAllBonsCommande(): Promise<BCsusTVA[]> {
-    return await this.bcsusTVARepository.find({
-      where: { is_active: true },
-      relations: ['autorisation', 'autorisation.client'],
-      order: { created_at: 'DESC' },
-    });
+  /**
+   * Récupérer tous les bons de commande
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findAllBonsCommande(databaseName: string): Promise<BCsusTVA[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT bc.*, at.numero_autorisation, c.nom as client_nom
+       FROM bcsus_tva bc
+       LEFT JOIN autorisations_tva at ON bc.autorisation_id = at.id
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE bc.is_active = true
+       ORDER BY bc.created_at DESC`
+    );
   }
 
-  async findBonsCommandeByAutorisation(autorisationId: number): Promise<BCsusTVA[]> {
-    return await this.bcsusTVARepository.find({
-      where: { 
-        autorisation: { id: autorisationId },
-        is_active: true 
-      },
-      relations: ['autorisation', 'autorisation.client'],
-      order: { created_at: 'DESC' },
-    });
+  /**
+   * Récupérer les bons de commande par autorisation
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findBonsCommandeByAutorisation(databaseName: string, autorisationId: number): Promise<BCsusTVA[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    return await connection.query(
+      `SELECT bc.*, at.numero_autorisation, c.nom as client_nom
+       FROM bcsus_tva bc
+       LEFT JOIN autorisations_tva at ON bc.autorisation_id = at.id
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE bc.autorisation_id = $1 AND bc.is_active = true
+       ORDER BY bc.created_at DESC`,
+      [autorisationId]
+    );
   }
 
-  async findOneBonCommande(id: number): Promise<BCsusTVA> {
-    const bonCommande = await this.bcsusTVARepository.findOne({
-      where: { id, is_active: true },
-      relations: ['autorisation', 'autorisation.client'],
-    });
+  /**
+   * Récupérer un bon de commande par ID
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async findOneBonCommande(databaseName: string, id: number): Promise<BCsusTVA> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const result = await connection.query(
+      `SELECT bc.*, at.numero_autorisation, c.nom as client_nom
+       FROM bcsus_tva bc
+       LEFT JOIN autorisations_tva at ON bc.autorisation_id = at.id
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE bc.id = $1 AND bc.is_active = true`,
+      [id]
+    );
 
-    if (!bonCommande) {
+    if (!result || result.length === 0) {
       throw new NotFoundException(`Bon de commande avec l'ID ${id} non trouvé`);
     }
 
-    return bonCommande;
+    return result[0];
   }
 
-  async updateBonCommande(id: number, updateDto: UpdateBonCommandeDto): Promise<BCsusTVA> {
-    const bonCommande = await this.findOneBonCommande(id);
+  /**
+   * Mettre à jour un bon de commande
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async updateBonCommande(databaseName: string, id: number, updateDto: UpdateBonCommandeDto): Promise<BCsusTVA> {
+    const bonCommande = await this.findOneBonCommande(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
     // Vérifier l'unicité du numéro si modifié
     if (updateDto.numeroBonCommande && updateDto.numeroBonCommande !== bonCommande.numeroBonCommande) {
-      const existingBonCommande = await this.bcsusTVARepository.findOne({
-        where: {
-          autorisation: { id: bonCommande.autorisation.id },
-          numeroBonCommande: updateDto.numeroBonCommande,
-          is_active: true,
-        },
-      });
+      // Récupérer l'autorisation_id depuis la base de données
+      const bcData = await connection.query(
+        `SELECT autorisation_id FROM bcsus_tva WHERE id = $1`,
+        [id]
+      );
+      
+      const autorisationId = bcData[0].autorisation_id;
+      const existingBonCommande = await connection.query(
+        `SELECT * FROM bcsus_tva WHERE autorisation_id = $1 AND numero_bon_commande = $2 AND is_active = true AND id != $3 LIMIT 1`,
+        [autorisationId, updateDto.numeroBonCommande, id]
+      );
 
-      if (existingBonCommande && existingBonCommande.id !== id) {
+      if (existingBonCommande && existingBonCommande.length > 0) {
         throw new BadRequestException(
           `Un bon de commande avec le numéro ${updateDto.numeroBonCommande} existe déjà pour cette autorisation`
         );
       }
     }
 
-    // Mettre à jour les champs
-    if (updateDto.numeroBonCommande) bonCommande.numeroBonCommande = updateDto.numeroBonCommande;
-    if (updateDto.dateBonCommande) bonCommande.dateBonCommande = new Date(updateDto.dateBonCommande);
-    if (updateDto.montantBonCommande) bonCommande.montantBonCommande = updateDto.montantBonCommande;
-    if (updateDto.description !== undefined) bonCommande.description = updateDto.description;
-    if (updateDto.statut) bonCommande.statut = updateDto.statut;
-    if (typeof updateDto.is_active === 'boolean') bonCommande.is_active = updateDto.is_active;
-    if (updateDto.imagePath === null) bonCommande.imagePath = null; // Permet de supprimer l'image
+    await connection.query(
+      `UPDATE bcsus_tva 
+       SET numero_bon_commande = $1, date_bon_commande = $2, montant_bon_commande = $3, 
+           description = $4, statut = $5, is_active = $6, image_path = $7, updated_at = NOW()
+       WHERE id = $8`,
+      [
+        updateDto.numeroBonCommande !== undefined ? updateDto.numeroBonCommande : bonCommande.numeroBonCommande,
+        updateDto.dateBonCommande !== undefined ? new Date(updateDto.dateBonCommande) : bonCommande.dateBonCommande,
+        updateDto.montantBonCommande !== undefined ? updateDto.montantBonCommande : bonCommande.montantBonCommande,
+        updateDto.description !== undefined ? updateDto.description : bonCommande.description,
+        updateDto.statut !== undefined ? updateDto.statut : bonCommande.statut,
+        updateDto.is_active !== undefined ? updateDto.is_active : bonCommande.is_active,
+        updateDto.imagePath !== undefined ? updateDto.imagePath : bonCommande.imagePath,
+        id,
+      ]
+    );
 
-    return await this.bcsusTVARepository.save(bonCommande);
+    return this.findOneBonCommande(databaseName, id);
   }
 
-  async deleteBonCommande(id: number): Promise<void> {
-    const bonCommande = await this.findOneBonCommande(id);
-    bonCommande.is_active = false;
-    await this.bcsusTVARepository.save(bonCommande);
+  /**
+   * Supprimer un bon de commande (soft delete)
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async deleteBonCommande(databaseName: string, id: number): Promise<void> {
+    const bonCommande = await this.findOneBonCommande(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    await connection.query(
+      `UPDATE bcsus_tva SET is_active = false, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
   }
 
-  async uploadBonCommandeImage(id: number, imageBuffer: Buffer, originalName?: string): Promise<BCsusTVA> {
-    const bonCommande = await this.findOneBonCommande(id);
+  /**
+   * Upload image pour un bon de commande
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async uploadBonCommandeImage(databaseName: string, id: number, imageBuffer: Buffer, originalName?: string): Promise<BCsusTVA> {
+    const bonCommande = await this.findOneBonCommande(databaseName, id);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
     
     // Créer le répertoire s'il n'existe pas
     const uploadDir = path.join(process.cwd(), 'uploads', 'bons-de-commande');
@@ -292,18 +416,24 @@ export class AutorisationTVAService {
 
     // Stocker le chemin relatif dans la base de données
     const relativePath = `uploads/bons-de-commande/${fileName}`;
-    bonCommande.imagePath = relativePath;
+    await connection.query(
+      `UPDATE bcsus_tva SET image_path = $1, updated_at = NOW() WHERE id = $2`,
+      [relativePath, id]
+    );
     
-    return await this.bcsusTVARepository.save(bonCommande);
+    return this.findOneBonCommande(databaseName, id);
   }
 
   // ===========================
   // COMPATIBILITÉ TEMPORAIRE (DEPRECATED)
   // ===========================
 
-  // Alias pour maintenir la compatibilité avec l'ancien code
-  async createSuspensionTVA(createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
-    return await this.createBonCommande({
+  /**
+   * Alias pour maintenir la compatibilité avec l'ancien code
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async createSuspensionTVA(databaseName: string, createDto: CreateBonCommandeDto): Promise<BCsusTVA> {
+    return await this.createBonCommande(databaseName, {
       autorisationId: createDto.autorisationId,
       numeroBonCommande: createDto.numeroBonCommande,
       dateBonCommande: createDto.dateBonCommande,
@@ -314,83 +444,96 @@ export class AutorisationTVAService {
     });
   }
 
-  async findAllSuspensionsTVA(): Promise<BCsusTVA[]> {
-    return await this.findAllBonsCommande();
+  async findAllSuspensionsTVA(databaseName: string): Promise<BCsusTVA[]> {
+    return await this.findAllBonsCommande(databaseName);
   }
 
-  async findSuspensionsTVAByClient(clientId: number): Promise<BCsusTVA[]> {
+  async findSuspensionsTVAByClient(databaseName: string, clientId: number): Promise<BCsusTVA[]> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     // Trouver d'abord toutes les autorisations du client
-    const autorisations = await this.findAutorisationsTVAByClient(clientId);
+    const autorisations = await this.findAutorisationsTVAByClient(databaseName, clientId);
     const autorisationIds = autorisations.map(a => a.id);
     
     if (autorisationIds.length === 0) {
       return [];
     }
 
-    return await this.bcsusTVARepository.find({
-      where: { 
-        autorisation: { id: In(autorisationIds) },
-        is_active: true 
-      },
-      relations: ['autorisation', 'autorisation.client'],
-      order: { created_at: 'DESC' },
-    });
+    const placeholders = autorisationIds.map((_, i) => `$${i + 1}`).join(',');
+    return await connection.query(
+      `SELECT bc.*, at.numero_autorisation, c.nom as client_nom
+       FROM bcsus_tva bc
+       LEFT JOIN autorisations_tva at ON bc.autorisation_id = at.id
+       LEFT JOIN clients c ON at.client_id = c.id
+       WHERE bc.autorisation_id IN (${placeholders}) AND bc.is_active = true
+       ORDER BY bc.created_at DESC`,
+      autorisationIds
+    );
   }
 
-  async findOneSuspensionTVA(id: number): Promise<BCsusTVA> {
-    return await this.findOneBonCommande(id);
+  async findOneSuspensionTVA(databaseName: string, id: number): Promise<BCsusTVA> {
+    return await this.findOneBonCommande(databaseName, id);
   }
 
-  async updateSuspensionTVA(id: number, updateDto: UpdateBonCommandeDto): Promise<BCsusTVA> {
-    return await this.updateBonCommande(id, updateDto);
+  async updateSuspensionTVA(databaseName: string, id: number, updateDto: UpdateBonCommandeDto): Promise<BCsusTVA> {
+    return await this.updateBonCommande(databaseName, id, updateDto);
   }
 
-  async deleteSuspensionTVA(id: number): Promise<void> {
-    return await this.deleteBonCommande(id);
+  async deleteSuspensionTVA(databaseName: string, id: number): Promise<void> {
+    return await this.deleteBonCommande(databaseName, id);
   }
 
-  async uploadSuspensionTVAImage(id: number, imageBuffer: Buffer, originalName?: string): Promise<BCsusTVA> {
-    return await this.uploadBonCommandeImage(id, imageBuffer, originalName);
+  async uploadSuspensionTVAImage(databaseName: string, id: number, imageBuffer: Buffer, originalName?: string): Promise<BCsusTVA> {
+    return await this.uploadBonCommandeImage(databaseName, id, imageBuffer, originalName);
   }
 
   // ===========================
   // MÉTHODES UTILITAIRES
   // ===========================
 
-  async getClientTVAStatus(clientId: number): Promise<{
-    client: Client;
+  /**
+   * Obtenir le statut TVA d'un client
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async getClientTVAStatus(databaseName: string, clientId: number): Promise<{
+    client: any;
     autorisations: AutorisationTVA[];
     bonsCommande: BCsusTVA[];
     hasValidAutorisations: boolean;
     activesAutorisations: AutorisationTVA[];
     montantTotalBonsCommande: number;
   }> {
-    const client = await this.clientRepository.findOne({
-      where: { id: clientId }
-    });
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const clientResult = await connection.query(
+      `SELECT * FROM clients WHERE id = $1 LIMIT 1`,
+      [clientId]
+    );
 
-    if (!client) {
+    if (!clientResult || clientResult.length === 0) {
       throw new NotFoundException(`Client avec l'ID ${clientId} non trouvé`);
     }
 
-    const autorisations = await this.findAutorisationsTVAByClient(clientId);
+    const client = clientResult[0];
+    const autorisations = await this.findAutorisationsTVAByClient(databaseName, clientId);
     const activesAutorisations = autorisations.filter(a => a.isValid);
     
     // Récupérer tous les bons de commande pour ce client
     const autorisationIds = autorisations.map(a => a.id);
-    const bonsCommande = autorisationIds.length > 0 
-      ? await this.bcsusTVARepository.find({
-          where: { 
-            autorisation: { id: In(autorisationIds) },
-            is_active: true 
-          },
-          relations: ['autorisation'],
-        })
-      : [];
+    let bonsCommande = [];
+    
+    if (autorisationIds.length > 0) {
+      const placeholders = autorisationIds.map((_, i) => `$${i + 1}`).join(',');
+      bonsCommande = await connection.query(
+        `SELECT bc.* FROM bcsus_tva bc
+         WHERE bc.autorisation_id IN (${placeholders}) AND bc.is_active = true`,
+        autorisationIds
+      );
+    }
 
     const montantTotalBonsCommande = bonsCommande
       .filter(bc => bc.statut === 'ACTIF')
-      .reduce((total, bc) => total + Number(bc.montantBonCommande), 0);
+      .reduce((total, bc) => total + Number(bc.montant_bon_commande || 0), 0);
 
     return {
       client,
@@ -402,13 +545,16 @@ export class AutorisationTVAService {
     };
   }
 
-  // Valide la cohérence de l'état fiscal du client avec ses autorisations
-  async validateClientTVACoherence(clientId: number): Promise<{
+  /**
+   * Valide la cohérence de l'état fiscal du client avec ses autorisations
+   * ✅ MULTI-TENANT: Utilise databaseName
+   */
+  async validateClientTVACoherence(databaseName: string, clientId: number): Promise<{
     isValid: boolean;
     errors: string[];
     warnings: string[];
   }> {
-    const status = await this.getClientTVAStatus(clientId);
+    const status = await this.getClientTVAStatus(databaseName, clientId);
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -430,5 +576,44 @@ export class AutorisationTVAService {
       errors,
       warnings,
     };
+  }
+  
+  // ===========================
+  // MÉTHODES WRAPPER POUR COMPATIBILITÉ TYPEORM
+  // ===========================
+  
+  /**
+   * Wrapper pour getClientTVAStatus utilisant la base TypeORM configurée
+   * ⚠️ DEPRECATED: Utiliser getClientTVAStatus avec databaseName explicite
+   * Utilisé par les services qui utilisent encore TypeORM Repository
+   */
+  async getClientTVAStatusFromTypeORM(clientId: number, databaseName?: string): Promise<{
+    client: any;
+    autorisations: AutorisationTVA[];
+    bonsCommande: BCsusTVA[];
+    hasValidAutorisations: boolean;
+    activesAutorisations: AutorisationTVA[];
+    montantTotalBonsCommande: number;
+  }> {
+    if (!databaseName) {
+      throw new Error('databaseName requis - pas de fallback vers velosi');
+    }
+    return this.getClientTVAStatus(databaseName, clientId);
+  }
+  
+  /**
+   * Wrapper pour validateClientTVACoherence utilisant la base TypeORM configurée
+   * ⚠️ DEPRECATED: Utiliser validateClientTVACoherence avec databaseName explicite
+   * Utilisé par les services qui utilisent encore TypeORM Repository
+   */
+  async validateClientTVACoherenceFromTypeORM(clientId: number, databaseName?: string): Promise<{
+    isValid: boolean;
+    errors: string[];
+    warnings: string[];
+  }> {
+    if (!databaseName) {
+      throw new Error('databaseName requis - pas de fallback vers velosi');
+    }
+    return this.validateClientTVACoherence(databaseName, clientId);
   }
 }

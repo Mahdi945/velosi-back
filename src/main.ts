@@ -1,13 +1,15 @@
 // Polyfill pour Node.js 18
 import './polyfills';
 
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import * as cookieParser from 'cookie-parser';
+import * as express from 'express';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './filters/all-exceptions.filter';
+import { MultiTenantInterceptor } from './common/multi-tenant.interceptor';
 
 async function bootstrap() {
   console.log('========================================');
@@ -45,7 +47,61 @@ async function bootstrap() {
   console.log(`  - Port          : ${process.env.PORT || 3000}`);
   console.log('');
   
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // 🔧 FIX: Désactiver le body parser par défaut pour le gérer manuellement
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false, // Désactiver pour le configurer manuellement
+  });
+
+  // 🔧 Middleware pour les cookies (AVANT tout)
+  app.use(cookieParser());
+
+  // 🔧 Middleware de détection et bypass pour les requêtes multipart
+  app.use((req: any, res: any, next: any) => {
+    const contentType = req.headers['content-type'] || '';
+    const url = req.url || '';
+    
+    console.log('🔍 [Middleware] Content-Type:', contentType);
+    console.log('🔍 [Middleware] URL:', url);
+    
+    // Marquer les requêtes multipart pour bypass du JSON parser
+    // Vérifier AUSSI l'URL pour les endpoints d'upload connus
+    const isMultipartByContentType = contentType.includes('multipart/form-data');
+    const isUploadEndpoint = url.includes('/upload-logo') || 
+                            url.includes('/upload-profile-image') || 
+                            url.includes('/complete-setup');
+    
+    if (isMultipartByContentType || isUploadEndpoint) {
+      console.log('🔧 [Bypass] Requête multipart/upload détectée:', req.method, req.url);
+      req.isMultipart = true;
+      return next();
+    }
+    
+    console.log('🔍 [Middleware] Pas de multipart, continuer normalement');
+    next();
+  });
+
+  // 🔧 Middleware conditionnel pour parser le JSON body
+  app.use((req: any, res: any, next: any) => {
+    console.log('🔍 [JSON Parser] Vérification req.isMultipart:', req.isMultipart);
+    
+    // Si marqué comme multipart, skip totalement
+    if (req.isMultipart) {
+      console.log('🔧 [Skip JSON] Multipart bypass activé pour:', req.url);
+      return next();
+    }
+    
+    console.log('🔍 [JSON Parser] Parsing JSON pour:', req.url);
+    // Sinon, parser le JSON normalement
+    return express.json({ limit: '50mb' })(req, res, next);
+  });
+
+  // Middleware pour parser les données URL-encoded (sauf multipart)
+  app.use((req: any, res: any, next: any) => {
+    if (req.isMultipart) {
+      return next();
+    }
+    return express.urlencoded({ extended: true, limit: '50mb' })(req, res, next);
+  });
 
   // Configuration CORS pour permettre les requêtes depuis le frontend (AVANT les autres middleware)
   const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -125,6 +181,11 @@ async function bootstrap() {
     prefix: '/uploads/correspondants-logo/',
   });
 
+  // Configuration pour les logos des organisations (admin MSP)
+  app.useStaticAssets(join(process.cwd(), 'uploads', 'logos'), {
+    prefix: '/uploads/logos/',
+  });
+
   // Ajout d'un log pour déboguer le chemin des uploads
   console.log('📁 Chemin uploads:', join(process.cwd(), 'uploads'));
   console.log('📁 Chemin assets:', join(process.cwd(), 'assets'));
@@ -134,14 +195,19 @@ async function bootstrap() {
   console.log('📁 Chemin logos_armateurs:', join(process.cwd(), 'uploads', 'logos_armateurs'));
   console.log('📁 Chemin logos_fournisseurs:', join(process.cwd(), 'uploads', 'logos_fournisseurs'));
   console.log('📁 Chemin correspondants-logo:', join(process.cwd(), 'uploads', 'correspondants-logo'));
-
-  // Middleware pour les cookies
-  app.use(cookieParser());
+  console.log('📁 Chemin logos organisations:', join(process.cwd(), 'uploads', 'logos'));
 
   // Filtre global pour la gestion des erreurs
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // Validation globale des DTOs
+  // ✅ INTERCEPTEUR GLOBAL MULTI-TENANT
+  // S'applique automatiquement à TOUTES les requêtes pour injecter les infos d'organisation
+  const reflector = app.get(Reflector);
+  app.useGlobalInterceptors(new MultiTenantInterceptor(reflector));
+  console.log('🏢 Intercepteur Multi-Tenant activé globalement');
+  console.log('');
+
+  // Validation globale des DTOs (avec exception pour les uploads)
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -149,15 +215,19 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
-        excludeExtraneousValues: false, // Important: ne pas exclure automatiquement
+        excludeExtraneousValues: false,
       },
+      // 🔧 FIX: Ne pas valider si le body est vide (cas des multipart)
+      skipMissingProperties: true,
+      skipNullProperties: false,
+      skipUndefinedProperties: false,
     }),
   );
 
   // Préfixe global pour toutes les routes API (APRÈS les fichiers statiques)
   // Exclure les routes statiques du préfixe global
   app.setGlobalPrefix('api', {
-    exclude: ['/uploads/(.*)', '/uploads/autorisations/(.*)', '/uploads/bons-de-commande/(.*)', '/uploads/activites/(.*)', '/uploads/logos_armateurs/(.*)', '/uploads/logos_fournisseurs/(.*)', '/uploads/correspondants-logo/(.*)', '/assets/(.*)']
+    exclude: ['/uploads/(.*)', '/uploads/autorisations/(.*)', '/uploads/bons-de-commande/(.*)', '/uploads/activites/(.*)', '/uploads/logos_armateurs/(.*)', '/uploads/logos_fournisseurs/(.*)', '/uploads/correspondants-logo/(.*)', '/uploads/logos/(.*)', '/assets/(.*)']
   });
 
   const port = process.env.PORT || 3000;

@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Exclude, Expose } from 'class-transformer';
 import { ContactClient } from './contact-client.entity';
@@ -19,9 +20,16 @@ export enum EtatFiscal {
 }
 
 @Entity('client')
+@Index('idx_client_org_id_fiscal', ['organisation_id', 'id_fiscal'], { unique: true })
+@Index('idx_client_org_c_douane', ['organisation_id', 'c_douane'], { unique: true })
+@Index('idx_client_org_iban', ['organisation_id', 'iban'], { unique: true })
+@Index('idx_client_org_compte_cpt', ['organisation_id', 'compte_cpt'], { unique: true })
 export class Client {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ type: 'integer', nullable: false })
+  organisation_id: number; // ID de l'organisation (référence vers shipnology.organisations)
 
   @Column({ type: 'varchar', nullable: false })
   nom: string;
@@ -47,14 +55,14 @@ export class Client {
   @Column({ type: 'varchar', nullable: true })
   pays: string;
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  id_fiscal: string;
+  @Column({ type: 'varchar', nullable: true })
+  id_fiscal: string; // UNIQUE par organisation (voir @Index en haut)
 
   @Column({ type: 'varchar', nullable: true })
   nature: string;
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  c_douane: string;
+  @Column({ type: 'varchar', nullable: true })
+  c_douane: string; // UNIQUE par organisation (voir @Index en haut)
 
   @Column({ type: 'integer', nullable: true })
   nbr_jour_ech: number;
@@ -87,15 +95,15 @@ export class Client {
   @Column({ type: 'boolean', nullable: true })
   timbre: boolean;
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  compte_cpt: string;
+  @Column({ type: 'varchar', nullable: true })
+  compte_cpt: string; // UNIQUE par organisation (voir @Index en haut)
 
   // Informations bancaires
   @Column({ type: 'varchar', nullable: true })
   banque: string; // Nom de la banque
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  iban: string; // International Bank Account Number
+  @Column({ type: 'varchar', nullable: true })
+  iban: string; // International Bank Account Number - UNIQUE par organisation (voir @Index en haut)
 
   @Column({ type: 'varchar', nullable: true })
   rib: string; // Relevé d'Identité Bancaire
@@ -141,7 +149,7 @@ export class Client {
   updated_at: Date;
 
   @Column({ type: 'uuid', nullable: true })
-  keycloak_id: string;
+  keycloak_id: string; // Pas unique car peut être null pour plusieurs clients
 
   @Column({ type: 'text', nullable: true, default: 'uploads/profiles/default-avatar.png' })
   photo: string; // URL ou chemin vers la photo de profil

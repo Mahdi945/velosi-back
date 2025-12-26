@@ -631,7 +631,7 @@ export class ClientService {
 
     // Validation avant changement d'état
     if (nouvelEtat === EtatFiscal.SUSPENSION_TVA) {
-      const tvaStatus = await this.autorisationTVAService.getClientTVAStatus(client.id);
+      const tvaStatus = await this.autorisationTVAService.getClientTVAStatusFromTypeORM(client.id);
       if (!tvaStatus.hasValidAutorisations) {
         throw new BadRequestException(
           'Impossible de passer en suspension TVA sans autorisation TVA valide'
@@ -686,7 +686,7 @@ export class ClientService {
       };
     }
 
-    return await this.autorisationTVAService.validateClientTVACoherence(client.id);
+    return await this.autorisationTVAService.validateClientTVACoherenceFromTypeORM(client.id);
   }
 
   async findClientsByAutorisationStatus(hasValidAutorisations: boolean): Promise<Client[]> {
@@ -696,7 +696,7 @@ export class ClientService {
     for (const client of clients) {
       if (client.id) {
         try {
-          const tvaStatus = await this.autorisationTVAService.getClientTVAStatus(client.id);
+          const tvaStatus = await this.autorisationTVAService.getClientTVAStatusFromTypeORM(client.id);
           if (tvaStatus.hasValidAutorisations === hasValidAutorisations) {
             filteredClients.push(client);
           }
@@ -722,7 +722,7 @@ export class ClientService {
     for (const client of clients) {
       if (client.id) {
         try {
-          const tvaStatus = await this.autorisationTVAService.getClientTVAStatus(client.id);
+          const tvaStatus = await this.autorisationTVAService.getClientTVAStatusFromTypeORM(client.id);
           
           // Vérifier les autorisations expirées
           const hasExpiredAutorisations = tvaStatus.autorisations.some(auth => auth.isExpired);

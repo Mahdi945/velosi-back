@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
@@ -19,15 +20,20 @@ import { extname } from 'path';
 import { FournisseursService } from '../services/fournisseurs.service';
 import { CreateFournisseurDto } from '../dto/create-fournisseur.dto';
 import { UpdateFournisseurDto } from '../dto/update-fournisseur.dto';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { UseGuards } from '@nestjs/common';
 
 @Controller('fournisseurs')
+@UseGuards(JwtAuthGuard)
 export class FournisseursController {
   constructor(private readonly fournisseursService: FournisseursService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() createFournisseurDto: CreateFournisseurDto) {
-    return this.fournisseursService.create(createFournisseurDto);
+  create(@Body() createFournisseurDto: CreateFournisseurDto, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.create(databaseName, createFournisseurDto);
   }
 
   @Post('upload-logo/:id')
@@ -55,13 +61,15 @@ export class FournisseursController {
   async uploadLogo(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ) {
     if (!file) {
       throw new Error('Aucun fichier fourni');
     }
 
+    const databaseName = getDatabaseName(req);
     const logoUrl = `/uploads/logos_fournisseurs/${file.filename}`;
-    return this.fournisseursService.updateLogo(id, logoUrl);
+    return this.fournisseursService.updateLogo(databaseName, id, logoUrl);
   }
 
   @Get()
@@ -72,9 +80,12 @@ export class FournisseursController {
     @Query('ville') ville?: string,
     @Query('pays') pays?: string,
     @Query('isActive') isActive?: string,
+    @Req() req: any = {},
   ) {
+    const databaseName = getDatabaseName(req);
     const isActiveBoolean = isActive === 'true' ? true : isActive === 'false' ? false : undefined;
     return this.fournisseursService.findAll(
+      databaseName,
       Number(page),
       Number(limit),
       search,
@@ -85,46 +96,55 @@ export class FournisseursController {
   }
 
   @Get('stats')
-  getStats() {
-    return this.fournisseursService.getStats();
+  getStats(@Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.getStats(databaseName);
   }
 
   @Get('villes')
-  getVilles() {
-    return this.fournisseursService.getVilles();
+  getVilles(@Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.getVilles(databaseName);
   }
 
   @Get('pays')
-  getPays() {
-    return this.fournisseursService.getPays();
+  getPays(@Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.getPays(databaseName);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.fournisseursService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.findOne(databaseName, id);
   }
 
   @Get('code/:code')
-  findByCode(@Param('code') code: string) {
-    return this.fournisseursService.findByCode(code);
+  findByCode(@Param('code') code: string, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.findByCode(databaseName, code);
   }
 
   @Put(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateFournisseurDto: UpdateFournisseurDto,
+    @Req() req: any,
   ) {
-    return this.fournisseursService.update(id, updateFournisseurDto);
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.update(databaseName, id, updateFournisseurDto);
   }
 
   @Put(':id/toggle-active')
-  toggleActive(@Param('id', ParseIntPipe) id: number) {
-    return this.fournisseursService.toggleActive(id);
+  toggleActive(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.toggleActive(databaseName, id);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.fournisseursService.remove(id);
+  remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    const databaseName = getDatabaseName(req);
+    return this.fournisseursService.remove(databaseName, id);
   }
 }

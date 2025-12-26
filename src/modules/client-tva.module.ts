@@ -12,11 +12,13 @@ import { AutorisationTVAController } from '../controllers/autorisation-tva.contr
 import { ClientController } from '../controllers/client.controller';
 import { BCsusTVAController } from '../controllers/bcsus-tva.controller';
 import { AuthModule } from '../auth/auth.module';
+import { DatabaseModule } from '../common/database.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([AutorisationTVA, BCsusTVA, Client, Fournisseur]),
-    AuthModule
+    AuthModule,
+    DatabaseModule, // 🏢 Multi-tenant database support
   ],
   controllers: [AutorisationTVAController, ClientController, BCsusTVAController],
   providers: [AutorisationTVAService, ClientService, BCsusTVAService, EmailService],

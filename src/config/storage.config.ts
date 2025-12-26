@@ -54,7 +54,7 @@ export const imageFileFilter = (req: any, file: Express.Multer.File, callback: a
   const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
   if (!allowedMimes.includes(file.mimetype)) {
     return callback(
-      new BadRequestException('Type de fichier non supporté. Utilisez JPG, PNG, WEBP ou GIF.'),
+      new Error('Type de fichier non supporté. Utilisez JPG, PNG, WEBP ou GIF.'),
       false
     );
   }
@@ -65,7 +65,7 @@ export const imageFileFilter = (req: any, file: Express.Multer.File, callback: a
   
   if (!extname) {
     return callback(
-      new BadRequestException('Extension de fichier invalide.'),
+      new Error('Extension de fichier invalide.'),
       false
     );
   }

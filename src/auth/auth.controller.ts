@@ -34,6 +34,7 @@ import { extname, join } from 'path';
 import * as fs from 'fs';
 import { imageFileFilter } from '../config/storage.config';
 import { v2 as cloudinary } from 'cloudinary';
+import { getDatabaseName, getOrganisationId } from '../common/helpers/multi-tenant.helper';
 
 // DTOs pour la récupération de mot de passe
 interface ForgotPasswordDto {
@@ -58,6 +59,8 @@ export interface AuthenticatedUser {
   email: string;
   role: string;
   userType: 'client' | 'personnel';
+  databaseName: string; // 🏢 Multi-tenant
+  organisationId: number; // 🏢 Multi-tenant
   [key: string]: any; // Pour d'autres propriétés éventuelles
 }
 
@@ -224,7 +227,22 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@Request() req) {
-    const fullUserProfile = await this.authService.getFullUserProfile(req.user.id, req.user.userType);
+    // 🏢 MULTI-TENANT: Récupérer les informations depuis le JWT
+    const databaseName = req.user?.databaseName;
+    const organisationId = req.user?.organisationId;
+    
+    console.log(`🏢 [GET /auth/profile] User ID:${req.user?.id}, DB:${databaseName}, Org:${organisationId}`);
+    
+    if (!databaseName || !organisationId) {
+      throw new UnauthorizedException('Informations multi-tenant manquantes dans le token');
+    }
+    
+    const fullUserProfile = await this.authService.getFullUserProfile(
+      req.user.id, 
+      req.user.userType,
+      databaseName,
+      organisationId
+    );
     // Retourner directement le profil sans wrapper
     return fullUserProfile;
   }
@@ -232,7 +250,23 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Put('profile')
   async updateProfile(@Request() req, @Body() updateData: any) {
-    const updatedProfile = await this.authService.updateUserProfile(req.user.id, req.user.userType, updateData);
+    // 🏢 MULTI-TENANT: Récupérer les informations depuis le JWT
+    const databaseName = req.user?.databaseName;
+    const organisationId = req.user?.organisationId;
+    
+    console.log(`🏢 [PUT /auth/profile] User ID:${req.user?.id}, DB:${databaseName}, Org:${organisationId}`);
+    
+    if (!databaseName || !organisationId) {
+      throw new UnauthorizedException('Informations multi-tenant manquantes dans le token');
+    }
+    
+    const updatedProfile = await this.authService.updateUserProfile(
+      req.user.id, 
+      req.user.userType, 
+      updateData,
+      databaseName,
+      organisationId
+    );
     return updatedProfile;
   }
 
@@ -246,7 +280,14 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('change-password-first-login')
   async changePasswordFirstLogin(@Request() req, @Body() passwordData: { newPassword: string }) {
-    const result = await this.authService.changePasswordFirstLogin(req.user.id, req.user.userType, passwordData.newPassword);
+    // 🏢 MULTI-TENANT: Passer databaseName et organisationId depuis le JWT
+    const result = await this.authService.changePasswordFirstLogin(
+      req.user.id, 
+      req.user.userType, 
+      passwordData.newPassword,
+      req.user.databaseName, // ✅ Passer la base de données depuis le JWT
+      req.user.organisationId // ✅ Passer l'organisation depuis le JWT
+    );
     return result;
   }
 
@@ -584,38 +625,52 @@ export class AuthController {
   async registerClient(
     @Body() createClientDto: CreateClientDto,
     @Res({ passthrough: true }) response: Response,
+    @Request() req: any,
   ) {
-    const result = await this.authService.registerClient(createClientDto);
+    try {
+      // Utiliser les helpers multi-tenant pour extraire les informations d'organisation
+      const databaseName = getDatabaseName(req);
+      const organisationId = getOrganisationId(req);
+      
+      console.log('📥 [auth/register/client] DB:', databaseName, 'Org:', organisationId);
+      
+      const result = await this.authService.registerClient(createClientDto, databaseName, organisationId);
 
-    // Définir les cookies sécurisés - Configuration 8 heures cohérente
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      maxAge: 8 * 60 * 60 * 1000, // 8 heures - cohérent avec Keycloak
-    };
+      // Définir les cookies sécurisés - Configuration 8 heures cohérente
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        maxAge: 8 * 60 * 60 * 1000, // 8 heures - cohérent avec Keycloak
+      };
 
-    const refreshCookieOptions = {
-      ...cookieOptions,
-      maxAge: 8 * 60 * 60 * 1000, // 8 heures - cohérent avec la configuration globale
-    };
+      const refreshCookieOptions = {
+        ...cookieOptions,
+        maxAge: 8 * 60 * 60 * 1000, // 8 heures - cohérent avec la configuration globale
+      };
 
-    response.cookie('access_token', result.access_token, cookieOptions);
-    response.cookie(
-      'refresh_token',
-      result.refresh_token,
-      refreshCookieOptions,
-    );
+      if (result.access_token) {
+        response.cookie('access_token', result.access_token, cookieOptions);
+      }
+      if (result.refresh_token) {
+        response.cookie('refresh_token', result.refresh_token, refreshCookieOptions);
+      }
 
-    return {
-      message: 'Client créé avec succès',
-      user: result.user,
-      access_token: result.access_token,
-      data: {
-        client: result.client
-      },
-      success: true
-    };
+      return {
+        success: true,
+        message: 'Client créé avec succès',
+        data: result.client, // Données du client créé
+        user: result.user,
+        access_token: result.access_token,
+      };
+    } catch (error) {
+      console.error('❌ [auth/register/client] Erreur:', error);
+      return {
+        success: false,
+        message: error.message || 'Erreur lors de la création du client',
+        error: error.message,
+      };
+    }
   }
 
   // Routes de récupération de mot de passe
@@ -677,6 +732,112 @@ export class AuthController {
       message: 'Mot de passe réinitialisé avec succès',
       success: true,
     };
+  }
+
+  /**
+   * 🔐 Admin: Réinitialiser le mot de passe d'un personnel
+   */
+  @Post('admin/reset-password/personnel/:id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async adminResetPersonnelPassword(
+    @Param('id') personnelId: string,
+    @Body() body: { newPassword: string },
+    @Request() req: any,
+  ) {
+    try {
+      console.log(`🔐 [adminResetPersonnelPassword] Réinitialisation mot de passe personnel ID: ${personnelId}`);
+      
+      // Vérifier que l'utilisateur est admin ou administratif
+      if (!req.user || !['admin', 'administratif'].includes(req.user.role?.toLowerCase())) {
+        throw new UnauthorizedException('Seuls les administrateurs peuvent réinitialiser les mots de passe');
+      }
+
+      const databaseName = req.user?.databaseName || req.organisationDatabase;
+      const organisationId = req.user?.organisationId || req.organisationId;
+
+      if (!databaseName || !organisationId) {
+        throw new BadRequestException('Informations multi-tenant manquantes');
+      }
+
+      // Construire le nom de l'admin pour l'audit trail
+      const adminName = req.user?.prenom && req.user?.nom 
+        ? `${req.user.prenom} ${req.user.nom}` 
+        : req.user?.nom_utilisateur || 'Administrateur';
+
+      console.log(`👤 Admin qui effectue l'action: ${adminName}`);
+
+      // Utiliser le service auth pour réinitialiser le mot de passe
+      const result = await this.authService.adminResetPersonnelPassword(
+        databaseName,
+        organisationId,
+        parseInt(personnelId),
+        body.newPassword,
+        adminName
+      );
+
+      return {
+        success: true,
+        message: 'Mot de passe du personnel réinitialisé avec succès',
+        data: result
+      };
+    } catch (error) {
+      console.error(`❌ [adminResetPersonnelPassword] Erreur:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 🔐 Admin: Réinitialiser le mot de passe d'un client
+   */
+  @Post('admin/reset-password/client/:id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async adminResetClientPassword(
+    @Param('id') clientId: string,
+    @Body() body: { newPassword: string },
+    @Request() req: any,
+  ) {
+    try {
+      console.log(`🔐 [adminResetClientPassword] Réinitialisation mot de passe client ID: ${clientId}`);
+      
+      // Vérifier que l'utilisateur est admin ou administratif
+      if (!req.user || !['admin', 'administratif', 'commercial'].includes(req.user.role?.toLowerCase())) {
+        throw new UnauthorizedException('Accès non autorisé');
+      }
+
+      const databaseName = req.user?.databaseName || req.organisationDatabase;
+      const organisationId = req.user?.organisationId || req.organisationId;
+
+      if (!databaseName || !organisationId) {
+        throw new BadRequestException('Informations multi-tenant manquantes');
+      }
+
+      // Construire le nom de l'admin pour l'audit trail
+      const adminName = req.user?.prenom && req.user?.nom 
+        ? `${req.user.prenom} ${req.user.nom}` 
+        : req.user?.nom_utilisateur || 'Administrateur';
+
+      console.log(`👤 Admin qui effectue l'action: ${adminName}`);
+
+      // Utiliser le service auth pour réinitialiser le mot de passe
+      const result = await this.authService.adminResetClientPassword(
+        databaseName,
+        organisationId,
+        parseInt(clientId),
+        body.newPassword,
+        adminName
+      );
+
+      return {
+        success: true,
+        message: 'Mot de passe du client réinitialisé avec succès',
+        data: result
+      };
+    } catch (error) {
+      console.error(`❌ [adminResetClientPassword] Erreur:`, error);
+      throw error;
+    }
   }
 
   // 🔐 Endpoints pour HTTP-Only Cookies - Sécurité renforcée pour reset password
@@ -898,14 +1059,24 @@ export class AuthController {
         console.log('💾 [Upload] Utilisation du stockage local:', finalPath);
       }
 
-      // Mettre à jour le profil utilisateur
+      // 🏢 MULTI-TENANT: Extraire les informations du JWT
+      const databaseName = user.databaseName;
+      const organisationId = user.organisationId;
+      
+      if (!databaseName || !organisationId) {
+        throw new UnauthorizedException('Informations multi-tenant manquantes dans le token');
+      }
+      
+      // Mettre à jour le profil utilisateur avec les informations multi-tenant
       await this.authService.updateUserProfileImage(
         user.id,
         user.userType,
         finalPath,
+        databaseName,
+        organisationId
       );
 
-      console.log('✅ [Upload] Image de profil mise à jour avec succès');
+      console.log(`✅ [Upload] Image de profil mise à jour avec succès pour DB:${databaseName}, Org:${organisationId}`);
 
       return {
         success: true,
@@ -951,9 +1122,20 @@ export class AuthController {
   async deleteProfileImage(@Request() req) {
     try {
       const user = req.user as AuthenticatedUser;
+      
+      // 🏢 MULTI-TENANT: Extraire les informations du JWT
+      const databaseName = user.databaseName;
+      const organisationId = user.organisationId;
+      
+      if (!databaseName || !organisationId) {
+        throw new UnauthorizedException('Informations multi-tenant manquantes dans le token');
+      }
+      
       const result = await this.authService.deleteUserProfileImage(
         user.id,
         user.userType,
+        databaseName,
+        organisationId
       );
 
       return {
@@ -1261,7 +1443,16 @@ export class AuthController {
         // Si c'est un utilisateur local, récupérer les infos complètes
         if (decoded.userType !== 'keycloak-only' && decoded.sub) {
           try {
-            const fullUserProfile = await this.authService.getFullUserProfile(decoded.sub, decoded.userType);
+            // 🏢 MULTI-TENANT: Récupérer databaseName et organisationId depuis le token
+            const databaseName = decoded.databaseName || 'velosi';
+            const organisationId = decoded.organisationId || 1;
+            
+            const fullUserProfile = await this.authService.getFullUserProfile(
+              decoded.sub, 
+              decoded.userType,
+              databaseName,
+              organisationId
+            );
             const roles = await this.authService.getUserRoles(decoded.sub, decoded.userType);
             
             return {
@@ -1881,79 +2072,38 @@ export class AuthController {
     }
   }
 
+  /**
+   * 🏢 Récupérer les informations de l'organisation courante de l'utilisateur
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('current-organisation')
+  async getCurrentOrganisation(@Request() req) {
+    const organisationId = getOrganisationId(req);
+    if (!organisationId) {
+      throw new UnauthorizedException('Organisation introuvable');
+    }
+
+    this.logger.log(`🏢 [getCurrentOrganisation] Récupération de l'organisation ID: ${organisationId}`);
+    const organisation = await this.authService.getOrganisationById(organisationId);
+    
+    const result = {
+      id: organisation.id,
+      nom: organisation.nom,
+      nom_affichage: organisation.nom_affichage,
+      logo_url: organisation.logo_url,
+      slug: organisation.slug,
+      telephone: organisation.telephone,
+      adresse: organisation.adresse,
+      email_contact: organisation.email_contact,
+    };
+    
+    this.logger.log(`✅ [getCurrentOrganisation] Organisation récupérée: ${result.nom} (logo: ${result.logo_url})`);
+    return result;
+  }
+
   // ==========================================
   // ENDPOINTS D'AUTHENTIFICATION BIOMÉTRIQUE
   // ==========================================
   // NOTE: Les endpoints biométriques ont été déplacés vers BiometricController
   // pour supporter multi-appareils et Resident Keys (Passkeys)
-
-  // ==========================================
-  // RÉINITIALISATION MOT DE PASSE PAR ADMIN
-  // ==========================================
-
-  /**
-   * Réinitialiser le mot de passe d'un personnel (Admin seulement)
-   */
-  @Post('admin/reset-password/personnel/:id')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  async adminResetPersonnelPassword(
-    @Param('id') personnelId: string,
-    @Body() body: { newPassword: string },
-    @Request() req
-  ) {
-    // Vérifier que l'utilisateur est admin ou administratif
-    const allowedRoles = ['admin', 'administratif'];
-    if (!allowedRoles.includes(req.user.role?.toLowerCase())) {
-      throw new UnauthorizedException('Seuls les administrateurs peuvent réinitialiser les mots de passe');
-    }
-
-    try {
-      const result = await this.authService.adminResetPersonnelPassword(
-        parseInt(personnelId),
-        body.newPassword,
-        req.user.id
-      );
-      return {
-        success: true,
-        message: 'Mot de passe du personnel réinitialisé avec succès',
-        ...result,
-      };
-    } catch (error) {
-      throw new BadRequestException(`Erreur réinitialisation mot de passe: ${error.message}`);
-    }
-  }
-
-  /**
-   * Réinitialiser le mot de passe d'un client (Admin seulement)
-   */
-  @Post('admin/reset-password/client/:id')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  async adminResetClientPassword(
-    @Param('id') clientId: string,
-    @Body() body: { newPassword: string },
-    @Request() req
-  ) {
-    // Vérifier que l'utilisateur est admin ou administratif
-    const allowedRoles = ['admin', 'administratif'];
-    if (!allowedRoles.includes(req.user.role?.toLowerCase())) {
-      throw new UnauthorizedException('Seuls les administrateurs peuvent réinitialiser les mots de passe');
-    }
-
-    try {
-      const result = await this.authService.adminResetClientPassword(
-        parseInt(clientId),
-        body.newPassword,
-        req.user.id
-      );
-      return {
-        success: true,
-        message: 'Mot de passe du client réinitialisé avec succès',
-        ...result,
-      };
-    } catch (error) {
-      throw new BadRequestException(`Erreur réinitialisation mot de passe: ${error.message}`);
-    }
-  }
 }

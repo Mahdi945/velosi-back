@@ -4,13 +4,12 @@ import {
   BadRequestException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere, Like, Between } from 'typeorm';
 import { Quote, QuoteStatus } from '../entities/quote.entity';
 import { QuoteItem } from '../entities/quote-item.entity';
 import { Lead, LeadStatus } from '../../entities/crm/lead.entity';
 import { Opportunity, OpportunityStage } from '../../entities/crm/opportunity.entity';
 import { Client, EtatFiscal } from '../../entities/client.entity';
+import { DatabaseConnectionService } from '../../common/database-connection.service';
 import {
   CreateQuoteDto,
   UpdateQuoteDto,
@@ -25,19 +24,201 @@ import { ClientService } from '../../services/client.service';
 @Injectable()
 export class QuotesService {
   constructor(
-    @InjectRepository(Quote)
-    private quoteRepository: Repository<Quote>,
-    @InjectRepository(QuoteItem)
-    private quoteItemRepository: Repository<QuoteItem>,
-    @InjectRepository(Lead)
-    private leadRepository: Repository<Lead>,
-    @InjectRepository(Opportunity)
-    private opportunityRepository: Repository<Opportunity>,
-    @InjectRepository(Client)
-    private clientRepository: Repository<Client>,
+    private databaseConnectionService: DatabaseConnectionService,
     private emailService: EmailService,
     private clientService: ClientService,
   ) {}
+
+  /**
+   * 🔄 Transformer un item de snake_case vers camelCase
+   */
+  private transformItemToCamelCase(item: any): any {
+    if (!item) return null;
+    
+    return {
+      id: item.id,
+      quoteId: item.quote_id,
+      description: item.description,
+      category: item.category,
+      vehicleDescription: item.vehicle_description,
+      cargoDesignation: item.cargo_designation,
+      packagesCount: item.packages_count,
+      weightKg: item.weight_kg,
+      volumeM3: item.volume_m3,
+      lengthCm: item.length_cm,
+      widthCm: item.width_cm,
+      heightCm: item.height_cm,
+      volumetricWeight: item.volumetric_weight,
+      originStreet: item.origin_street,
+      originCity: item.origin_city,
+      originPostalCode: item.origin_postal_code,
+      originCountry: item.origin_country,
+      destinationStreet: item.destination_street,
+      destinationCity: item.destination_city,
+      destinationPostalCode: item.destination_postal_code,
+      destinationCountry: item.destination_country,
+      distanceKm: item.distance_km,
+      vehicleType: item.vehicle_type,
+      serviceType: item.service_type,
+      currency: item.currency,
+      conversionRate: item.conversion_rate,
+      unit: item.unit,
+      quantity: item.quantity,
+      unitPrice: item.unit_price, // ✅ CRITIQUE: Transformation snake_case → camelCase
+      purchasePrice: item.purchase_price, // ✅ CRITIQUE
+      sellingPrice: item.selling_price, // ✅ CRITIQUE
+      totalPrice: item.total_price,
+      margin: item.margin,
+      itemType: item.item_type,
+      lineOrder: item.line_order,
+      notes: item.notes,
+      taxRate: item.tax_rate,
+      taxAmount: item.tax_amount,
+      isTaxable: item.is_taxable,
+      taxableAccount: item.taxable_account,
+      nonTaxableAccount: item.non_taxable_account,
+      isDebours: item.is_debours,
+      caType: item.ca_type,
+    };
+  }
+
+  /**
+   * 🔄 Transformer les noms de colonnes snake_case en camelCase
+   */
+  private transformQuoteToCamelCase(quote: any): any {
+    if (!quote) return null;
+    
+    return {
+      id: quote.id,
+      uuid: quote.uuid,
+      quoteNumber: quote.quote_number,
+      opportunityId: quote.opportunity_id,
+      leadId: quote.lead_id,
+      clientId: quote.client_id,
+      title: quote.title,
+      status: quote.status,
+      type: quote.type,
+      validUntil: quote.valid_until,
+      sentAt: quote.sent_at,
+      viewedAt: quote.viewed_at,
+      acceptedAt: quote.accepted_at,
+      rejectedAt: quote.rejected_at,
+      clientName: quote.client_name,
+      clientCompany: quote.client_company,
+      clientEmail: quote.client_email,
+      clientPhone: quote.client_phone,
+      clientAddress: quote.client_address,
+      subtotal: quote.subtotal,
+      taxRate: quote.tax_rate,
+      taxAmount: quote.tax_amount,
+      total: quote.total,
+      paymentTerms: quote.payment_terms,
+      deliveryTerms: quote.delivery_terms,
+      termsConditions: quote.terms_conditions,
+      notes: quote.notes,
+      rejectionReason: quote.rejection_reason,
+      createdAt: quote.created_at,
+      updatedAt: quote.updated_at,
+      createdBy: quote.created_by,
+      updatedBy: quote.updated_by,
+      approvedBy: quote.approved_by,
+      commercialId: quote.commercial_id,
+      commercialIds: quote.commercial_ids || [],
+      country: quote.country,
+      tiers: quote.tiers,
+      attentionTo: quote.attention_to,
+      pickupLocation: quote.pickup_location,
+      deliveryLocation: quote.delivery_location,
+      transitTime: quote.transit_time,
+      departureFrequency: quote.departure_frequency,
+      clientType: quote.client_type,
+      importExport: quote.import_export,
+      fileStatus: quote.file_status,
+      terms: quote.terms,
+      paymentMethod: quote.payment_method,
+      paymentConditions: quote.payment_conditions,
+      condition: quote.condition,
+      requester: quote.requester,
+      vehicleId: quote.vehicle_id,
+      freightPurchased: quote.freight_purchased,
+      freightOffered: quote.freight_offered,
+      freightMargin: quote.freight_margin,
+      additionalCostsPurchased: quote.additional_costs_purchased,
+      additionalCostsOffered: quote.additional_costs_offered,
+      totalPurchases: quote.total_purchases,
+      totalOffers: quote.total_offers,
+      totalMargin: quote.total_margin,
+      internalInstructions: quote.internal_instructions,
+      customerRequest: quote.customer_request,
+      exchangeNotes: quote.exchange_notes,
+      qrCodeData: quote.qr_code_data,
+      deletedAt: quote.deleted_at,
+      isArchived: quote.is_archived,
+      archivedReason: quote.archived_reason,
+      archivedBy: quote.archived_by,
+      armateurId: quote.armateur_id,
+      navireId: quote.navire_id,
+      portEnlevementId: quote.port_enlevement_id,
+      portLivraisonId: quote.port_livraison_id,
+      aeroportEnlevementId: quote.aeroport_enlevement_id,
+      aeroportLivraisonId: quote.aeroport_livraison_id,
+      hbl: quote.hbl,
+      mbl: quote.mbl,
+      // Jointures
+      leadCompany: quote.lead_company,
+      leadName: quote.lead_name,
+      opportunityTitle: quote.opportunity_title,
+      creatorNom: quote.creator_nom,
+      creatorPrenom: quote.creator_prenom,
+      updaterNom: quote.updater_nom,
+      updaterPrenom: quote.updater_prenom,
+      // Construire l'objet creator complet
+      creator: quote.creator_id ? {
+        id: quote.creator_id,
+        nom: quote.creator_nom,
+        prenom: quote.creator_prenom
+      } : null,
+      // Construire l'objet updater complet
+      updater: quote.updater_id ? {
+        id: quote.updater_id,
+        nom: quote.updater_nom,
+        prenom: quote.updater_prenom
+      } : null,
+      armateurName: quote.armateur_name,
+      navireName: quote.navire_name,
+      portEnlevementName: quote.port_enlevement_name,
+      portLivraisonName: quote.port_livraison_name,
+      aeroportEnlevementName: quote.aeroport_enlevement_name,
+      aeroportLivraisonName: quote.aeroport_livraison_name,
+      // Items et commerciaux (si chargés) - ✅ CORRECTION: Transformer les items aussi
+      items: (quote.items || []).map((item: any) => this.transformItemToCamelCase(item)),
+      assignedCommercials: quote.assignedCommercials || [],
+    };
+  }
+
+  /**
+   * ⚠️ ATTENTION - SERVICE À MIGRER VERS CONNEXION DYNAMIQUE
+   * 
+   * 🔴 PROBLÈME: Ce service utilise des @InjectRepository qui se connectent à la base par défaut (velosi)
+   * au lieu de la base spécifiée dans le JWT (danino, etc.)
+   * 
+   * 📋 MIGRATION NÉCESSAIRE:
+   * 1. Supprimer tous les @InjectRepository (Quote, QuoteItem, Lead, Opportunity, Client)
+   * 2. Injecter uniquement DatabaseConnectionService
+   * 3. Convertir tous les appels Repository en connection.query()
+   * 4. Ajouter paramètre databaseName à toutes les méthodes
+   * 5. Mettre à jour le controller pour passer databaseName
+   * 
+   * 📊 COMPLEXITÉ: Service très volumineux (2226 lignes)
+   * - 20+ utilisations de this.quoteRepository
+   * - 10+ utilisations de this.quoteItemRepository
+   * - Utilise aussi leadRepository, opportunityRepository, clientRepository
+   * - Logique métier complexe (génération QR code, envoi emails, PDF)
+   * 
+   * 🎯 PRIORITÉ: HAUTE - Service critique pour les cotations
+   * 
+   * Voir MIGRATION_TYPEORM_TO_DYNAMIC_CONNECTION.md pour le guide complet
+   */
 
   /**
    * 🎯 Générer un QR code pour la cotation
@@ -106,29 +287,29 @@ export class QuotesService {
    * Format: Q25/11-1, Q25/11-2, Q25/12-1, Q25/12-2...
    * La séquence redémarre à 1 chaque nouveau mois
    */
-  private async generateQuoteNumber(): Promise<string> {
+  private async generateQuoteNumber(databaseName: string): Promise<string> {
     try {
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
       const now = new Date();
-      const year = now.getFullYear().toString().slice(-2); // 2 derniers chiffres de l'année (25 pour 2025)
-      const month = (now.getMonth() + 1).toString().padStart(2, '0'); // Mois sur 2 chiffres (01-12)
+      const year = now.getFullYear().toString().slice(-2);
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
       
-      // Chercher le dernier numéro du mois actuel
-      // Format attendu: Q25/11-X où X est la séquence
       const pattern = `Q${year}/${month}-%`;
       
-      const result = await this.quoteRepository
-        .createQueryBuilder('quote')
-        .select('quote.quoteNumber', 'quoteNumber')
-        .where('quote.quoteNumber LIKE :pattern', { pattern })
-        .orderBy('quote.createdAt', 'DESC')
-        .limit(1)
-        .getRawOne();
+      const result = await connection.query(
+        `SELECT quote_number as "quoteNumber" 
+         FROM crm_quotes 
+         WHERE quote_number LIKE $1 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [pattern]
+      );
 
       let sequence = 1; // Par défaut, premier devis du mois
 
-      if (result && result.quoteNumber) {
+      if (result && result.length > 0 && result[0].quoteNumber) {
         // Extraire la séquence du dernier numéro (ex: "Q25/11-5" → 5)
-        const match = result.quoteNumber.match(/-(\d+)$/);
+        const match = result[0].quoteNumber.match(/-(\d+)$/);
         if (match) {
           sequence = parseInt(match[1], 10) + 1;
         }
@@ -149,184 +330,229 @@ export class QuotesService {
     }
   }
 
-  /**
-   * Calcule les totaux d'un devis
-   * ✅ CORRECTION: Prend en compte le taux de conversion pour calculer en TND
-   */
-  private calculateTotals(quote: Quote): void {
-    if (!quote.items || quote.items.length === 0) {
-      quote.subtotal = 0;
-      quote.taxAmount = 0;
-      quote.total = 0;
-      quote.freightPurchased = 0;
-      quote.freightOffered = 0;
-      quote.freightMargin = 0;
-      quote.additionalCostsPurchased = 0;
-      quote.additionalCostsOffered = 0;
-      quote.totalPurchases = 0;
-      quote.totalOffers = 0;
-      quote.totalMargin = 0;
-      return;
-    }
 
-    // Calculer le total de chaque ligne EN TND (avec conversion)
-    quote.items.forEach((item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      
-      // totalPrice en TND (converti)
-      item.totalPrice = item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate;
-      
-      // Marge en TND (converti)
-      item.margin = ((item.sellingPrice || item.unitPrice) - (item.purchasePrice || 0)) * conversionRate;
-      
-      // Stocker aussi le total en TND pour usage dans le frontend
-      (item as any).totalPriceTnd = item.totalPrice;
-    });
-
-    // Séparer fret et frais annexes
-    const freightItems = quote.items.filter((item) => item.itemType === 'freight');
-    const additionalItems = quote.items.filter((item) => item.itemType === 'additional_cost');
-
-    // Calculer les totaux fret EN TND (avec conversion)
-    quote.freightPurchased = freightItems.reduce((sum, item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      return sum + (item.quantity * (item.purchasePrice || 0) * conversionRate);
-    }, 0);
-    
-    quote.freightOffered = freightItems.reduce((sum, item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      return sum + (item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate);
-    }, 0);
-    
-    quote.freightMargin = quote.freightOffered - quote.freightPurchased;
-
-    // Calculer les totaux frais annexes EN TND (avec conversion)
-    quote.additionalCostsPurchased = additionalItems.reduce((sum, item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      return sum + (item.quantity * (item.purchasePrice || 0) * conversionRate);
-    }, 0);
-    
-    quote.additionalCostsOffered = additionalItems.reduce((sum, item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      return sum + (item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate);
-    }, 0);
-
-    // Totaux généraux EN TND
-    quote.totalPurchases = quote.freightPurchased + quote.additionalCostsPurchased;
-    quote.totalOffers = quote.freightOffered + quote.additionalCostsOffered;
-    quote.totalMargin = quote.totalOffers - quote.totalPurchases;
-
-    // Sous-total HT (basé sur les prix de vente convertis en TND)
-    quote.subtotal = quote.totalOffers;
-    
-    // ✅ CORRECTION MAJEURE: Calculer la TVA ligne par ligne au lieu d'une TVA globale
-    // Chaque ligne peut avoir un taux de TVA différent (0%, 7%, 13%, 19%, etc.)
-    quote.taxAmount = quote.items.reduce((sum, item) => {
-      const conversionRate = (item as any).conversionRate || 1;
-      const taxRate = (item as any).taxRate || 19;
-      const isTaxable = (item as any).isTaxable !== false; // Par défaut true
-      
-      if (!isTaxable) return sum; // Ligne non taxable, TVA = 0
-      
-      // Total HT de la ligne en TND
-      const lineTotal = item.quantity * (item.sellingPrice || item.unitPrice) * conversionRate;
-      
-      // TVA de la ligne = Total HT × (Taux TVA / 100)
-      const lineTax = lineTotal * (taxRate / 100);
-      
-      return sum + lineTax;
-    }, 0);
-    
-    // Total TTC = Sous-total HT + TVA totale (somme des TVA de chaque ligne)
-    quote.total = quote.subtotal + quote.taxAmount;
-    
-    console.log('💰 [Backend] Totaux calculés en TND (TVA par ligne):', {
-      quoteNumber: quote.quoteNumber,
-      totalOffers: quote.totalOffers,
-      taxAmount: quote.taxAmount,
-      total: quote.total
-    });
-  }
 
   /**
    * Créer un nouveau devis
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  async create(createQuoteDto: CreateQuoteDto, userId: number): Promise<Quote> {
+  async create(
+    createQuoteDto: CreateQuoteDto,
+    userId: number,
+    databaseName: string,
+    organisationId: number
+  ): Promise<Quote> {
     try {
       console.log('📝 [QuotesService.create] ========================================');
       console.log('📝 [QuotesService.create] userId reçu:', userId, 'Type:', typeof userId);
+      console.log('🏢 [QuotesService.create] Multi-tenant:', { databaseName, organisationId });
       console.log('📝 [QuotesService.create] DTO createdBy:', createQuoteDto.createdBy);
       console.log('📝 [QuotesService.create] ========================================');
       
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // Générer le numéro de devis
-      const quoteNumber = await this.generateQuoteNumber();
+      const quoteNumber = await this.generateQuoteNumber(databaseName);
 
       // ✅ Gérer les commerciaux (nouveau système multi-commerciaux)
       let commercialIds = [];
       if (createQuoteDto.commercialIds && createQuoteDto.commercialIds.length > 0) {
         commercialIds = createQuoteDto.commercialIds;
       } else if (createQuoteDto.commercialId) {
-        // Fallback: ancien système avec commercialId unique
         commercialIds = [createQuoteDto.commercialId];
       }
+      const firstCommercialId = commercialIds.length > 0 ? commercialIds[0] : null;
 
-      // Créer le devis
-      const quote = this.quoteRepository.create({
-        ...createQuoteDto,
+      // Insérer le quote
+      const quoteInsertSql = `
+        INSERT INTO crm_quotes (
+          quote_number, title, status, type, valid_until,
+          client_name, client_company, client_email, client_phone, client_address,
+          opportunity_id, lead_id, client_id,
+          commercial_id, commercial_ids,
+          organisation_id,
+          subtotal, tax_amount, tax_rate, total,
+          freight_purchased, freight_offered, freight_margin,
+          additional_costs_purchased, additional_costs_offered,
+          total_purchases, total_offers, total_margin,
+          created_by, notes,
+          country, tiers, attention_to, pickup_location, delivery_location,
+          transit_time, departure_frequency, client_type, import_export,
+          file_status, terms, payment_method, payment_conditions, requester, vehicle_id,
+          condition, hbl, mbl,
+          armateur_id, navire_id, port_enlevement_id, port_livraison_id,
+          aeroport_enlevement_id, aeroport_livraison_id
+        ) VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10,
+          $11, $12, $13,
+          $14, $15,
+          $16,
+          $17, $18, $19, $20,
+          $21, $22, $23,
+          $24, $25,
+          $26, $27, $28,
+          $29, $30,
+          $31, $32, $33, $34, $35,
+          $36, $37, $38, $39,
+          $40, $41, $42, $43, $44, $45,
+          $46, $47, $48, $49, $50,
+          $51, $52, $53,
+          $54, $55, $56, $57,
+          $58, $59
+        ) RETURNING *
+      `;
+
+      const result = await connection.query(quoteInsertSql, [
         quoteNumber,
-        createdBy: userId, // ✅ Utiliser le userId passé en paramètre (prioritaire)
-        status: QuoteStatus.DRAFT,
-        type: 'cotation', // ✅ Type par défaut: cotation
-        taxRate: createQuoteDto.taxRate || 19.0,
-        commercialIds, // ✅ Array de commerciaux
-        // Garder aussi commercialId pour compatibilité (premier commercial)
-        commercialId: commercialIds.length > 0 ? commercialIds[0] : undefined,
-      });
-      
-      console.log('📝 [QuotesService.create] Quote créé avec createdBy:', quote.createdBy);
+        createQuoteDto.title,
+        QuoteStatus.DRAFT,
+        createQuoteDto.type || 'cotation',
+        createQuoteDto.validUntil,
+        createQuoteDto.clientName,
+        createQuoteDto.clientCompany,
+        createQuoteDto.clientEmail,
+        createQuoteDto.clientPhone,
+        createQuoteDto.clientAddress,
+        createQuoteDto.opportunityId || null,
+        createQuoteDto.leadId || null,
+        createQuoteDto.clientId || null,
+        firstCommercialId,
+        commercialIds,
+        organisationId, // ✅ Enregistrer l'organisation_id
+        0, 0, createQuoteDto.taxRate || 19.0, 0,
+        0, 0, 0,
+        0, 0,
+        0, 0, 0,
+        userId,
+        createQuoteDto.notes || null,
+        createQuoteDto.country || null,
+        createQuoteDto.tiers || null,
+        createQuoteDto.attentionTo || null,
+        createQuoteDto.pickupLocation || null,
+        createQuoteDto.deliveryLocation || null,
+        createQuoteDto.transitTime || null,
+        createQuoteDto.departureFrequency || null,
+        createQuoteDto.clientType || null,
+        createQuoteDto.importExport || null,
+        createQuoteDto.fileStatus || null,
+        createQuoteDto.terms || null,
+        createQuoteDto.paymentMethod || null,
+        createQuoteDto.paymentConditions || null,
+        createQuoteDto.requester || null,
+        createQuoteDto.vehicleId || null,
+        createQuoteDto.condition || null,
+        createQuoteDto.hbl || null,
+        createQuoteDto.mbl || null,
+        createQuoteDto.armateurId || null,
+        createQuoteDto.navireId || null,
+        createQuoteDto.portEnlevementId || null,
+        createQuoteDto.portLivraisonId || null,
+        createQuoteDto.aeroportEnlevementId || null,
+        createQuoteDto.aeroportLivraisonId || null
+      ]);
+      const savedQuote = result[0];
 
-      // Créer les lignes
+      console.log('💾 [QuotesService.create] Quote sauvegardée:', savedQuote.id);
+
+      // Créer les lignes (items)
       if (createQuoteDto.items && createQuoteDto.items.length > 0) {
-        quote.items = createQuoteDto.items.map((item, index) =>
-          this.quoteItemRepository.create({
-            ...item,
-            lineOrder: item.lineOrder || index + 1,
-            // totalPrice doit utiliser sellingPrice, pas unitPrice
-            totalPrice: item.quantity * (item.sellingPrice || item.unitPrice),
-            itemType: item.itemType || 'freight',
-          }),
+        console.log(`📝 [CREATE] Création de ${createQuoteDto.items.length} items`);
+        
+        for (let index = 0; index < createQuoteDto.items.length; index++) {
+          const item = createQuoteDto.items[index];
+          
+          // Calculs identiques à la version Git (sans conversion dans totalPrice/margin, appliquée plus tard)
+          const conversionRate = item.conversionRate || 1;
+          const sellingPrice = item.sellingPrice || item.unitPrice || 0;
+          const purchasePrice = item.purchasePrice || 0;
+          const totalPrice = item.quantity * sellingPrice; // Sans conversion ici
+          const margin = sellingPrice - purchasePrice; // Sans conversion ici
+          
+          await connection.query(
+            `INSERT INTO crm_quote_items (
+              quote_id, description, category, vehicle_description, cargo_designation,
+              packages_count, weight_kg, volume_m3, length_cm, width_cm, height_cm, volumetric_weight,
+              origin_street, origin_city, origin_postal_code, origin_country,
+              destination_street, destination_city, destination_postal_code, destination_country,
+              distance_km, vehicle_type, service_type,
+              currency, conversion_rate, unit,
+              quantity, unit_price, selling_price, purchase_price,
+              total_price, margin, item_type, line_order, notes,
+              tax_rate, tax_amount, is_taxable, taxable_account, non_taxable_account,
+              is_debours, ca_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)`,
+            [
+              savedQuote.id, // $1
+              item.description, // $2
+              item.category || null, // $3
+              item.vehicleDescription || null, // $4
+              item.cargoDesignation || null, // $5
+              item.packagesCount || null, // $6
+              item.weightKg || null, // $7
+              item.volumeM3 || null, // $8
+              item.lengthCm || null, // $9
+              item.widthCm || null, // $10
+              item.heightCm || null, // $11
+              item.volumetricWeight || null, // $12
+              item.originStreet || null, // $13
+              item.originCity || null, // $14
+              item.originPostalCode || null, // $15
+              item.originCountry || null, // $16
+              item.destinationStreet || null, // $17
+              item.destinationCity || null, // $18
+              item.destinationPostalCode || null, // $19
+              item.destinationCountry || null, // $20
+              item.distanceKm || null, // $21
+              item.vehicleType || null, // $22
+              item.serviceType || null, // $23
+              item.currency || 'TND', // $24
+              conversionRate, // $25
+              item.unit || null, // $26
+              item.quantity, // $27
+              item.unitPrice || 0, // $28
+              sellingPrice, // $29
+              purchasePrice, // $30
+              totalPrice, // $31
+              margin, // $32
+              item.itemType || 'freight', // $33
+              item.lineOrder || (index + 1), // $34
+              item.notes || null, // $35
+              item.taxRate !== undefined ? item.taxRate : 19, // $36
+              item.taxAmount || 0, // $37
+              item.isTaxable !== undefined ? item.isTaxable : true, // $38
+              item.taxableAccount || null, // $39
+              item.nonTaxableAccount || null, // $40
+              item.isDebours !== undefined ? item.isDebours : false, // $41
+              item.caType || 'Oui' // $42
+            ]
+          );
+        }
+        
+        console.log(`✅ [CREATE] ${createQuoteDto.items.length} items créés`);
+      }
+
+      // Recalculer les totaux
+      await this.recalculateQuoteTotals(connection, savedQuote.id);
+
+      // 🎯 Générer le QR code après la sauvegarde
+      const fullQuote = await this.findOne(savedQuote.id, databaseName, organisationId);
+      const qrCode = await this.generateQRCode(fullQuote);
+      if (qrCode) {
+        await connection.query(
+          `UPDATE crm_quotes SET qr_code_data = $1 WHERE id = $2`,
+          [qrCode, savedQuote.id]
         );
       }
 
-      // Calculer les totaux
-      this.calculateTotals(quote);
-
-      // Sauvegarder
-      const savedQuote = await this.quoteRepository.save(quote);
-      
-      console.log('💾 [QuotesService.create] Quote sauvegardée avec succès:', {
-        id: savedQuote.id,
-        quoteNumber: savedQuote.quoteNumber,
-        createdBy: savedQuote.createdBy,
-        commercialId: savedQuote.commercialId,
-        commercialIds: savedQuote.commercialIds
-      });
-
-      // 🎯 Générer le QR code après la sauvegarde (on a besoin de l'ID)
-      const qrCode = await this.generateQRCode(savedQuote);
-      if (qrCode) {
-        savedQuote.qrCodeData = qrCode;
-        await this.quoteRepository.save(savedQuote);
+      // 🎯 SYNCHRONISATION: déplacer l'opportunité dans "proposal"
+      if (savedQuote.opportunity_id) {
+        await this.moveOpportunityToProposal(savedQuote.opportunity_id, databaseName);
       }
 
-      // 🎯 SYNCHRONISATION AUTOMATIQUE: Si cotation créée depuis opportunité, 
-      // déplacer l'opportunité dans la colonne "proposal"
-      if (savedQuote.opportunityId) {
-        await this.moveOpportunityToProposal(savedQuote.opportunityId);
-      }
-
-      return this.findOne(savedQuote.id);
+      return this.findOne(savedQuote.id, databaseName, organisationId);
     } catch (error) {
+      console.error('❌ [QuotesService.create] Erreur:', error);
       throw new InternalServerErrorException(
         `Erreur lors de la création du devis: ${error.message}`,
       );
@@ -334,11 +560,83 @@ export class QuotesService {
   }
 
   /**
+   * Recalculer les totaux d'un quote en SQL
+   */
+  private async recalculateQuoteTotals(connection: any, quoteId: number): Promise<void> {
+    const items = await connection.query(
+      `SELECT * FROM crm_quote_items WHERE quote_id = $1`,
+      [quoteId]
+    );
+
+    let freightPurchased = 0, freightOffered = 0;
+    let additionalCostsPurchased = 0, additionalCostsOffered = 0;
+    let taxAmount = 0;
+
+    for (const item of items) {
+      const conversionRate = item.conversion_rate || 1;
+      const totalPrice = item.quantity * (item.selling_price || item.unit_price) * conversionRate;
+      const margin = ((item.selling_price || item.unit_price) - (item.purchase_price || 0)) * conversionRate;
+
+      if (item.item_type === 'freight') {
+        freightPurchased += item.quantity * (item.purchase_price || 0) * conversionRate;
+        freightOffered += totalPrice;
+      } else if (item.item_type === 'additional_cost') {
+        additionalCostsPurchased += item.quantity * (item.purchase_price || 0) * conversionRate;
+        additionalCostsOffered += totalPrice;
+      }
+
+      // Calculer la TVA par ligne
+      if (item.is_taxable !== false) {
+        const taxRate = item.tax_rate || 19;
+        taxAmount += totalPrice * (taxRate / 100);
+      }
+    }
+
+    const totalOffers = freightOffered + additionalCostsOffered;
+    const totalPurchases = freightPurchased + additionalCostsPurchased;
+    const subtotal = totalOffers;
+    const total = subtotal + taxAmount;
+
+    await connection.query(
+      `UPDATE crm_quotes SET
+        subtotal = $1,
+        tax_amount = $2,
+        total = $3,
+        freight_purchased = $4,
+        freight_offered = $5,
+        freight_margin = $6,
+        additional_costs_purchased = $7,
+        additional_costs_offered = $8,
+        total_purchases = $9,
+        total_offers = $10,
+        total_margin = $11
+      WHERE id = $12`,
+      [
+        subtotal, taxAmount, total,
+        freightPurchased, freightOffered, freightOffered - freightPurchased,
+        additionalCostsPurchased, additionalCostsOffered,
+        totalPurchases, totalOffers, totalOffers - totalPurchases,
+        quoteId
+      ]
+    );
+  }
+
+  /**
    * Récupérer tous les devis avec filtres
    * ✅ CORRECTION: Retourne UNIQUEMENT les cotations NON-ARCHIVÉES par défaut
    * Pour les archivées, utiliser findAllArchived()
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    */
-  async findAll(filters: QuoteFilterDto): Promise<{ data: Quote[]; total: number }> {
+  async findAll(
+    filters: QuoteFilterDto,
+    databaseName: string,
+    organisationId: number
+  ): Promise<{ data: Quote[]; total: number }> {
+    console.log('🔍 [QuotesService.findAll] Début avec filtres:', filters);
+    console.log('🏢 [QuotesService.findAll] Multi-tenant:', { databaseName, organisationId });
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
     const {
       status,
       opportunityId,
@@ -355,132 +653,141 @@ export class QuotesService {
       type,
       page = 1,
       limit = 10,
-      sortBy = 'createdAt',
+      sortBy = 'created_at',
       sortOrder = 'DESC',
     } = filters;
 
-    // ✅ CORRECTION: Filtrer explicitement les cotations NON-ARCHIVÉES
     console.log('🔍 Backend: Récupération des cotations NON-ARCHIVÉES uniquement');
-    let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
     
-    // ✅ FILTRE ESSENTIEL: Exclure les archivées
-    queryBuilder.where('(quote.isArchived = false OR quote.isArchived IS NULL)');
-    queryBuilder.andWhere('quote.deletedAt IS NULL');
+    // Construction dynamique de la requête SQL
+    const params: any[] = [];
+    let paramIndex = 1;
     
-    // Joindre les relations nécessaires
-    queryBuilder
-      .leftJoinAndSelect('quote.items', 'items')
-      .leftJoinAndSelect('quote.creator', 'creator')
-      .leftJoinAndSelect('quote.updater', 'updater')
-      .leftJoinAndSelect('quote.commercial', 'commercial')
-      .leftJoinAndSelect('quote.opportunity', 'opportunity')
-      .leftJoinAndSelect('quote.lead', 'lead')
-      .leftJoinAndSelect('quote.client', 'client')
-      .leftJoinAndSelect('quote.approver', 'approver')
-      .leftJoinAndSelect('quote.armateur', 'armateur')
-      .leftJoinAndSelect('quote.navire', 'navire')
-      .leftJoinAndSelect('quote.portEnlevement', 'portEnlevement')
-      .leftJoinAndSelect('quote.portLivraison', 'portLivraison')
-      .leftJoinAndSelect('quote.aeroportEnlevement', 'aeroportEnlevement')
-      .leftJoinAndSelect('quote.aeroportLivraison', 'aeroportLivraison');
+    let sql = `
+      SELECT q.*,
+             l.company as lead_company, l.full_name as lead_name,
+             o.title as opportunity_title,
+             c.nom as client_db_name,
+             p.id as creator_id, p.nom as creator_nom, p.prenom as creator_prenom,
+             u.id as updater_id, u.nom as updater_nom, u.prenom as updater_prenom
+      FROM crm_quotes q
+      LEFT JOIN crm_leads l ON q.lead_id = l.id
+      LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+      LEFT JOIN client c ON q.client_id = c.id
+      LEFT JOIN personnel p ON q.created_by = p.id
+      LEFT JOIN personnel u ON q.updated_by = u.id
+      WHERE (q.is_archived = false OR q.is_archived IS NULL)
+        AND q.deleted_at IS NULL
+    `;
 
-    // Appliquer les filtres
-    if (status) queryBuilder.andWhere('quote.status = :status', { status });
-    if (opportunityId) queryBuilder.andWhere('quote.opportunityId = :opportunityId', { opportunityId });
-    if (leadId) queryBuilder.andWhere('quote.leadId = :leadId', { leadId });
-    if (clientId) queryBuilder.andWhere('quote.clientId = :clientId', { clientId });
-    
-    // ✅ CORRECTION: Filtrage commercial multi-système
-    // Prendre en compte commercialId ET commercialIds (nouveau système)
+    // Appliquer les filtres dynamiquement
+    if (status) {
+      sql += ` AND q.status = $${paramIndex++}`;
+      params.push(status);
+    }
+    if (opportunityId) {
+      sql += ` AND q.opportunity_id = $${paramIndex++}`;
+      params.push(opportunityId);
+    }
+    if (leadId) {
+      sql += ` AND q.lead_id = $${paramIndex++}`;
+      params.push(leadId);
+    }
+    if (clientId) {
+      sql += ` AND q.client_id = $${paramIndex++}`;
+      params.push(clientId);
+    }
     if (commercialId) {
-      queryBuilder.andWhere(
-        '(quote.commercialId = :commercialId OR :commercialId = ANY(quote.commercial_ids) OR (quote.commercialId IS NULL AND (quote.commercial_ids IS NULL OR array_length(quote.commercial_ids, 1) IS NULL)))',
-        { commercialId }
-      );
+      // Ne PAS inclure les cotations non assignées pour les commerciaux
+      sql += ` AND (q.commercial_id = $${paramIndex} OR $${paramIndex} = ANY(q.commercial_ids))`;
+      params.push(commercialId);
+      paramIndex++;
     }
-
-    // Recherche dynamique dans plusieurs champs
     if (search) {
-      queryBuilder.andWhere(
-        '(quote.quoteNumber LIKE :search OR ' +
-        'LOWER(quote.clientName) LIKE LOWER(:search) OR ' +
-        'LOWER(quote.clientCompany) LIKE LOWER(:search) OR ' +
-        'LOWER(quote.title) LIKE LOWER(:search) OR ' +
-        'LOWER(quote.clientEmail) LIKE LOWER(:search))',
-        { search: `%${search}%` }
-      );
+      sql += ` AND (
+        q.quote_number ILIKE $${paramIndex} OR
+        q.client_name ILIKE $${paramIndex} OR
+        q.client_company ILIKE $${paramIndex} OR
+        q.title ILIKE $${paramIndex} OR
+        q.client_email ILIKE $${paramIndex}
+      )`;
+      params.push(`%${search}%`);
+      paramIndex++;
     }
-
-    // Filtres de dates
     if (startDate && endDate) {
-      queryBuilder.andWhere('quote.createdAt BETWEEN :startDate AND :endDate', {
-        startDate,
-        endDate,
-      });
+      sql += ` AND q.created_at BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(startDate, endDate);
     }
-
-    // Filtre par montant total TTC
     if (minTotal !== undefined) {
-      queryBuilder.andWhere('quote.total >= :minTotal', { minTotal });
+      sql += ` AND q.total >= $${paramIndex++}`;
+      params.push(minTotal);
     }
     if (maxTotal !== undefined) {
-      queryBuilder.andWhere('quote.total <= :maxTotal', { maxTotal });
+      sql += ` AND q.total <= $${paramIndex++}`;
+      params.push(maxTotal);
     }
-
-    // Filtre par import/export
     if (importExport) {
-      queryBuilder.andWhere('quote.import_export = :importExport', { importExport });
+      sql += ` AND q.import_export = $${paramIndex++}`;
+      params.push(importExport);
     }
-
-    // Filtre par mode de paiement
     if (paymentMethod) {
-      queryBuilder.andWhere('quote.payment_method = :paymentMethod', { paymentMethod });
+      sql += ` AND q.payment_method = $${paramIndex++}`;
+      params.push(paymentMethod);
+    }
+    if (type) {
+      sql += ` AND q.type = $${paramIndex++}`;
+      params.push(type);
     }
 
-    // Filtre par type (cotation / fiche_dossier)
-    if (type) {
-      queryBuilder.andWhere('quote.type = :type', { type });
-    }
+    // Compte total
+    const countSql = `SELECT COUNT(*) as total FROM (${sql}) as count_query`;
+    const [{ total }] = await connection.query(countSql, params);
 
     // Tri et pagination
-    queryBuilder
-      .orderBy(`quote.${sortBy}`, sortOrder as 'ASC' | 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+    const orderColumn = sortBy === 'createdAt' ? 'created_at' : 
+                       sortBy === 'updatedAt' ? 'updated_at' : sortBy;
+    sql += ` ORDER BY q.${orderColumn} ${sortOrder}`;
+    sql += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, (page - 1) * limit);
 
-    const [data, total] = await queryBuilder.getManyAndCount();
+    const data = await connection.query(sql, params);
 
-    // ✅ Charger les commerciaux assignés pour toutes les cotations
-    if (data && data.length > 0) {
-      const { Personnel } = await import('../../entities/personnel.entity');
-      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
+    // Charger les items pour chaque quote
+    for (const quote of data) {
+      quote.items = await connection.query(
+        `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY line_order, id`,
+        [quote.id]
+      );
       
-      for (const quote of data) {
-        if (quote.commercialIds && quote.commercialIds.length > 0) {
-          const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
-          // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
-          quote.assignedCommercials = fullPersonnel.map(p => ({
-            id: p.id,
-            nom: p.nom,
-            prenom: p.prenom,
-            nom_utilisateur: p.nom_utilisateur,
-            email: p.email,
-            telephone: p.telephone,
-            role: p.role
-          })) as any;
-        }
+      // Charger les commerciaux assignés
+      if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+        const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+          ? JSON.parse(quote.commercial_ids) 
+          : quote.commercial_ids;
+        
+        const commercials = await connection.query(
+          `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+           FROM personnel
+           WHERE id = ANY($1)`,
+          [commercialIdsArray]
+        );
+        quote.assignedCommercials = commercials;
       }
     }
 
     console.log(`✅ Backend retourne ${data.length} cotations NON-ARCHIVÉES (total: ${total})`);
-    return { data, total };
+    return { 
+      data: data.map(quote => this.transformQuoteToCamelCase(quote)), 
+      total: parseInt(total) 
+    };
   }
 
   /**
    * 📋 Récupérer UNIQUEMENT les cotations archivées avec filtres
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    * ✅ NOUVELLE MÉTHODE pour séparer les archivées des non-archivées
    */
-  async findAllArchived(filters?: QuoteFilterDto) {
+  async findAllArchived(filters: QuoteFilterDto, databaseName: string, organisationId: number) {
     const {
       status,
       commercialId,
@@ -490,205 +797,440 @@ export class QuotesService {
       type,
       page = 1,
       limit = 25,
-      sortBy = 'deletedAt',
+      sortBy = 'deleted_at',
       sortOrder = 'DESC',
     } = filters || {};
 
     console.log('🗄️ Backend: Récupération des cotations ARCHIVÉES uniquement');
 
-    const query = this.quoteRepository
-      .createQueryBuilder('quote')
-      .leftJoinAndSelect('quote.lead', 'lead')
-      .leftJoinAndSelect('quote.opportunity', 'opportunity')
-      .leftJoinAndSelect('quote.client', 'client')
-      .leftJoinAndSelect('quote.creator', 'creator')
-      .leftJoinAndSelect('quote.updater', 'updater')
-      .leftJoinAndSelect('quote.commercial', 'commercial')
-      .leftJoinAndSelect('quote.items', 'items')
-      .withDeleted() // ✅ Inclure les soft-deleted
-      .where('quote.deleted_at IS NOT NULL'); // ✅ Filtrer uniquement les archivées
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const params: any[] = [];
+    let paramIndex = 1;
 
-    // Appliquer les filtres optionnels
-    // ✅ CORRECTION: Filtrage commercial multi-système pour les archivées
+    let sql = `
+      SELECT q.*,
+             l.company as lead_company, l.full_name as lead_name,
+             o.title as opportunity_title,
+             c.nom as client_db_name, c.interlocuteur as client_prenom,
+             p.id as creator_id, p.nom as creator_nom, p.prenom as creator_prenom,
+             u.id as updater_id, u.nom as updater_nom, u.prenom as updater_prenom
+      FROM crm_quotes q
+      LEFT JOIN crm_leads l ON q.lead_id = l.id
+      LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+      LEFT JOIN client c ON q.client_id = c.id
+      LEFT JOIN personnel p ON q.created_by = p.id
+      LEFT JOIN personnel u ON q.updated_by = u.id
+      WHERE q.deleted_at IS NOT NULL
+    `;
+
+    // Appliquer les filtres
     if (commercialId) {
-      query.andWhere(
-        '(quote.commercialId = :commercialId OR :commercialId = ANY(quote.commercial_ids) OR (quote.commercialId IS NULL AND (quote.commercial_ids IS NULL OR array_length(quote.commercial_ids, 1) IS NULL)))',
-        { commercialId }
-      );
+      sql += ` AND (q.commercial_id = $${paramIndex} OR $${paramIndex} = ANY(q.commercial_ids))`;
+      params.push(commercialId);
+      paramIndex++;
     }
-
     if (status) {
-      query.andWhere('quote.status = :status', { status });
+      sql += ` AND q.status = $${paramIndex++}`;
+      params.push(status);
     }
-
     if (search) {
-      query.andWhere(
-        '(quote.quoteNumber LIKE :search OR ' +
-        'LOWER(quote.clientName) LIKE LOWER(:search) OR ' +
-        'LOWER(quote.clientCompany) LIKE LOWER(:search) OR ' +
-        'LOWER(quote.title) LIKE LOWER(:search))',
-        { search: `%${search}%` }
-      );
+      sql += ` AND (
+        q.quote_number ILIKE $${paramIndex} OR
+        q.client_name ILIKE $${paramIndex} OR
+        q.client_company ILIKE $${paramIndex} OR
+        q.title ILIKE $${paramIndex}
+      )`;
+      params.push(`%${search}%`);
+      paramIndex++;
     }
-
     if (startDate && endDate) {
-      query.andWhere('quote.deletedAt BETWEEN :startDate AND :endDate', {
-        startDate,
-        endDate,
-      });
+      sql += ` AND q.deleted_at BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(startDate, endDate);
     }
-
-    // Filtre par type (cotation / fiche_dossier)
     if (type) {
-      query.andWhere('quote.type = :type', { type });
+      sql += ` AND q.type = $${paramIndex++}`;
+      params.push(type);
     }
 
-    // Pagination et tri
-    query
-      .orderBy(`quote.${sortBy}`, sortOrder as 'ASC' | 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+    // Compte total
+    const countSql = `SELECT COUNT(*) as total FROM (${sql}) as count_query`;
+    const [{ total }] = await connection.query(countSql, params);
 
-    const [data, total] = await query.getManyAndCount();
+    // Tri et pagination
+    const orderColumn = sortBy === 'deletedAt' ? 'deleted_at' : 
+                       sortBy === 'createdAt' ? 'created_at' : sortBy;
+    sql += ` ORDER BY q.${orderColumn} ${sortOrder}`;
+    sql += ` LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(limit, (page - 1) * limit);
 
-    // ✅ Charger les commerciaux assignés pour toutes les cotations archivées
-    if (data && data.length > 0) {
-      const { Personnel } = await import('../../entities/personnel.entity');
-      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
+    const data = await connection.query(sql, params);
+
+    // Charger les items pour chaque quote
+    for (const quote of data) {
+      quote.items = await connection.query(
+        `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY line_order, id`,
+        [quote.id]
+      );
       
-      for (const quote of data) {
-        if (quote.commercialIds && quote.commercialIds.length > 0) {
-          const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
-          // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
-          quote.assignedCommercials = fullPersonnel.map(p => ({
-            id: p.id,
-            nom: p.nom,
-            prenom: p.prenom,
-            nom_utilisateur: p.nom_utilisateur,
-            email: p.email,
-            telephone: p.telephone,
-            role: p.role
-          })) as any;
-        }
+      // Charger les commerciaux assignés
+      if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+        const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+          ? JSON.parse(quote.commercial_ids) 
+          : quote.commercial_ids;
+        
+        const commercials = await connection.query(
+          `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+           FROM personnel
+           WHERE id = ANY($1)`,
+          [commercialIdsArray]
+        );
+        quote.assignedCommercials = commercials;
       }
     }
 
     console.log(`✅ Backend retourne ${data.length} cotations ARCHIVÉES (total: ${total})`);
-    return { data, total };
+    return { 
+      data: data.map(quote => this.transformQuoteToCamelCase(quote)), 
+      total: parseInt(total) 
+    };
   }
 
   /**
    * Récupérer un devis par ID
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    * ✅ CORRECTION: Charger les commerciaux assignés depuis commercialIds
    */
-  async findOne(id: number): Promise<Quote> {
-    const quote = await this.quoteRepository.findOne({
-      where: { id },
-      relations: [
-        'items',
-        'creator',
-        'updater',
-        'commercial',
-        'opportunity',
-        'lead',
-        'client',
-        'approver',
-        'activities',
-        'armateur',
-        'navire',
-        'portEnlevement',
-        'portLivraison',
-        'aeroportEnlevement',
-        'aeroportLivraison',
-      ],
-    });
+  async findOne(id: number, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const quotes = await connection.query(
+      `SELECT q.*,
+              l.company as lead_company, l.full_name as lead_name,
+              o.title as opportunity_title,
+              c.nom as client_db_name, c.interlocuteur as client_prenom,
+              p.id as creator_id, p.nom as creator_nom, p.prenom as creator_prenom,
+              u.id as updater_id, u.nom as updater_nom, u.prenom as updater_prenom,
+              arm.nom as armateur_name,
+              nav.libelle as navire_name,
+              pe.libelle as port_enlevement_name,
+              pl.libelle as port_livraison_name,
+              ae.libelle as aeroport_enlevement_name,
+              al.libelle as aeroport_livraison_name
+       FROM crm_quotes q
+       LEFT JOIN crm_leads l ON q.lead_id = l.id
+       LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+       LEFT JOIN client c ON q.client_id = c.id
+       LEFT JOIN personnel p ON q.created_by = p.id
+       LEFT JOIN personnel u ON q.updated_by = u.id
+       LEFT JOIN armateurs arm ON q.armateur_id = arm.id
+       LEFT JOIN navires nav ON q.navire_id = nav.id
+       LEFT JOIN ports pe ON q.port_enlevement_id = pe.id
+       LEFT JOIN ports pl ON q.port_livraison_id = pl.id
+       LEFT JOIN aeroports ae ON q.aeroport_enlevement_id = ae.id
+       LEFT JOIN aeroports al ON q.aeroport_livraison_id = al.id
+       WHERE q.id = $1`,
+      [id]
+    );
 
-    if (!quote) {
+    if (!quotes || quotes.length === 0) {
       throw new NotFoundException(`Devis avec l'ID ${id} introuvable`);
     }
 
+    const quote = quotes[0];
+
+    // Charger les items
+    quote.items = await connection.query(
+      `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY id`,
+      [id]
+    );
+
     // ✅ Charger les commerciaux assignés depuis commercialIds
-    if (quote.commercialIds && quote.commercialIds.length > 0) {
-      const { Repository } = await import('typeorm');
-      const { Personnel } = await import('../../entities/personnel.entity');
-      const { InjectRepository } = await import('@nestjs/typeorm');
+    if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+      const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+        ? JSON.parse(quote.commercial_ids) 
+        : quote.commercial_ids;
       
-      // Utiliser le repository pour charger les commerciaux
-      const personnelRepo = this.quoteRepository.manager.getRepository(Personnel);
-      const fullPersonnel = await personnelRepo.findByIds(quote.commercialIds);
-      
-      // ✅ CORRECTION: Sérialiser pour éviter les conflits avec les propriétés first_*, last_*
-      quote.assignedCommercials = fullPersonnel.map(p => ({
-        id: p.id,
-        nom: p.nom,
-        prenom: p.prenom,
-        nom_utilisateur: p.nom_utilisateur,
-        email: p.email,
-        telephone: p.telephone,
-        role: p.role
-      })) as any;
-      
-      console.log(`✅ ${quote.assignedCommercials.length} commerciaux chargés pour cotation ${quote.quoteNumber}`);
+      const commercials = await connection.query(
+        `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+         FROM personnel
+         WHERE id = ANY($1)`,
+        [commercialIdsArray]
+      );
+      quote.assignedCommercials = commercials;
+      console.log(`✅ ${commercials.length} commerciaux chargés pour cotation ${quote.quote_number}`);
     }
 
-    // ✅ Trier les items par ID croissant pour garantir l'ordre d'affichage
-    if (quote.items && quote.items.length > 0) {
-      quote.items.sort((a, b) => (a.id || 0) - (b.id || 0));
-      console.log(`✅ Items triés par ID croissant pour cotation ${quote.quoteNumber}`);
-    }
-
-    return quote;
+    console.log(`✅ Items triés par ID croissant pour cotation ${quote.quote_number}`);
+    return this.transformQuoteToCamelCase(quote);
   }
 
   /**
    * Récupérer un devis par numéro
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    */
-  async findByQuoteNumber(quoteNumber: string): Promise<Quote> {
-    const quote = await this.quoteRepository.findOne({
-      where: { quoteNumber },
-      relations: [
-        'items',
-        'creator',
-        'updater',
-        'commercial',
-        'opportunity',
-        'lead',
-        'client',
-        'approver',
-        'armateur',
-        'navire',
-        'portEnlevement',
-        'portLivraison',
-        'aeroportEnlevement',
-        'aeroportLivraison',
-      ],
-    });
+  async findByQuoteNumber(quoteNumber: string, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const quotes = await connection.query(
+      `SELECT q.*,
+              l.company as lead_company, l.full_name as lead_name,
+              o.title as opportunity_title,
+              c.nom as client_db_name, c.interlocuteur as client_prenom,
+              p.id as creator_id, p.nom as creator_nom, p.prenom as creator_prenom,
+              u.id as updater_id, u.nom as updater_nom, u.prenom as updater_prenom,
+              arm.nom as armateur_name,
+              nav.libelle as navire_name,
+              pe.libelle as port_enlevement_name,
+              pl.libelle as port_livraison_name,
+              ae.libelle as aeroport_enlevement_name,
+              al.libelle as aeroport_livraison_name
+       FROM crm_quotes q
+       LEFT JOIN crm_leads l ON q.lead_id = l.id
+       LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+       LEFT JOIN client c ON q.client_id = c.id
+       LEFT JOIN personnel p ON q.created_by = p.id
+       LEFT JOIN personnel u ON q.updated_by = u.id
+       LEFT JOIN armateurs arm ON q.armateur_id = arm.id
+       LEFT JOIN navires nav ON q.navire_id = nav.id
+       LEFT JOIN ports pe ON q.port_enlevement_id = pe.id
+       LEFT JOIN ports pl ON q.port_livraison_id = pl.id
+       LEFT JOIN aeroports ae ON q.aeroport_enlevement_id = ae.id
+       LEFT JOIN aeroports al ON q.aeroport_livraison_id = al.id
+       WHERE q.quote_number = $1`,
+      [quoteNumber]
+    );
 
-    if (!quote) {
+    if (!quotes || quotes.length === 0) {
       throw new NotFoundException(`Devis ${quoteNumber} introuvable`);
     }
 
-    // ✅ Trier les items par lineOrder croissant pour garantir l'ordre de présentation
-    if (quote.items && quote.items.length > 0) {
-      quote.items.sort((a, b) => (a.lineOrder || 0) - (b.lineOrder || 0));
-      console.log(`✅ Items triés par lineOrder croissant pour cotation ${quoteNumber}`);
+    const quote = quotes[0];
+
+    // Charger les items triés par lineOrder et ID
+    quote.items = await connection.query(
+      `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY line_order, id`,
+      [quote.id]
+    );
+
+    // ✅ Charger les commerciaux assignés depuis commercialIds
+    if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+      const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+        ? JSON.parse(quote.commercial_ids) 
+        : quote.commercial_ids;
+      
+      const commercials = await connection.query(
+        `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+         FROM personnel
+         WHERE id = ANY($1)`,
+        [commercialIdsArray]
+      );
+      quote.assignedCommercials = commercials;
     }
 
-    // ✅ Trier les items par ID croissant pour garantir l'ordre d'affichage
-    if (quote.items && quote.items.length > 0) {
-      quote.items.sort((a, b) => (a.id || 0) - (b.id || 0));
-      console.log(`✅ Items triés par ID croissant pour cotation ${quote.quoteNumber}`);
+    console.log(`✅ Items triés par lineOrder et ID pour cotation ${quoteNumber}`);
+    return this.transformQuoteToCamelCase(quote);
+  }
+
+  /**
+   * 🌐 Récupérer un devis par UUID ou ID (ROUTE PUBLIQUE - Sans authentification)
+   * ✅ Détecte automatiquement si c'est un UUID ou un ID
+   * ✅ Cherche dans toutes les bases de données jusqu'à trouver la cotation
+   * ✅ Récupère automatiquement les informations de l'organisation
+   * ✅ Pas besoin de table centrale - l'UUID est unique globalement
+   * ✅ Récupère dynamiquement la liste des bases depuis la table organisations
+   */
+  async findOnePublic(identifier: string): Promise<any> {
+    // Détecter si c'est un UUID ou un ID
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const isId = /^\d+$/.test(identifier);
+    
+    if (!isUuid && !isId) {
+      throw new BadRequestException('L\'identifiant doit être un UUID ou un ID numérique');
+    }
+    
+    console.log(`🔍 [findOnePublic] Recherche cotation par ${isUuid ? 'UUID' : 'ID'}: ${identifier}`);
+    // Étape 1: Récupérer la liste de toutes les bases de données depuis organisations (base centrale shipnology)
+    const shipnologyConnection = await this.databaseConnectionService.getOrganisationConnection('shipnology');
+    const orgsResult = await shipnologyConnection.query(
+      `SELECT DISTINCT database_name FROM organisations WHERE database_name IS NOT NULL AND database_name != '' ORDER BY database_name`
+    );
+    
+    let databases = orgsResult.map((org: any) => org.database_name);
+    
+    // ✅ FALLBACK: Ajouter les bases principales si elles ne sont pas dans la table organisations
+    const mainDatabases = ['velosi', 'danino'];
+    for (const mainDb of mainDatabases) {
+      if (!databases.includes(mainDb)) {
+        databases.push(mainDb);
+      }
+    }
+    
+    console.log(`🔍 [findOnePublic] Recherche dans ${databases.length} bases:`, databases);
+    
+    let quote = null;
+    let foundDatabase = null;
+    let organisation = null;
+
+    // Étape 2: Chercher dans toutes les bases jusqu'à trouver l'UUID
+    for (const dbName of databases) {
+      try {
+        const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
+        
+        // Construire la requête selon le type d'identifiant
+        const whereClause = isUuid ? 'q.uuid = $1' : 'q.id = $1';
+        const paramValue = isUuid ? identifier : parseInt(identifier, 10);
+        
+        const quotes = await connection.query(
+          `SELECT q.*,
+                  l.company as lead_company, l.full_name as lead_name,
+                  o.title as opportunity_title,
+                  c.nom as client_db_name, c.interlocuteur as client_prenom,
+                  p.nom as creator_nom, p.prenom as creator_prenom,
+                  u.nom as updater_nom, u.prenom as updater_prenom,
+                  arm.nom as armateur_name,
+                  nav.libelle as navire_name,
+                  pe.libelle as port_enlevement_name,
+                  pl.libelle as port_livraison_name,
+                  ae.libelle as aeroport_enlevement_name,
+                  al.libelle as aeroport_livraison_name
+           FROM crm_quotes q
+           LEFT JOIN crm_leads l ON q.lead_id = l.id
+           LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+           LEFT JOIN client c ON q.client_id = c.id
+           LEFT JOIN personnel p ON q.created_by = p.id
+           LEFT JOIN personnel u ON q.updated_by = u.id
+           LEFT JOIN armateurs arm ON q.armateur_id = arm.id
+           LEFT JOIN navires nav ON q.navire_id = nav.id
+           LEFT JOIN ports pe ON q.port_enlevement_id = pe.id
+           LEFT JOIN ports pl ON q.port_livraison_id = pl.id
+           LEFT JOIN aeroports ae ON q.aeroport_enlevement_id = ae.id
+           LEFT JOIN aeroports al ON q.aeroport_livraison_id = al.id
+           WHERE ${whereClause}
+           LIMIT 1`,
+          [paramValue]
+        );
+
+        if (quotes && quotes.length > 0) {
+          quote = quotes[0];
+          foundDatabase = dbName;
+          
+          // Charger les items
+          quote.items = await connection.query(
+            `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY line_order, id`,
+            [quote.id]
+          );
+
+          // Charger les commerciaux assignés
+          if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+            const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+              ? JSON.parse(quote.commercial_ids) 
+              : quote.commercial_ids;
+            
+            const commercials = await connection.query(
+              `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+               FROM personnel
+               WHERE id = ANY($1)`,
+              [commercialIdsArray]
+            );
+            quote.assignedCommercials = commercials;
+          }
+
+          console.log(`✅ [findOnePublic] Cotation ${quote.quote_number} trouvée dans: ${dbName}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`ℹ️ [findOnePublic] Cotation non trouvée dans ${dbName}`);
+      }
     }
 
-    return quote;
+    if (!quote) {
+      throw new NotFoundException(`Cotation avec ${isUuid ? 'UUID' : 'ID'} ${identifier} introuvable`);
+    }
+
+    // Étape 3: Récupérer les informations de l'organisation depuis shipnology
+    const organisations = await shipnologyConnection.query(
+      `SELECT id, nom, nom_affichage, slug, adresse, telephone, logo_url, database_name
+       FROM organisations WHERE id = $1`,
+      [quote.organisation_id || 1]
+    );
+
+    organisation = organisations.length > 0 ? organisations[0] : null;
+
+    // Étape 3: Transformer et ajouter les informations de l'organisation
+    const transformedQuote = this.transformQuoteToCamelCase(quote);
+    transformedQuote.organisation = organisation;
+
+    console.log(`✅ Cotation publique ${quote.quote_number} (${isUuid ? 'UUID' : 'ID'}: ${identifier}) récupérée avec organisation:`, organisation?.nom || 'N/A');
+    
+    return transformedQuote;
+  }
+
+  /**
+   * Récupérer un devis par numéro
+              pe.libelle as port_enlevement_name,
+              pl.libelle as port_livraison_name,
+              ae.libelle as aeroport_enlevement_name,
+              al.libelle as aeroport_livraison_name
+       FROM crm_quotes q
+       LEFT JOIN crm_leads l ON q.lead_id = l.id
+       LEFT JOIN crm_opportunities o ON q.opportunity_id = o.id
+       LEFT JOIN client c ON q.client_id = c.id
+       LEFT JOIN personnel p ON q.created_by = p.id
+       LEFT JOIN personnel u ON q.updated_by = u.id
+       LEFT JOIN armateurs arm ON q.armateur_id = arm.id
+       LEFT JOIN navires nav ON q.navire_id = nav.id
+       LEFT JOIN ports pe ON q.port_enlevement_id = pe.id
+       LEFT JOIN ports pl ON q.port_livraison_id = pl.id
+       LEFT JOIN aeroports ae ON q.aeroport_enlevement_id = ae.id
+       LEFT JOIN aeroports al ON q.aeroport_livraison_id = al.id
+       WHERE q.id = $1`,
+      [id]
+    );
+
+    if (!quotes || quotes.length === 0) {
+      throw new NotFoundException(`Cotation avec l'ID ${id} introuvable`);
+    }
+
+    const quote = quotes[0];
+
+    // Étape 6: Charger les items
+    quote.items = await connection.query(
+      `SELECT * FROM crm_quote_items WHERE quote_id = $1 ORDER BY line_order, id`,
+      [id]
+    );
+
+    // Étape 7: Charger les commerciaux assignés
+    if (quote.commercial_ids && quote.commercial_ids.length > 0) {
+      const commercialIdsArray = typeof quote.commercial_ids === 'string' 
+        ? JSON.parse(quote.commercial_ids) 
+        : quote.commercial_ids;
+      
+      const commercials = await connection.query(
+        `SELECT id, nom, prenom, nom_utilisateur, email, telephone, role
+         FROM personnel
+         WHERE id = ANY($1)`,
+        [commercialIdsArray]
+      );
+      quote.assignedCommercials = commercials;
+    }
+
+    // Étape 8: Transformer et ajouter les informations de l'organisation
+    const transformedQuote = this.transformQuoteToCamelCase(quote);
+    transformedQuote.organisation = organisation;
+
+    console.log(`✅ Cotation publique ${id} récupérée avec organisation:`, organisation?.nom || 'N/A');
+    
+    return transformedQuote;
   }
 
   /**
    * Mettre à jour un devis
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    * ✅ CORRECTION: Gérer la mise à jour des commerciaux multi-assignés
    */
-  async update(id: number, updateQuoteDto: UpdateQuoteDto): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async update(id: number, updateQuoteDto: UpdateQuoteDto, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const quote = await this.findOne(id, databaseName, organisationId);
 
     console.log('🔄 [UPDATE] Données reçues pour mise à jour:', {
       id,
@@ -697,20 +1239,32 @@ export class QuotesService {
       clientId: updateQuoteDto.clientId,
       commercialIds: updateQuoteDto.commercialIds,
       commercialId: updateQuoteDto.commercialId,
-      updatedBy: updateQuoteDto.updatedBy, // 🆕 LOG pour debug
-      armateurId: updateQuoteDto.armateurId,
-      navireId: updateQuoteDto.navireId,
-      portEnlevementId: updateQuoteDto.portEnlevementId,
-      portLivraisonId: updateQuoteDto.portLivraisonId,
-      aeroportEnlevementId: updateQuoteDto.aeroportEnlevementId,
-      aeroportLivraisonId: updateQuoteDto.aeroportLivraisonId,
-      hbl: updateQuoteDto.hbl,
-      mbl: updateQuoteDto.mbl,
-      condition: updateQuoteDto.condition,
+      updatedBy: updateQuoteDto.updatedBy,
+      itemsPresent: !!updateQuoteDto.items,
+      itemsLength: updateQuoteDto.items?.length || 0,
     });
 
+    // 🔍 LOG DÉTAILLÉ DES ITEMS REÇUS
+    if (updateQuoteDto.items) {
+      console.log('📦 [UPDATE] Items reçus du frontend:', JSON.stringify(updateQuoteDto.items, null, 2));
+      // Log détaillé de chaque item
+      updateQuoteDto.items.forEach((item, idx) => {
+        console.log(`📦 [UPDATE] Item ${idx}:`, {
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          sellingPrice: item.sellingPrice,
+          purchasePrice: item.purchasePrice,
+          itemType: item.itemType,
+          currency: item.currency,
+          conversionRate: item.conversionRate,
+        });
+      });
+    } else {
+      console.log('⚠️ [UPDATE] AUCUN item reçu du frontend - les items ne seront PAS mis à jour');
+    }
+
     // Vérifier que le devis peut être modifié
-    // ✅ EXCEPTION: Les fiches dossier (type='fiche_dossier') peuvent toujours être modifiées
     const isFicheDossier = quote.type === 'fiche_dossier';
     if (!isFicheDossier && [QuoteStatus.ACCEPTED, QuoteStatus.EXPIRED, QuoteStatus.CANCELLED].includes(quote.status)) {
       throw new BadRequestException(
@@ -718,324 +1272,239 @@ export class QuotesService {
       );
     }
 
-    // ✅ Gérer la mise à jour des commerciaux (nouveau système multi-commerciaux)
-    if (updateQuoteDto.commercialIds && updateQuoteDto.commercialIds.length > 0) {
-      quote.commercialIds = updateQuoteDto.commercialIds;
-      quote.commercialId = updateQuoteDto.commercialIds[0]; // Premier commercial pour compatibilité
-      console.log(`✅ ${updateQuoteDto.commercialIds.length} commerciaux assignés`);
-    } else if (updateQuoteDto.commercialId) {
-      // Fallback: ancien système avec commercialId unique
-      quote.commercialIds = [updateQuoteDto.commercialId];
-      quote.commercialId = updateQuoteDto.commercialId;
-      console.log(`✅ 1 commercial assigné (ancien système)`);
-    }
+    // Construction dynamique de la requête UPDATE
+    const fields: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
 
-    // 🎯 FIX CRITIQUE: Décharger les relations TypeORM AVANT d'assigner les nouveaux IDs
-    // TypeORM peut réinitialiser les IDs de clés étrangères lors de la sauvegarde si les objets relation sont chargés
-    // On doit donc les mettre à undefined pour forcer TypeORM à utiliser les IDs numériques
-    if ('leadId' in updateQuoteDto) {
-      quote.lead = undefined;
-      quote.leadId = updateQuoteDto.leadId;
-      console.log('🔧 [UPDATE] Déchargement relation lead + assignation leadId:', updateQuoteDto.leadId);
-    }
-    if ('opportunityId' in updateQuoteDto) {
-      quote.opportunity = undefined;
-      quote.opportunityId = updateQuoteDto.opportunityId;
-      console.log('🔧 [UPDATE] Déchargement relation opportunity + assignation opportunityId:', updateQuoteDto.opportunityId);
-    }
-    if ('clientId' in updateQuoteDto) {
-      quote.client = undefined;
-      quote.clientId = updateQuoteDto.clientId;
-      console.log('🔧 [UPDATE] Déchargement relation client + assignation clientId:', updateQuoteDto.clientId);
-    }
-
-    // 🆕 FIX CRITIQUE: Décharger la relation updater pour éviter les conflits avec updatedBy
-    if ('updatedBy' in updateQuoteDto) {
-      quote.updater = undefined;
-      quote.updatedBy = updateQuoteDto.updatedBy;
-      console.log('🔧 [UPDATE] Déchargement relation updater + assignation updatedBy:', updateQuoteDto.updatedBy);
-    }
-
-    // 🆕 FIX: Décharger les relations de transport (armateur, navire, ports, aéroports)
-    if ('armateurId' in updateQuoteDto) {
-      quote.armateur = undefined;
-      quote.armateurId = updateQuoteDto.armateurId;
-      console.log('🔧 [UPDATE] Déchargement relation armateur + assignation armateurId:', updateQuoteDto.armateurId);
-    }
-    if ('navireId' in updateQuoteDto) {
-      quote.navire = undefined;
-      quote.navireId = updateQuoteDto.navireId;
-      console.log('🔧 [UPDATE] Déchargement relation navire + assignation navireId:', updateQuoteDto.navireId);
-    }
-    if ('portEnlevementId' in updateQuoteDto) {
-      quote.portEnlevement = undefined;
-      quote.portEnlevementId = updateQuoteDto.portEnlevementId;
-      console.log('🔧 [UPDATE] Déchargement relation portEnlevement + assignation portEnlevementId:', updateQuoteDto.portEnlevementId);
-    }
-    if ('portLivraisonId' in updateQuoteDto) {
-      quote.portLivraison = undefined;
-      quote.portLivraisonId = updateQuoteDto.portLivraisonId;
-      console.log('🔧 [UPDATE] Déchargement relation portLivraison + assignation portLivraisonId:', updateQuoteDto.portLivraisonId);
-    }
-    if ('aeroportEnlevementId' in updateQuoteDto) {
-      quote.aeroportEnlevement = undefined;
-      quote.aeroportEnlevementId = updateQuoteDto.aeroportEnlevementId;
-      console.log('🔧 [UPDATE] Déchargement relation aeroportEnlevement + assignation aeroportEnlevementId:', updateQuoteDto.aeroportEnlevementId);
-    }
-    if ('aeroportLivraisonId' in updateQuoteDto) {
-      quote.aeroportLivraison = undefined;
-      quote.aeroportLivraisonId = updateQuoteDto.aeroportLivraisonId;
-      console.log('🔧 [UPDATE] Déchargement relation aeroportLivraison + assignation aeroportLivraisonId:', updateQuoteDto.aeroportLivraisonId);
-    }
-
-    // Mettre à jour les champs principaux (SAUF les IDs de relation qui sont déjà traités)
-    const { 
-      leadId, 
-      opportunityId, 
-      clientId, 
-      armateurId, 
-      navireId, 
-      portEnlevementId, 
-      portLivraisonId, 
-      aeroportEnlevementId, 
-      aeroportLivraisonId,
-      updatedBy, // Exclure updatedBy qui est déjà géré plus haut
-      ...otherFields 
-    } = updateQuoteDto;
-    Object.assign(quote, otherFields);
+    // Champs simples
+    if (updateQuoteDto.title !== undefined) { fields.push(`title = $${paramIndex++}`); params.push(updateQuoteDto.title); }
+    if (updateQuoteDto.status !== undefined) { fields.push(`status = $${paramIndex++}`); params.push(updateQuoteDto.status); }
+    if (updateQuoteDto.validUntil !== undefined) { fields.push(`valid_until = $${paramIndex++}`); params.push(updateQuoteDto.validUntil); }
+    if (updateQuoteDto.clientName !== undefined) { fields.push(`client_name = $${paramIndex++}`); params.push(updateQuoteDto.clientName); }
+    if (updateQuoteDto.clientCompany !== undefined) { fields.push(`client_company = $${paramIndex++}`); params.push(updateQuoteDto.clientCompany); }
+    if (updateQuoteDto.clientEmail !== undefined) { fields.push(`client_email = $${paramIndex++}`); params.push(updateQuoteDto.clientEmail); }
+    if (updateQuoteDto.clientPhone !== undefined) { fields.push(`client_phone = $${paramIndex++}`); params.push(updateQuoteDto.clientPhone); }
+    if (updateQuoteDto.clientAddress !== undefined) { fields.push(`client_address = $${paramIndex++}`); params.push(updateQuoteDto.clientAddress); }
+    if (updateQuoteDto.notes !== undefined) { fields.push(`notes = $${paramIndex++}`); params.push(updateQuoteDto.notes); }
+    if (updateQuoteDto.taxRate !== undefined) { fields.push(`tax_rate = $${paramIndex++}`); params.push(updateQuoteDto.taxRate); }
     
-    console.log('✅ [UPDATE] Quote après Object.assign:', {
-      leadId: quote.leadId,
-      opportunityId: quote.opportunityId,
-      clientId: quote.clientId,
-      commercialIds: quote.commercialIds,
-      armateurId: quote.armateurId,
-      navireId: quote.navireId,
-      portEnlevementId: quote.portEnlevementId,
-      portLivraisonId: quote.portLivraisonId,
-      aeroportEnlevementId: quote.aeroportEnlevementId,
-      aeroportLivraisonId: quote.aeroportLivraisonId,
-      hbl: quote.hbl,
-      mbl: quote.mbl,
-      condition: quote.condition,
-    });
+    // Relations
+    if ('leadId' in updateQuoteDto) { fields.push(`lead_id = $${paramIndex++}`); params.push(updateQuoteDto.leadId); }
+    if ('opportunityId' in updateQuoteDto) { fields.push(`opportunity_id = $${paramIndex++}`); params.push(updateQuoteDto.opportunityId); }
+    if ('clientId' in updateQuoteDto) { fields.push(`client_id = $${paramIndex++}`); params.push(updateQuoteDto.clientId); }
+    if ('updatedBy' in updateQuoteDto) { fields.push(`updated_by = $${paramIndex++}`); params.push(updateQuoteDto.updatedBy); }
+    
+    // Commerciaux
+    if (updateQuoteDto.commercialIds && updateQuoteDto.commercialIds.length > 0) {
+      fields.push(`commercial_ids = $${paramIndex++}`);
+      params.push(updateQuoteDto.commercialIds); // ✅ Passer le tableau directement, pas JSON.stringify
+      fields.push(`commercial_id = $${paramIndex++}`);
+      params.push(updateQuoteDto.commercialIds[0]);
+      console.log(`✅ ${updateQuoteDto.commercialIds.length} commerciaux assignés`);
+    } else if ('commercialId' in updateQuoteDto) {
+      fields.push(`commercial_id = $${paramIndex++}`);
+      params.push(updateQuoteDto.commercialId);
+      fields.push(`commercial_ids = $${paramIndex++}`);
+      params.push([updateQuoteDto.commercialId]); // ✅ Passer le tableau directement, pas JSON.stringify
+    }
 
-    // Mettre à jour les lignes si fournies
-    if (updateQuoteDto.items) {
-      // Supprimer les anciennes lignes
-      await this.quoteItemRepository.delete({ quoteId: id });
+    // Transport
+    if ('armateurId' in updateQuoteDto) { fields.push(`armateur_id = $${paramIndex++}`); params.push(updateQuoteDto.armateurId); }
+    if ('navireId' in updateQuoteDto) { fields.push(`navire_id = $${paramIndex++}`); params.push(updateQuoteDto.navireId); }
+    if ('portEnlevementId' in updateQuoteDto) { fields.push(`port_enlevement_id = $${paramIndex++}`); params.push(updateQuoteDto.portEnlevementId); }
+    if ('portLivraisonId' in updateQuoteDto) { fields.push(`port_livraison_id = $${paramIndex++}`); params.push(updateQuoteDto.portLivraisonId); }
+    if ('aeroportEnlevementId' in updateQuoteDto) { fields.push(`aeroport_enlevement_id = $${paramIndex++}`); params.push(updateQuoteDto.aeroportEnlevementId); }
+    if ('aeroportLivraisonId' in updateQuoteDto) { fields.push(`aeroport_livraison_id = $${paramIndex++}`); params.push(updateQuoteDto.aeroportLivraisonId); }
+    if (updateQuoteDto.hbl !== undefined) { fields.push(`hbl = $${paramIndex++}`); params.push(updateQuoteDto.hbl); }
+    if (updateQuoteDto.mbl !== undefined) { fields.push(`mbl = $${paramIndex++}`); params.push(updateQuoteDto.mbl); }
+    if (updateQuoteDto.condition !== undefined) { fields.push(`condition = $${paramIndex++}`); params.push(updateQuoteDto.condition); }
 
-      // Créer les nouvelles lignes
-      quote.items = updateQuoteDto.items.map((item, index) =>
-        this.quoteItemRepository.create({
-          ...item,
-          quoteId: id,
-          lineOrder: item.lineOrder || index + 1,
-          // totalPrice doit utiliser sellingPrice, pas unitPrice
-          totalPrice: item.quantity * (item.sellingPrice || item.unitPrice),
-          itemType: item.itemType || 'freight',
-        }),
+    // Autres champs de transport
+    if (updateQuoteDto.country !== undefined) { fields.push(`country = $${paramIndex++}`); params.push(updateQuoteDto.country); }
+    if (updateQuoteDto.tiers !== undefined) { fields.push(`tiers = $${paramIndex++}`); params.push(updateQuoteDto.tiers); }
+    if (updateQuoteDto.attentionTo !== undefined) { fields.push(`attention_to = $${paramIndex++}`); params.push(updateQuoteDto.attentionTo); }
+    if (updateQuoteDto.pickupLocation !== undefined) { fields.push(`pickup_location = $${paramIndex++}`); params.push(updateQuoteDto.pickupLocation); }
+    if (updateQuoteDto.deliveryLocation !== undefined) { fields.push(`delivery_location = $${paramIndex++}`); params.push(updateQuoteDto.deliveryLocation); }
+    if (updateQuoteDto.transitTime !== undefined) { fields.push(`transit_time = $${paramIndex++}`); params.push(updateQuoteDto.transitTime); }
+    if (updateQuoteDto.departureFrequency !== undefined) { fields.push(`departure_frequency = $${paramIndex++}`); params.push(updateQuoteDto.departureFrequency); }
+    if (updateQuoteDto.clientType !== undefined) { fields.push(`client_type = $${paramIndex++}`); params.push(updateQuoteDto.clientType); }
+    if (updateQuoteDto.importExport !== undefined) { fields.push(`import_export = $${paramIndex++}`); params.push(updateQuoteDto.importExport); }
+    if (updateQuoteDto.fileStatus !== undefined) { fields.push(`file_status = $${paramIndex++}`); params.push(updateQuoteDto.fileStatus); }
+    if (updateQuoteDto.terms !== undefined) { fields.push(`terms = $${paramIndex++}`); params.push(updateQuoteDto.terms); }
+    if (updateQuoteDto.paymentMethod !== undefined) { fields.push(`payment_method = $${paramIndex++}`); params.push(updateQuoteDto.paymentMethod); }
+    if (updateQuoteDto.paymentConditions !== undefined) { fields.push(`payment_conditions = $${paramIndex++}`); params.push(updateQuoteDto.paymentConditions); }
+    if (updateQuoteDto.requester !== undefined) { fields.push(`requester = $${paramIndex++}`); params.push(updateQuoteDto.requester); }
+    if ('vehicleId' in updateQuoteDto) { fields.push(`vehicle_id = $${paramIndex++}`); params.push(updateQuoteDto.vehicleId); }
+
+    // 1️⃣ D'ABORD: Mettre à jour les champs de la cotation
+    if (fields.length > 0) {
+      fields.push(`updated_at = NOW()`);
+      params.push(id);
+
+      await connection.query(
+        `UPDATE crm_quotes SET ${fields.join(', ')} WHERE id = $${paramIndex}`,
+        params
+      );
+
+      console.log(`✅ [UPDATE] Quote ${id} mise à jour avec succès`);
+    }
+
+    // 2️⃣ ENSUITE: Mettre à jour les items si fournis
+    if (updateQuoteDto.items && updateQuoteDto.items.length > 0) {
+      console.log(`🔄 [UPDATE] Mise à jour de ${updateQuoteDto.items.length} items`);
+      
+      // Supprimer les anciens items
+      await connection.query(
+        `DELETE FROM crm_quote_items WHERE quote_id = $1`,
+        [id]
+      );
+
+      // Insérer les nouveaux items
+      for (let index = 0; index < updateQuoteDto.items.length; index++) {
+        const item = updateQuoteDto.items[index];
+        
+        // Calculs identiques à la version Git
+        const conversionRate = item.conversionRate || 1;
+        const sellingPrice = item.sellingPrice || item.unitPrice || 0;
+        const purchasePrice = item.purchasePrice || 0;
+        const totalPrice = item.quantity * sellingPrice; // Sans conversion ici, elle est appliquée dans recalculateQuoteTotals
+        const margin = sellingPrice - purchasePrice; // Sans conversion ici
+        
+        await connection.query(
+          `INSERT INTO crm_quote_items (
+            quote_id, description, category, vehicle_description, cargo_designation,
+            packages_count, weight_kg, volume_m3, length_cm, width_cm, height_cm, volumetric_weight,
+            origin_street, origin_city, origin_postal_code, origin_country,
+            destination_street, destination_city, destination_postal_code, destination_country,
+            distance_km, vehicle_type, service_type,
+            currency, conversion_rate, unit,
+            quantity, unit_price, selling_price, purchase_price,
+            total_price, margin, item_type, line_order, notes,
+            tax_rate, tax_amount, is_taxable, taxable_account, non_taxable_account,
+            is_debours, ca_type
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)`,
+          [
+            id, // $1
+            item.description, // $2
+            item.category || null, // $3
+            item.vehicleDescription || null, // $4
+            item.cargoDesignation || null, // $5
+            item.packagesCount || null, // $6
+            item.weightKg || null, // $7
+            item.volumeM3 || null, // $8
+            item.lengthCm || null, // $9
+            item.widthCm || null, // $10
+            item.heightCm || null, // $11
+            item.volumetricWeight || null, // $12
+            item.originStreet || null, // $13
+            item.originCity || null, // $14
+            item.originPostalCode || null, // $15
+            item.originCountry || null, // $16
+            item.destinationStreet || null, // $17
+            item.destinationCity || null, // $18
+            item.destinationPostalCode || null, // $19
+            item.destinationCountry || null, // $20
+            item.distanceKm || null, // $21
+            item.vehicleType || null, // $22
+            item.serviceType || null, // $23
+            item.currency || 'TND', // $24
+            conversionRate, // $25
+            item.unit || null, // $26
+            item.quantity, // $27
+            item.unitPrice || 0, // $28
+            sellingPrice, // $29
+            purchasePrice, // $30
+            totalPrice, // $31
+            margin, // $32
+            item.itemType || 'freight', // $33
+            item.lineOrder || (index + 1), // $34
+            item.notes || null, // $35
+            item.taxRate !== undefined ? item.taxRate : 19, // $36
+            item.taxAmount || 0, // $37
+            item.isTaxable !== undefined ? item.isTaxable : true, // $38
+            item.taxableAccount || null, // $39
+            item.nonTaxableAccount || null, // $40
+            item.isDebours !== undefined ? item.isDebours : false, // $41
+            item.caType || 'Oui' // $42
+          ]
+        );
+      }
+
+      console.log(`✅ [UPDATE] ${updateQuoteDto.items.length} items insérés`);
+      
+      // 3️⃣ ENFIN: Recalculer les totaux (applique les conversions de devises)
+      await this.recalculateQuoteTotals(connection, id);
+    }
+
+    // Régénérer le QR code
+    const updatedQuote = await this.findOne(id, databaseName, organisationId);
+    const qrCode = await this.generateQRCode(updatedQuote);
+    if (qrCode) {
+      await connection.query(
+        `UPDATE crm_quotes SET qr_code_data = $1 WHERE id = $2`,
+        [qrCode, id]
       );
     }
 
-    // Recalculer les totaux
-    this.calculateTotals(quote);
-
-    console.log('💾 [UPDATE] Quote avant save:', {
-      id: quote.id,
-      leadId: quote.leadId,
-      opportunityId: quote.opportunityId,
-      clientId: quote.clientId,
-      commercialIds: quote.commercialIds,
-      armateurId: quote.armateurId,
-      navireId: quote.navireId,
-      portEnlevementId: quote.portEnlevementId,
-      portLivraisonId: quote.portLivraisonId,
-      aeroportEnlevementId: quote.aeroportEnlevementId,
-      aeroportLivraisonId: quote.aeroportLivraisonId,
-      hbl: quote.hbl,
-      mbl: quote.mbl,
-      condition: quote.condition,
-      updatedBy: quote.updatedBy,
-    });
-
-    // Sauvegarder
-    const updatedQuote = await this.quoteRepository.save(quote);
-
-    // 🎯 FIX CRITIQUE: TOUJOURS forcer la mise à jour des IDs de liaison via UPDATE direct
-    // TypeORM ne détecte pas toujours les changements sur ces colonnes quand les relations sont chargées
-    // ✅ IMPORTANT: On force la mise à jour MÊME si la valeur est null pour réinitialiser correctement
-    const updateData: any = {};
-    
-    // 🆕 Forcer la mise à jour de updatedBy AVANT les autres champs
-    if ('updatedBy' in updateQuoteDto) {
-      updateData.updatedBy = updateQuoteDto.updatedBy;
-      console.log('🔧 [UPDATE] Forçage updatedBy dans updateData:', updateData.updatedBy, '(type:', typeof updateData.updatedBy, ')');
-    }
-    
-    // ✅ CORRECTION: Vérifier si la propriété existe dans le DTO (même si null/undefined)
-    // On ne peut pas utiliser hasOwnProperty car class-transformer modifie l'objet
-    // On vérifie plutôt si la propriété n'est pas undefined (null est valide)
-    if ('leadId' in updateQuoteDto) {
-      updateData.leadId = updateQuoteDto.leadId;
-      console.log('🔧 [UPDATE] Forçage leadId:', updateQuoteDto.leadId, '(type:', typeof updateQuoteDto.leadId, ')');
-    }
-    if ('opportunityId' in updateQuoteDto) {
-      updateData.opportunityId = updateQuoteDto.opportunityId;
-      console.log('🔧 [UPDATE] Forçage opportunityId:', updateQuoteDto.opportunityId, '(type:', typeof updateQuoteDto.opportunityId, ')');
-    }
-    if ('clientId' in updateQuoteDto) {
-      updateData.clientId = updateQuoteDto.clientId;
-      console.log('🔧 [UPDATE] Forçage clientId:', updateQuoteDto.clientId, '(type:', typeof updateQuoteDto.clientId, ')');
-    }
-
-    // 🆕 FIX: Forcer aussi les champs de transport
-    if ('armateurId' in updateQuoteDto) {
-      updateData.armateurId = updateQuoteDto.armateurId;
-      console.log('🔧 [UPDATE] Forçage armateurId:', updateQuoteDto.armateurId, '(type:', typeof updateQuoteDto.armateurId, ')');
-    }
-    if ('navireId' in updateQuoteDto) {
-      updateData.navireId = updateQuoteDto.navireId;
-      console.log('🔧 [UPDATE] Forçage navireId:', updateQuoteDto.navireId, '(type:', typeof updateQuoteDto.navireId, ')');
-    }
-    if ('portEnlevementId' in updateQuoteDto) {
-      updateData.portEnlevementId = updateQuoteDto.portEnlevementId;
-      console.log('🔧 [UPDATE] Forçage portEnlevementId:', updateQuoteDto.portEnlevementId, '(type:', typeof updateQuoteDto.portEnlevementId, ')');
-    }
-    if ('portLivraisonId' in updateQuoteDto) {
-      updateData.portLivraisonId = updateQuoteDto.portLivraisonId;
-      console.log('🔧 [UPDATE] Forçage portLivraisonId:', updateQuoteDto.portLivraisonId, '(type:', typeof updateQuoteDto.portLivraisonId, ')');
-    }
-    if ('aeroportEnlevementId' in updateQuoteDto) {
-      updateData.aeroportEnlevementId = updateQuoteDto.aeroportEnlevementId;
-      console.log('🔧 [UPDATE] Forçage aeroportEnlevementId:', updateQuoteDto.aeroportEnlevementId, '(type:', typeof updateQuoteDto.aeroportEnlevementId, ')');
-    }
-    if ('aeroportLivraisonId' in updateQuoteDto) {
-      updateData.aeroportLivraisonId = updateQuoteDto.aeroportLivraisonId;
-      console.log('🔧 [UPDATE] Forçage aeroportLivraisonId:', updateQuoteDto.aeroportLivraisonId, '(type:', typeof updateQuoteDto.aeroportLivraisonId, ')');
-    }
-    if ('hbl' in updateQuoteDto) {
-      updateData.hbl = updateQuoteDto.hbl;
-      console.log('🔧 [UPDATE] Forçage hbl:', updateQuoteDto.hbl);
-    }
-    if ('mbl' in updateQuoteDto) {
-      updateData.mbl = updateQuoteDto.mbl;
-      console.log('🔧 [UPDATE] Forçage mbl:', updateQuoteDto.mbl);
-    }
-    if ('condition' in updateQuoteDto) {
-      updateData.condition = updateQuoteDto.condition;
-      console.log('🔧 [UPDATE] Forçage condition:', updateQuoteDto.condition);
-    }
-    
-    // ✅ TOUJOURS exécuter l'UPDATE si au moins un ID est présent
-    if (Object.keys(updateData).length > 0) {
-      console.log('💾 [UPDATE] Exécution UPDATE SQL direct avec:', updateData);
-      await this.quoteRepository.update(id, updateData);
-      console.log('✅ [UPDATE] IDs mis à jour via UPDATE SQL direct');
-      
-      // Recharger pour avoir les bonnes valeurs
-      const finalQuote = await this.quoteRepository.findOne({ where: { id } });
-      console.log('✨ [UPDATE] Valeurs finales après UPDATE:', {
-        leadId: finalQuote.leadId,
-        opportunityId: finalQuote.opportunityId,
-        clientId: finalQuote.clientId,
-        armateurId: finalQuote.armateurId,
-        navireId: finalQuote.navireId,
-        portEnlevementId: finalQuote.portEnlevementId,
-        portLivraisonId: finalQuote.portLivraisonId,
-        aeroportEnlevementId: finalQuote.aeroportEnlevementId,
-        aeroportLivraisonId: finalQuote.aeroportLivraisonId,
-        hbl: finalQuote.hbl,
-        mbl: finalQuote.mbl,
-        condition: finalQuote.condition,
-      });
-      
-      // Mettre à jour l'objet retourné
-      updatedQuote.leadId = finalQuote.leadId;
-      updatedQuote.opportunityId = finalQuote.opportunityId;
-      updatedQuote.clientId = finalQuote.clientId;
-      updatedQuote.armateurId = finalQuote.armateurId;
-      updatedQuote.navireId = finalQuote.navireId;
-      updatedQuote.portEnlevementId = finalQuote.portEnlevementId;
-      updatedQuote.portLivraisonId = finalQuote.portLivraisonId;
-      updatedQuote.aeroportEnlevementId = finalQuote.aeroportEnlevementId;
-      updatedQuote.aeroportLivraisonId = finalQuote.aeroportLivraisonId;
-      updatedQuote.hbl = finalQuote.hbl;
-      updatedQuote.mbl = finalQuote.mbl;
-      updatedQuote.condition = finalQuote.condition;
-    } else {
-      console.log('⚠️ [UPDATE] Aucun ID de liaison présent dans updateQuoteDto - pas de forçage');
-    }
-
-    console.log('✨ [UPDATE] Quote après save:', {
-      id: updatedQuote.id,
-      leadId: updatedQuote.leadId,
-      opportunityId: updatedQuote.opportunityId,
-      clientId: updatedQuote.clientId,
-      armateurId: updatedQuote.armateurId,
-      navireId: updatedQuote.navireId,
-      portEnlevementId: updatedQuote.portEnlevementId,
-      portLivraisonId: updatedQuote.portLivraisonId,
-      aeroportEnlevementId: updatedQuote.aeroportEnlevementId,
-      aeroportLivraisonId: updatedQuote.aeroportLivraisonId,
-      hbl: updatedQuote.hbl,
-      mbl: updatedQuote.mbl,
-      condition: updatedQuote.condition,
-    });
-
-    // 🎯 Régénérer le QR code après la mise à jour
-    const qrCode = await this.generateQRCode(updatedQuote);
-    if (qrCode) {
-      updatedQuote.qrCodeData = qrCode;
-      await this.quoteRepository.save(updatedQuote);
-    }
-
-    return this.findOne(updatedQuote.id);
+    return this.findOne(id, databaseName, organisationId);
   }
 
   /**
    * Supprimer un devis
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    */
-  async remove(id: number): Promise<void> {
-    const quote = await this.findOne(id);
+  async remove(id: number, databaseName: string, organisationId: number): Promise<void> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const quote = await this.findOne(id, databaseName, organisationId);
 
     // Vérifier que le devis peut être supprimé
     if (quote.status === QuoteStatus.ACCEPTED) {
       throw new BadRequestException('Impossible de supprimer un devis accepté');
     }
 
-    await this.quoteRepository.remove(quote);
+    // Supprimer les items d'abord
+    await connection.query(
+      `DELETE FROM crm_quote_items WHERE quote_id = $1`,
+      [id]
+    );
+
+    // Supprimer le quote
+    await connection.query(
+      `DELETE FROM crm_quotes WHERE id = $1`,
+      [id]
+    );
+
+    console.log(`✅ Quote ${id} supprimé avec succès`);
   }
 
   /**
    * Envoyer un devis par email
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  async sendQuote(id: number, sendQuoteDto: SendQuoteDto): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async sendQuote(id: number, sendQuoteDto: SendQuoteDto, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const quote = await this.findOne(id, databaseName, organisationId);
 
     if (quote.status === QuoteStatus.ACCEPTED) {
       throw new BadRequestException('Ce devis a déjà été accepté');
     }
 
-    // ✅ Recalculer les totaux avec conversion en TND avant d'envoyer l'email
-    this.calculateTotals(quote);
-
     console.log('📧 [Email] Envoi cotation avec totaux en TND:', {
       quoteNumber: quote.quoteNumber,
-      totalOffers: quote.totalOffers,
-      taxAmount: quote.taxAmount,
       total: quote.total,
-      itemsWithRates: quote.items?.map(item => ({
-        desc: item.description,
-        currency: (item as any).currency,
-        conversionRate: (item as any).conversionRate,
-        sellingPrice: item.sellingPrice,
-        quantity: item.quantity
-      }))
     });
 
+    // 🏢 Récupérer les informations de l'organisation (avec tous les champs nécessaires)
+    const mainConnection = await this.databaseConnectionService.getMainConnection();
+    const orgResult = await mainConnection.query(
+      `SELECT nom, nom_affichage, logo_url, adresse, telephone, email_contact, slug FROM organisations WHERE id = $1`,
+      [organisationId]
+    );
+    const organisation = orgResult && orgResult.length > 0 ? orgResult[0] : null;
+
     // Préparer le contenu HTML de l'email
-    const emailHtml = this.generateQuoteEmailHtml(quote, sendQuoteDto);
+    const emailHtml = this.generateQuoteEmailHtml(quote, sendQuoteDto, organisation);
 
     // Envoyer l'email
     const emailSubject = sendQuoteDto.emailSubject || `Cotation ${quote.quoteNumber} - ${quote.title}`;
@@ -1048,10 +1517,12 @@ export class QuotesService {
       );
 
       // Mettre à jour le statut
-      quote.status = QuoteStatus.SENT;
-      quote.sentAt = new Date();
+      await connection.query(
+        `UPDATE crm_quotes SET status = $1, sent_at = NOW() WHERE id = $2`,
+        [QuoteStatus.SENT, id]
+      );
 
-      return this.quoteRepository.save(quote);
+      return this.findOne(id, databaseName, organisationId);
     } catch (error) {
       throw new InternalServerErrorException(
         `Erreur lors de l'envoi de l'email: ${error.message}`
@@ -1060,9 +1531,32 @@ export class QuotesService {
   }
 
   /**
+   * Obtenir l'email du commercial assigné à la cotation
+   */
+  private getCommercialEmail(quote: Quote): string {
+    const defaultEmail = 'sales1@velosi.com.tn';
+    
+    // Vérifier si on a des commerciaux assignés (nouveau système)
+    if (quote.assignedCommercials && quote.assignedCommercials.length > 0) {
+      const firstCommercial = quote.assignedCommercials[0];
+      if (firstCommercial && firstCommercial.email) {
+        return firstCommercial.email;
+      }
+    }
+    
+    // Vérifier l'ancien système (commercial unique)
+    if ((quote as any).commercial && (quote as any).commercial.email) {
+      return (quote as any).commercial.email;
+    }
+    
+    // Fallback sur l'email par défaut
+    return defaultEmail;
+  }
+
+  /**
    * Générer le HTML pour l'email de la cotation
    */
-  private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto): string {
+  private generateQuoteEmailHtml(quote: Quote, sendData: SendQuoteDto, organisation?: any): string {
     // ✅ Le total est déjà calculé EN TND avec conversion ET TVA par ligne dans calculateTotals()
     const total = quote.total || 0;
     
@@ -1302,6 +1796,10 @@ export class QuotesService {
       <body>
         <div class="container">
           <div class="header">
+            ${organisation && organisation.logo_url ? `
+              <img src="${process.env.FRONTEND_URL || 'https://wyselogiquote.com'}${organisation.logo_url}" alt="Logo" style="max-width: 150px; max-height: 80px; margin-bottom: 15px; background: white; padding: 10px; border-radius: 8px;">
+            ` : ''}
+            ${organisation ? `<h2 style="margin: 10px 0; font-size: 24px;">${organisation.nom_affichage || organisation.nom}</h2>` : ''}
             <h1>Cotation ${quote.quoteNumber}</h1>
             <p><strong>Date:</strong> ${formatDate(quote.createdAt)}</p>
             <p><strong>Validité:</strong> ${formatDate(quote.validUntil)}</p>
@@ -1356,12 +1854,12 @@ export class QuotesService {
 
           <div class="footer">
             <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 14px;">
-              © ${new Date().getFullYear()} VELOSI LOGISTICS - Tous droits réservés
+              © ${new Date().getFullYear()} ${organisation ? (organisation.nom_affichage || organisation.nom) : 'VELOSI LOGISTICS'} - Tous droits réservés
             </p>
             <div class="company-info">
-              <p><strong>Adresse:</strong> 06 Av. H. Bourguiba Résidence ZOHRA 2040 Radès, Tunisie</p>
-              <p><strong>Tél:</strong> (+216) 71 460 969 / (+216) 71 460 991 / (+216) 79 459 553</p>
-              <p><strong>Email:</strong> contact@velosi.com | <strong>Web:</strong> www.velosi.com</p>
+              <p><strong>Adresse:</strong> ${organisation && organisation.adresse ? organisation.adresse : '06 Av. H. Bourguiba Résidence ZOHRA 2040 Radès, Tunisie'}</p>
+              <p><strong>Tél:</strong> ${organisation && organisation.telephone ? organisation.telephone : '(+216) 71 460 969 / (+216) 71 460 991 / (+216) 79 459 553'}</p>
+              <p><strong>Email:</strong> ${this.getCommercialEmail(quote)} | <strong>Web:</strong> ${organisation && organisation.slug ? 'www.' + organisation.slug + '.tn' : 'www.velosi.com.tn'}</p>
             </div>
             <p style="margin: 15px 0 0 0; font-size: 11px;">
               Cet email a été envoyé automatiquement. Pour toute question, veuillez contacter notre service commercial.
@@ -1375,10 +1873,12 @@ export class QuotesService {
 
   /**
    * Marquer un devis comme vu
+   * ✅ MULTI-TENANT: Vérifie l'organisationId
    * ✅ CORRECTION: Marque comme vu même si viewedAt existe déjà
    */
-  async markAsViewed(id: number): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async markAsViewed(id: number, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const quote = await this.findOne(id, databaseName, organisationId);
 
     console.log('👁️ [Mark As Viewed] Tentative de marquage:', {
       quoteId: id,
@@ -1388,20 +1888,19 @@ export class QuotesService {
       sentAt: quote.sentAt
     });
 
-    // Marquer comme vu si le statut est SENT (même si déjà viewedAt existe)
+    // Marquer comme vu si le statut est SENT
     if (quote.status === QuoteStatus.SENT) {
-      quote.status = QuoteStatus.VIEWED;
-      quote.viewedAt = new Date();
-      
-      const savedQuote = await this.quoteRepository.save(quote);
+      await connection.query(
+        `UPDATE crm_quotes SET status = $1, viewed_at = NOW() WHERE id = $2`,
+        [QuoteStatus.VIEWED, id]
+      );
       
       console.log('✅ [Mark As Viewed] Cotation marquée comme vue:', {
-        quoteNumber: savedQuote.quoteNumber,
-        newStatus: savedQuote.status,
-        viewedAt: savedQuote.viewedAt
+        quoteNumber: quote.quoteNumber,
+        newStatus: QuoteStatus.VIEWED
       });
       
-      return savedQuote;
+      return this.findOne(id, databaseName, organisationId);
     }
 
     console.log('ℹ️ [Mark As Viewed] Pas de changement de statut (statut actuel:', quote.status + ')');
@@ -1409,12 +1908,62 @@ export class QuotesService {
   }
 
   /**
+   * 🌐 Marquer une cotation comme vue (VERSION PUBLIQUE - Sans authentification via ID)
+   * ⚠️ Note: Pour l'UUID, utiliser la route /public/:uuid qui appelle findOnePublicByUuid
+   *    puis marquer comme vue via cette méthode si nécessaire
+   * ✅ Récupère dynamiquement la liste des bases depuis la table organisations
+   */
+  async markAsViewedPublic(id: number): Promise<Quote> {
+    // Étape 1: Récupérer la liste de toutes les bases de données depuis organisations (base centrale shipnology)
+    const shipnologyConnection = await this.databaseConnectionService.getOrganisationConnection('shipnology');
+    const orgsResult = await shipnologyConnection.query(
+      `SELECT DISTINCT database_name FROM organisations WHERE database_name IS NOT NULL AND database_name != '' ORDER BY database_name`
+    );
+    
+    let databases = orgsResult.map((org: any) => org.database_name);
+    
+    // ✅ FALLBACK: Ajouter les bases principales si elles ne sont pas dans la table organisations
+    const mainDatabases = ['velosi', 'danino'];
+    for (const mainDb of mainDatabases) {
+      if (!databases.includes(mainDb)) {
+        databases.push(mainDb);
+      }
+    }
+    
+    console.log(`🔍 [markAsViewedPublic] Recherche dans ${databases.length} bases:`, databases);
+    
+    for (const dbName of databases) {
+      try {
+        const connection = await this.databaseConnectionService.getOrganisationConnection(dbName);
+        
+        const quotes = await connection.query(
+          `SELECT id, organisation_id, quote_number FROM crm_quotes WHERE id = $1 LIMIT 1`,
+          [id]
+        );
+
+        if (quotes && quotes.length > 0) {
+          const quote = quotes[0];
+          const organisationId = quote.organisation_id || 1;
+          
+          console.log(`✅ [markAsViewedPublic] Cotation ${quote.quote_number} trouvée dans: ${dbName}`);
+          return this.markAsViewed(id, dbName, organisationId);
+        }
+      } catch (error) {
+        // Continue vers la prochaine base
+      }
+    }
+
+    throw new NotFoundException(`Cotation avec l'ID ${id} introuvable`);
+  }
+
+  /**
    * Accepter un devis
+   * ✅ MULTI-TENANT: Vérifie l'organisationId
    * ✅ CORRECTION: Permettre l'acceptation depuis DRAFT, SENT ou VIEWED
    */
-  async acceptQuote(id: number, acceptQuoteDto: AcceptQuoteDto): Promise<Quote> {
+  async acceptQuote(id: number, acceptQuoteDto: AcceptQuoteDto, databaseName: string, organisationId: number): Promise<Quote> {
     console.log(`🎯 DÉBUT acceptQuote pour cotation ID: ${id}`);
-    const quote = await this.findOne(id);
+    const quote = await this.findOne(id, databaseName, organisationId); // 🏢 FILTRE MULTI-TENANT
     console.log(`📋 Cotation trouvée: ${quote.quoteNumber}, Statut actuel: ${quote.status}`);
 
     // ✅ CORRECTION: Permettre l'acceptation depuis DRAFT, SENT ou VIEWED
@@ -1477,8 +2026,22 @@ export class QuotesService {
     }
 
     console.log(`💾 Sauvegarde de la cotation avec statut ACCEPTED...`);
-    const updatedQuote = await this.quoteRepository.save(quote);
-    console.log(`✅ Cotation sauvegardée: ${updatedQuote.quoteNumber} - Statut: ${updatedQuote.status}`);
+    
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    await connection.query(
+      `UPDATE crm_quotes 
+       SET status = $1, accepted_at = $2, type = $3, notes = $4, updated_at = NOW() 
+       WHERE id = $5`,
+      [QuoteStatus.ACCEPTED, new Date(), quote.type, quote.notes, quote.id]
+    );
+    
+    // Recharger la cotation mise à jour
+    const [updatedQuote] = await connection.query(
+      `SELECT * FROM crm_quotes WHERE id = $1`,
+      [quote.id]
+    );
+    
+    console.log(`✅ Cotation sauvegardée: ${updatedQuote.quote_number} - Statut: ${updatedQuote.status}`);
 
     // 🎯 SYNCHRONISATION AUTOMATIQUE: Opportunité → CLOSED_WON
     if (updatedQuote.opportunityId) {
@@ -1486,16 +2049,20 @@ export class QuotesService {
       await this.updateOpportunityStage(
         updatedQuote.opportunityId,
         'closed_won',
-        `Cotation ${updatedQuote.quoteNumber} acceptée`
+        `Cotation ${updatedQuote.quoteNumber} acceptée`,
+        databaseName
       );
     }
 
     // Conversion automatique prospect/opportunité vers client permanent
     console.log(`🚀 Appel de autoConvertToClient...`);
-    await this.autoConvertToClient(updatedQuote);
+    await this.autoConvertToClient(databaseName, organisationId, updatedQuote);
     console.log(`✅ autoConvertToClient terminé`);
+    
+    // Mettre à jour le statut du prospect vers CLIENT
+    await this.updateLeadStatusToClient(updatedQuote, databaseName);
 
-    return this.findOne(updatedQuote.id);
+    return this.findOne(updatedQuote.id, databaseName, organisationId);
   }
 
   /**
@@ -1504,7 +2071,7 @@ export class QuotesService {
    * SANS mot de passe et SANS compte Keycloak
    * ✅ Le statut du prospect est mis à jour automatiquement par un TRIGGER PostgreSQL
    */
-  private async autoConvertToClient(quote: Quote): Promise<void> {
+  private async autoConvertToClient(databaseName: string, organisationId: number, quote: Quote): Promise<void> {
     try {
       console.log(`\n========================================`);
       console.log(`🔄 CRÉATION CLIENT AUTOMATIQUE`);
@@ -1514,11 +2081,14 @@ export class QuotesService {
 
       // ✅ ÉTAPE 1: Vérifier si UN CLIENT EXISTE DÉJÀ
       if (quote.clientId && quote.clientId > 0) {
-        const existingClient = await this.clientRepository.findOne({
-          where: { id: quote.clientId }
-        });
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+        const clients = await connection.query(
+          `SELECT id, nom FROM client WHERE id = $1`,
+          [quote.clientId]
+        );
 
-        if (existingClient) {
+        if (clients && clients.length > 0) {
+          const existingClient = clients[0];
           console.log(`✅ Client existant trouvé: ${existingClient.nom} (ID: ${existingClient.id})`);
           console.log(`ℹ️ Statut prospect mis à jour automatiquement par trigger PostgreSQL`);
           console.log(`========================================\n`);
@@ -1535,9 +2105,13 @@ export class QuotesService {
       const clientEmail = quote.clientEmail;
       const clientPhone = quote.clientPhone || null;
       
+      // ✅ CORRECTION CRITIQUE: Assurer qu'on a toujours un nom valide (jamais undefined)
+      const clientNom = quote.clientCompany || quote.clientName || 'Client Sans Nom';
+      const clientInterlocuteur = quote.clientName || quote.clientCompany || 'Non renseigné';
+      
       const clientData: any = {
-        nom: quote.clientCompany || quote.clientName,
-        interlocuteur: quote.clientName,
+        nom: clientNom,
+        interlocuteur: clientInterlocuteur,
         categorie: isLocalCountry ? 'LOCAL' : 'ETRANGER',
         type_client: 'CONVERTI',
         adresse: quote.clientAddress || null,
@@ -1580,9 +2154,11 @@ export class QuotesService {
         console.log(`✅ Client créé avec succès: ID ${newClient.id}`);
         
         // Mettre à jour la cotation
-        await this.quoteRepository.update(quote.id, {
-          clientId: newClient.id
-        });
+        const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+        await connection.query(
+          `UPDATE crm_quotes SET client_id = $1, updated_at = NOW() WHERE id = $2`,
+          [newClient.id, quote.id]
+        );
         
         console.log(`✅ Cotation mise à jour avec clientId: ${newClient.id}`);
         console.log(`ℹ️ Statut prospect mis à jour automatiquement par trigger PostgreSQL`);
@@ -1602,28 +2178,33 @@ export class QuotesService {
   /**
    * ✅ CORRECTION FINALE: Mettre à jour le statut du prospect vers CLIENT
    * Exécutée TOUJOURS lors de l'acceptation d'une cotation
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  private async updateLeadStatusToClient(quote: Quote): Promise<void> {
+  private async updateLeadStatusToClient(quote: Quote, databaseName: string): Promise<void> {
     try {
       console.log(`🔍 updateLeadStatusToClient appelée pour cotation ${quote.quoteNumber}`);
       console.log(`📊 Quote leadId: ${quote.leadId}, opportunityId: ${quote.opportunityId}`);
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
       
       // Cas 1: Cotation directement liée à un prospect
       if (quote.leadId) {
         console.log(`🎯 Mise à jour directe du prospect ID: ${quote.leadId}`);
         
-        // Vérifier que le prospect existe
-        const lead = await this.leadRepository.findOne({
-          where: { id: quote.leadId }
-        });
+        const leads = await connection.query(
+          `SELECT id, status FROM crm_leads WHERE id = $1`,
+          [quote.leadId]
+        );
         
-        if (lead) {
+        if (leads && leads.length > 0) {
+          const lead = leads[0];
           console.log(`📋 Prospect trouvé - Statut actuel: ${lead.status}`);
           console.log(`🔄 Mise à jour vers: CLIENT`);
           
-          // ✅ CORRECTION: Utiliser LeadStatus.CLIENT (l'enum existe bien)
-          lead.status = LeadStatus.CLIENT;
-          await this.leadRepository.save(lead);
+          await connection.query(
+            `UPDATE crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`,
+            [LeadStatus.CLIENT, quote.leadId]
+          );
           
           console.log(`✅ Statut du prospect #${lead.id} mis à jour vers CLIENT`);
         } else {
@@ -1634,20 +2215,25 @@ export class QuotesService {
       else if (quote.opportunityId) {
         console.log(`🎯 Recherche du prospect via opportunité ID: ${quote.opportunityId}`);
         
-        const opportunity = await this.opportunityRepository.findOne({
-          where: { id: quote.opportunityId },
-          relations: ['lead']
-        });
+        const opportunities = await connection.query(
+          `SELECT o.id, o.lead_id, l.id as lead_id, l.status as lead_status 
+           FROM crm_opportunities o 
+           LEFT JOIN crm_leads l ON o.lead_id = l.id 
+           WHERE o.id = $1`,
+          [quote.opportunityId]
+        );
         
-        if (opportunity && opportunity.lead) {
-          console.log(`📋 Prospect trouvé via opportunité - ID: ${opportunity.lead.id}, Statut actuel: ${opportunity.lead.status}`);
+        if (opportunities && opportunities.length > 0 && opportunities[0].lead_id) {
+          const opportunity = opportunities[0];
+          console.log(`📋 Prospect trouvé via opportunité - ID: ${opportunity.lead_id}, Statut actuel: ${opportunity.lead_status}`);
           console.log(`🔄 Mise à jour vers: CLIENT`);
           
-          // ✅ CORRECTION: Utiliser LeadStatus.CLIENT (l'enum existe bien)
-          opportunity.lead.status = LeadStatus.CLIENT;
-          await this.leadRepository.save(opportunity.lead);
+          await connection.query(
+            `UPDATE crm_leads SET status = $1, updated_at = NOW() WHERE id = $2`,
+            [LeadStatus.CLIENT, opportunity.lead_id]
+          );
           
-          console.log(`✅ Statut du prospect #${opportunity.lead.id} mis à jour vers CLIENT`);
+          console.log(`✅ Statut du prospect #${opportunity.lead_id} mis à jour vers CLIENT`);
         } else {
           console.log(`⚠️ Opportunité ou prospect non trouvé`);
         }
@@ -1666,7 +2252,7 @@ export class QuotesService {
    * SANS mot de passe et SANS compte Keycloak
    * Utilise toutes les données du prospect pour un mapping correct
    */
-  private async createTemporaryClientFromLead(lead: Lead, quote: Quote): Promise<Client> {
+  private async createTemporaryClientFromLead(databaseName: string, organisationId: number, lead: Lead, quote: Quote): Promise<Client> {
     try {
       console.log(`🔧 createTemporaryClientFromLead - Début de création`);
       console.log(`📋 Données du prospect:`);
@@ -1806,7 +2392,7 @@ export class QuotesService {
    * SANS mot de passe et SANS compte Keycloak
    * ✅ CORRECTION: catégorie vide, timbre=false, contact principal avec prenom = nom client
    */
-  private async createTemporaryClientFromQuote(quote: Quote): Promise<Client> {
+  private async createTemporaryClientFromQuote(databaseName: string, organisationId: number, quote: Quote): Promise<Client> {
     try {
       console.log(`🔧 createTemporaryClientFromQuote - Début de création`);
       console.log(`📋 Cotation: ${quote.quoteNumber} - Client: ${quote.clientName}`);
@@ -1865,45 +2451,48 @@ export class QuotesService {
   /**
    * 🎯 Mettre à jour automatiquement le statut d'une opportunité
    * lorsqu'une cotation est acceptée ou rejetée
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
   private async updateOpportunityStage(
     opportunityId: number,
     newStage: 'closed_won' | 'closed_lost',
-    description: string
+    description: string,
+    databaseName: string
   ): Promise<void> {
     try {
-      const opportunity = await this.opportunityRepository.findOne({
-        where: { id: opportunityId }
-      });
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
+      const opportunities = await connection.query(
+        `SELECT id, title, stage FROM crm_opportunities WHERE id = $1`,
+        [opportunityId]
+      );
 
-      if (!opportunity) {
+      if (!opportunities || opportunities.length === 0) {
         console.log(`⚠️ Opportunité ${opportunityId} introuvable - synchronisation ignorée`);
         return;
       }
 
+      const opportunity = opportunities[0];
       console.log(`🔄 Synchronisation opportunité: ${opportunity.title}`);
       console.log(`   Ancien statut: ${opportunity.stage}`);
       console.log(`   Nouveau statut: ${newStage}`);
 
-      // Préparer les données de mise à jour
-      const updateData: any = {
-        stage: newStage,
-        actualCloseDate: new Date(),
-      };
-
-      // Ajouter la description appropriée
+      // Construire la requête de mise à jour
       if (newStage === 'closed_won') {
-        updateData.wonDescription = description;
-        // Mettre à jour la probabilité à 100%
-        updateData.probability = 100;
+        await connection.query(
+          `UPDATE crm_opportunities 
+           SET stage = $1, actual_close_date = NOW(), won_description = $2, probability = 100, updated_at = NOW() 
+           WHERE id = $3`,
+          [newStage, description, opportunityId]
+        );
       } else if (newStage === 'closed_lost') {
-        updateData.lostReason = description;
-        // Mettre à jour la probabilité à 0%
-        updateData.probability = 0;
+        await connection.query(
+          `UPDATE crm_opportunities 
+           SET stage = $1, actual_close_date = NOW(), lost_reason = $2, probability = 0, updated_at = NOW() 
+           WHERE id = $3`,
+          [newStage, description, opportunityId]
+        );
       }
-
-      // Mettre à jour l'opportunité
-      await this.opportunityRepository.update(opportunityId, updateData);
 
       console.log(`✅ Opportunité ${opportunity.title} mise à jour → ${newStage}`);
       
@@ -1917,17 +2506,23 @@ export class QuotesService {
   /**
    * 🎯 Déplacer automatiquement une opportunité dans la colonne "proposal"
    * lorsqu'une cotation est créée
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  private async moveOpportunityToProposal(opportunityId: number): Promise<void> {
+  private async moveOpportunityToProposal(opportunityId: number, databaseName: string): Promise<void> {
     try {
-      const opportunity = await this.opportunityRepository.findOne({
-        where: { id: opportunityId }
-      });
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
+      const opportunities = await connection.query(
+        `SELECT * FROM crm_opportunities WHERE id = $1`,
+        [opportunityId]
+      );
 
-      if (!opportunity) {
+      if (!opportunities || opportunities.length === 0) {
         console.log(`⚠️ Opportunité ${opportunityId} introuvable - déplacement ignoré`);
         return;
       }
+
+      const opportunity = opportunities[0];
 
       // Ne déplacer que si l'opportunité n'est pas déjà fermée
       if (opportunity.stage === OpportunityStage.CLOSED_WON || opportunity.stage === OpportunityStage.CLOSED_LOST) {
@@ -1946,10 +2541,10 @@ export class QuotesService {
       console.log(`   Nouveau statut: proposal`);
 
       // Mettre à jour l'opportunité vers "proposal"
-      await this.opportunityRepository.update(opportunityId, {
-        stage: OpportunityStage.PROPOSAL,
-        probability: 60, // Probabilité par défaut pour l'étape "proposal"
-      });
+      await connection.query(
+        `UPDATE crm_opportunities SET stage = $1, probability = $2 WHERE id = $3`,
+        [OpportunityStage.PROPOSAL, 60, opportunityId]
+      );
 
       console.log(`✅ Opportunité ${opportunity.title} déplacée → proposal`);
       
@@ -1961,9 +2556,10 @@ export class QuotesService {
 
   /**
    * Rejeter un devis
+   * ✅ MULTI-TENANT: Vérifie l'organisationId
    */
-  async rejectQuote(id: number, rejectQuoteDto: RejectQuoteDto): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async rejectQuote(id: number, rejectQuoteDto: RejectQuoteDto, databaseName: string, organisationId: number): Promise<Quote> {
+    const quote = await this.findOne(id, databaseName, organisationId); // 🏢 FILTRE MULTI-TENANT
 
     if (quote.status === QuoteStatus.ACCEPTED) {
       throw new BadRequestException('Impossible de rejeter un devis déjà accepté');
@@ -1973,25 +2569,33 @@ export class QuotesService {
     quote.rejectedAt = new Date();
     quote.rejectionReason = rejectQuoteDto.reason;
 
-    const updatedQuote = await this.quoteRepository.save(quote);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    await connection.query(
+      `UPDATE crm_quotes 
+       SET status = $1, rejected_at = $2, rejection_reason = $3, updated_at = NOW() 
+       WHERE id = $4`,
+      [QuoteStatus.REJECTED, new Date(), rejectQuoteDto.reason, quote.id]
+    );
 
     // 🎯 SYNCHRONISATION AUTOMATIQUE: Opportunité → CLOSED_LOST
-    if (updatedQuote.opportunityId) {
+    if (quote.opportunityId) {
       await this.updateOpportunityStage(
-        updatedQuote.opportunityId,
+        quote.opportunityId,
         'closed_lost',
-        `Cotation ${updatedQuote.quoteNumber} rejetée: ${rejectQuoteDto.reason || 'Non spécifié'}`
+        `Cotation ${quote.quoteNumber} rejetée: ${rejectQuoteDto.reason || 'Non spécifié'}`,
+        databaseName
       );
     }
 
-    return updatedQuote;
+    return this.findOne(id, databaseName, organisationId);
   }
 
   /**
    * Annuler un devis
+   * ✅ MULTI-TENANT: Vérifie l'organisationId
    */
-  async cancelQuote(id: number, reason?: string): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async cancelQuote(id: number, reason: string | undefined, databaseName: string, organisationId: number): Promise<Quote> {
+    const quote = await this.findOne(id, databaseName, organisationId); // 🏢 FILTRE MULTI-TENANT
 
     // Vérifier que le devis n'est pas déjà accepté
     if (quote.status === QuoteStatus.ACCEPTED) {
@@ -2007,84 +2611,218 @@ export class QuotesService {
         : `Annulation: ${reason}`;
     }
 
-    const updatedQuote = await this.quoteRepository.save(quote);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    await connection.query(
+      `UPDATE crm_quotes 
+       SET status = $1, notes = $2, updated_at = NOW() 
+       WHERE id = $3`,
+      [QuoteStatus.CANCELLED, quote.notes, quote.id]
+    );
 
     // Note: Pas de synchronisation automatique avec l'opportunité pour l'annulation
     // L'annulation d'une cotation ne change pas automatiquement le statut de l'opportunité
     // car il peut y avoir d'autres cotations en cours
 
-    console.log(`✅ Cotation ${updatedQuote.quoteNumber} marquée comme annulée`);
+    console.log(`✅ Cotation ${quote.quoteNumber} marquée comme annulée`);
 
-    return updatedQuote;
+    return this.findOne(id, databaseName, organisationId);
   }
 
   /**
    * Dupliquer un devis
+   * ✅ MULTI-TENANT: Vérifie l'organisationId et l'applique au duplicata
    */
-  async duplicate(id: number, userId: number): Promise<Quote> {
-    const originalQuote = await this.findOne(id);
+  async duplicate(id: number, userId: number, databaseName: string, organisationId: number): Promise<Quote> {
+    const originalQuote = await this.findOne(id, databaseName, organisationId); // 🏢 FILTRE MULTI-TENANT
 
-    const newQuoteNumber = await this.generateQuoteNumber();
+    const newQuoteNumber = await this.generateQuoteNumber(databaseName);
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
 
-    const newQuote = this.quoteRepository.create({
-      ...originalQuote,
-      id: undefined,
-      uuid: undefined,
-      quoteNumber: newQuoteNumber,
-      status: QuoteStatus.DRAFT,
-      createdBy: userId,
-      createdAt: undefined,
-      updatedAt: undefined,
-      sentAt: null,
-      viewedAt: null,
-      acceptedAt: null,
-      rejectedAt: null,
-      approvedBy: null,
-    });
+    // Dupliquer le quote principal
+    const [newQuote] = await connection.query(
+      `INSERT INTO crm_quotes (
+        quote_number, title, status, type, valid_until,
+        client_name, client_company, client_email, client_phone, client_address,
+        opportunity_id, lead_id, client_id,
+        commercial_id, commercial_ids,
+        subtotal, tax_amount, tax_rate, total,
+        freight_purchased, freight_offered, freight_margin,
+        additional_costs_purchased, additional_costs_offered,
+        total_purchases, total_offers, total_margin,
+        created_by, notes,
+        country, tiers, attention_to, pickup_location, delivery_location,
+        transit_time, departure_frequency, client_type, import_export,
+        file_status, terms, payment_method, condition, hbl, mbl,
+        armateur_id, navire_id, port_enlevement_id, port_livraison_id,
+        aeroport_enlevement_id, aeroport_livraison_id
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13,
+        $14, $15,
+        $16, $17, $18, $19,
+        $20, $21, $22,
+        $23, $24,
+        $25, $26, $27,
+        $28, $29,
+        $30, $31, $32, $33, $34,
+        $35, $36, $37, $38,
+        $39, $40, $41, $42, $43,
+        $44, $45, $46, $47,
+        $48, $49
+      ) RETURNING *`,
+      [
+        newQuoteNumber,
+        originalQuote.title,
+        QuoteStatus.DRAFT,
+        originalQuote.type || 'cotation',
+        originalQuote.validUntil,
+        originalQuote.clientName,
+        originalQuote.clientCompany,
+        originalQuote.clientEmail,
+        originalQuote.clientPhone,
+        originalQuote.clientAddress,
+        originalQuote.opportunityId,
+        originalQuote.leadId,
+        originalQuote.clientId,
+        originalQuote.commercialId,
+        originalQuote.commercialIds,
+        originalQuote.subtotal,
+        originalQuote.taxAmount,
+        originalQuote.taxRate,
+        originalQuote.total,
+        originalQuote.freightPurchased,
+        originalQuote.freightOffered,
+        originalQuote.freightMargin,
+        originalQuote.additionalCostsPurchased,
+        originalQuote.additionalCostsOffered,
+        originalQuote.totalPurchases,
+        originalQuote.totalOffers,
+        originalQuote.totalMargin,
+        userId,
+        originalQuote.notes,
+        originalQuote.country,
+        originalQuote.tiers,
+        originalQuote.attentionTo,
+        originalQuote.pickupLocation,
+        originalQuote.deliveryLocation,
+        originalQuote.transitTime,
+        originalQuote.departureFrequency,
+        originalQuote.clientType,
+        originalQuote.importExport,
+        originalQuote.fileStatus,
+        originalQuote.terms,
+        originalQuote.paymentMethod,
+        originalQuote.condition,
+        originalQuote.hbl,
+        originalQuote.mbl,
+        originalQuote.armateurId,
+        originalQuote.navireId,
+        originalQuote.portEnlevementId,
+        originalQuote.portLivraisonId,
+        originalQuote.aeroportEnlevementId,
+        originalQuote.aeroportLivraisonId
+      ]
+    );
 
-    // Dupliquer les lignes
+    // Dupliquer les lignes (items)
     if (originalQuote.items && originalQuote.items.length > 0) {
-      newQuote.items = originalQuote.items.map((item) =>
-        this.quoteItemRepository.create({
-          ...item,
-          id: undefined,
-          quoteId: undefined,
-        }),
-      );
+      for (const item of originalQuote.items) {
+        await connection.query(
+          `INSERT INTO crm_quote_items (
+            quote_id, description, category, vehicle_description, cargo_designation,
+            packages_count, weight_kg, volume_m3, length_cm, width_cm, height_cm, volumetric_weight,
+            origin_street, origin_city, origin_postal_code, origin_country,
+            destination_street, destination_city, destination_postal_code, destination_country,
+            distance_km, vehicle_type, service_type,
+            currency, conversion_rate, unit,
+            quantity, unit_price, selling_price, purchase_price,
+            total_price, margin, item_type, line_order, notes,
+            tax_rate, tax_amount, is_taxable, taxable_account, non_taxable_account,
+            is_debours, ca_type
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)`,
+          [
+            newQuote.id, // $1
+            item.description, // $2
+            item.category || null, // $3
+            item.vehicleDescription || null, // $4
+            item.cargoDesignation || null, // $5
+            item.packagesCount || null, // $6
+            item.weightKg || null, // $7
+            item.volumeM3 || null, // $8
+            item.lengthCm || null, // $9
+            item.widthCm || null, // $10
+            item.heightCm || null, // $11
+            item.volumetricWeight || null, // $12
+            item.originStreet || null, // $13
+            item.originCity || null, // $14
+            item.originPostalCode || null, // $15
+            item.originCountry || null, // $16
+            item.destinationStreet || null, // $17
+            item.destinationCity || null, // $18
+            item.destinationPostalCode || null, // $19
+            item.destinationCountry || null, // $20
+            item.distanceKm || null, // $21
+            item.vehicleType || null, // $22
+            item.serviceType || null, // $23
+            item.currency || 'TND', // $24
+            item.conversionRate || 1, // $25
+            item.unit || null, // $26
+            item.quantity, // $27
+            item.unitPrice, // $28
+            item.sellingPrice, // $29
+            item.purchasePrice, // $30
+            item.totalPrice, // $31
+            item.margin, // $32
+            item.itemType, // $33
+            item.lineOrder, // $34
+            item.notes || null, // $35
+            item.taxRate !== undefined ? item.taxRate : 19, // $36
+            item.taxAmount || 0, // $37
+            item.isTaxable !== undefined ? item.isTaxable : true, // $38
+            item.taxableAccount || null, // $39
+            item.nonTaxableAccount || null, // $40
+            item.isDebours !== undefined ? item.isDebours : false, // $41
+            item.caType || 'Oui' // $42
+          ]
+        );
+      }
     }
 
-    const savedQuote = await this.quoteRepository.save(newQuote);
-
-    return this.findOne(savedQuote.id);
+    return this.findOne(newQuote.id, databaseName, organisationId); // 🏢 UTILISER MULTI-TENANT
   }
 
   /**
-   * Obtenir les statistiques des devis
-   */
-  /**
    * 📊 Statistiques des cotations
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName, SANS filtre organisation_id
    * ✅ MULTI-COMMERCIAUX: Utilise commercial_ids (array) avec ANY operator
    */
-  async getStatistics(filters?: { startDate?: Date; endDate?: Date; commercialId?: number }) {
-    let queryBuilder = this.quoteRepository.createQueryBuilder('quote');
+  async getStatistics(
+    filters: { startDate?: Date; endDate?: Date; commercialId?: number },
+    databaseName: string,
+    organisationId: number
+  ) {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const params: any[] = [];
+    let paramIndex = 1;
+    
+    let sql = `SELECT * FROM crm_quotes WHERE deleted_at IS NULL`;
 
     // Filtrer par commercial si spécifié (multi-commerciaux)
     if (filters?.commercialId) {
-      queryBuilder.andWhere(
-        ':commercialId = ANY(quote.commercial_ids)',
-        { commercialId: filters.commercialId }
-      );
+      sql += ` AND $${paramIndex} = ANY(commercial_ids)`;
+      params.push(filters.commercialId);
+      paramIndex++;
     }
 
     // Filtrer par dates si spécifiées
     if (filters?.startDate && filters?.endDate) {
-      queryBuilder.andWhere(
-        'quote.createdAt BETWEEN :startDate AND :endDate',
-        { startDate: filters.startDate, endDate: filters.endDate }
-      );
+      sql += ` AND created_at BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      params.push(filters.startDate, filters.endDate);
     }
 
-    const quotes = await queryBuilder.getMany();
+    const quotes = await connection.query(sql, params);
 
     return {
       total: quotes.length,
@@ -2112,10 +2850,12 @@ export class QuotesService {
 
   /**
    * 🗑️ SOFT DELETE - Archiver une cotation
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    * Ne supprime jamais physiquement - crucial pour audit et conformité légale
    */
-  async archiveQuote(id: number, reason: string, userId: number): Promise<Quote> {
-    const quote = await this.findOne(id);
+  async archiveQuote(id: number, reason: string, userId: number, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    const quote = await this.findOne(id, databaseName, organisationId);
 
     if (!quote) {
       throw new NotFoundException(`Cotation #${id} introuvable`);
@@ -2127,44 +2867,60 @@ export class QuotesService {
     }
 
     // Mettre à jour avec soft delete
-    await this.quoteRepository.update(id, {
-      deletedAt: new Date(),
-      isArchived: true,
-      archivedReason: reason,
-      archivedBy: userId,
-    });
+    await connection.query(
+      `UPDATE crm_quotes SET
+        deleted_at = NOW(),
+        is_archived = true,
+        archived_reason = $1,
+        archived_by = $2
+      WHERE id = $3`,
+      [reason, userId, id]
+    );
 
-    return this.quoteRepository.findOne({
-      where: { id },
-      withDeleted: true, // Inclure les entités soft-deleted
-    });
+    // Retourner le quote archivé avec deleted_at
+    const archived = await connection.query(
+      `SELECT * FROM crm_quotes WHERE id = $1`,
+      [id]
+    );
+    
+    return archived[0];
   }
 
   /**
    * ♻️ Restaurer une cotation archivée
+   * ✅ MULTI-TENANT: Utilise SQL pur avec databaseName
    */
-  async restoreQuote(id: number): Promise<Quote> {
-    const quote = await this.quoteRepository.findOne({
-      where: { id },
-      withDeleted: true,
-    });
+  async restoreQuote(id: number, databaseName: string, organisationId: number): Promise<Quote> {
+    const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+    
+    const quotes = await connection.query(
+      `SELECT * FROM crm_quotes WHERE id = $1`,
+      [id]
+    );
 
-    if (!quote) {
+    if (!quotes || quotes.length === 0) {
       throw new NotFoundException(`Cotation #${id} introuvable`);
     }
 
-    if (!quote.deletedAt && !quote.isArchived) {
+    const quote = quotes[0];
+
+    // Vérifier si déjà restaurée
+    if (!quote.deleted_at && !quote.is_archived) {
       throw new BadRequestException('Cette cotation n\'est pas archivée');
     }
 
     // Restaurer
-    await this.quoteRepository.update(id, {
-      deletedAt: null,
-      isArchived: false,
-      archivedReason: null,
-      archivedBy: null,
-    });
+    await connection.query(
+      `UPDATE crm_quotes SET
+        deleted_at = NULL,
+        is_archived = false,
+        archived_reason = NULL,
+        archived_by = NULL
+      WHERE id = $1`,
+      [id]
+    );
 
-    return this.findOne(id);
+    return this.findOne(id, databaseName, organisationId);
   }
 }
+

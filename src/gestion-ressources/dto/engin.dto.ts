@@ -76,13 +76,11 @@ export class EnginFiltersDto {
 
   @IsOptional()
   @IsBoolean()
-  @Transform(({ value }) => value === 'true' || value === true)
-  isActive?: boolean;
-
-  // Accepte is_active (snake_case) pour compatibilité frontend
-  @IsOptional()
-  @IsBoolean()
-  @Transform(({ value }) => value === 'true' || value === true)
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
   is_active?: boolean;
 
   @IsOptional()

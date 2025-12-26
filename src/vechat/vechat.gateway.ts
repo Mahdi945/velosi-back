@@ -18,6 +18,9 @@ interface ConnectedUser {
   socketId: string;
   userName: string;
   lastSeen: Date;
+  databaseName: string;
+  organisationId: number;
+  organisationName: string;
 }
 
 @Injectable()
@@ -62,6 +65,16 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const userId = payload.sub || payload.id;
       const userType = payload.userType || 'personnel';
       const userName = `${payload.prenom || ''} ${payload.nom || ''}`.trim();
+      // 🏢 MULTI-TENANT: Extraire les informations d'organisation du JWT
+      const databaseName = payload.databaseName;
+      const organisationId = payload.organisationId;
+      const organisationName = payload.organisationName || 'Unknown';
+
+      if (!databaseName || !organisationId) {
+        this.logger.error(`JWT manque databaseName ou organisationId pour user ${userId}`);
+        client.disconnect();
+        return;
+      }
 
       // Ajouter à la liste des utilisateurs connectés
       const userKey = `${userId}_${userType}`;
@@ -71,6 +84,9 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         socketId: client.id,
         userName,
         lastSeen: new Date(),
+        databaseName,
+        organisationId,
+        organisationName,
       };
 
       this.connectedUsers.set(client.id, connectedUser);
@@ -154,10 +170,15 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.log('📨 NOUVEAU SYSTÈME - Message reçu:', messageData);
 
       // 1. Sauvegarder le message en base
-      const savedMessage = await this.vechatService.sendMessage(messageData, {
-        id: sender.userId,
-        userType: sender.userType
-      });
+      const savedMessage = await this.vechatService.sendMessage(
+        messageData,
+        {
+          id: sender.userId,
+          userType: sender.userType
+        },
+        sender.databaseName,
+        sender.organisationId
+      );
 
       // 2. SYNCHRONISATION IMMÉDIATE COMPLÈTE
       await this.syncCompleteState(savedMessage, sender);
@@ -209,9 +230,18 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Récupérer l'état complet d'un utilisateur
   private async getCompleteUserState(userId: number, userType: 'personnel' | 'client'): Promise<any> {
     try {
+      // Récupérer databaseName depuis un utilisateur connecté (pour cet user)
+      const userSocketId = Array.from(this.connectedUsers.entries())
+        .find(([_, u]) => u.userId === userId && u.userType === userType)?.[1];
+      
+      if (!userSocketId) {
+        console.error(`❌ Impossible de trouver databaseName pour ${userType}_${userId}`);
+        return { conversations: [], unreadCounts: {}, userId, userType };
+      }
+
       const [conversations, unreadCounts] = await Promise.all([
-        this.vechatService.getConversationsForUser(userId, userType),
-        this.vechatService.getUnreadCountsForUser(userId, userType)
+        this.vechatService.getConversationsForUser(userId, userType, userSocketId.databaseName),
+        this.vechatService.getUnreadCountsForUser(userId, userType, userSocketId.databaseName)
       ]);
 
       return {
@@ -257,13 +287,21 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.log('📖 WebSocket - Marquage messages comme lus:', data.messageIds);
       
       // Récupérer les détails des messages avant de les marquer comme lus
-      const messages = await this.vechatService.getMessagesByIds(data.messageIds);
+      const messages = await this.vechatService.getMessagesByIds(
+        data.messageIds,
+        reader.databaseName
+      );
       
       // Appeler le service pour marquer les messages comme lus
-      const result = await this.vechatService.markMessagesAsRead(data.messageIds, {
-        id: reader.userId,
-        userType: reader.userType
-      });
+      const result = await this.vechatService.markMessagesAsRead(
+        data.messageIds,
+        {
+          id: reader.userId,
+          userType: reader.userType
+        },
+        reader.databaseName,
+        reader.organisationId
+      );
 
       console.log('✅ Messages marqués comme lus:', result);
 
@@ -287,7 +325,8 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           // Récupérer les compteurs mis à jour pour cet expéditeur
           const unreadCounts = await this.vechatService.getUnreadCountsForUser(
             message.sender_id, 
-            message.sender_type
+            message.sender_type,
+            reader.databaseName
           );
           
           // Notifier l'expéditeur que ses messages ont été lus avec compteurs mis à jour
@@ -308,7 +347,10 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
 
         // Collecter les conversations pour mise à jour globale
-        const conversation = await this.vechatService.getConversationForMessage(message);
+        const conversation = await this.vechatService.getConversationForMessage(
+          message,
+          reader.databaseName
+        );
         if (conversation) {
           conversationsToUpdate.add(conversation.id);
         }
@@ -316,7 +358,10 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Notifier tous les participants des conversations affectées pour une mise à jour complète
       for (const conversationId of conversationsToUpdate) {
-        const conversation = await this.vechatService.getConversationById(conversationId);
+        const conversation = await this.vechatService.getConversationById(
+          conversationId,
+          reader.databaseName
+        );
         if (conversation) {
           const participant1Key = `${conversation.participant1_id}_${conversation.participant1_type}`;
           const participant2Key = `${conversation.participant2_id}_${conversation.participant2_type}`;
@@ -383,17 +428,23 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const unreadMessages = await this.vechatService.getUnreadMessagesForUserInConversation(
         data.conversationId, 
         user.userId, 
-        user.userType
+        user.userType,
+        user.databaseName
       );
 
       if (unreadMessages.length > 0) {
         console.log(`📖 LECTURE AUTO: ${unreadMessages.length} messages marqués comme lus`);
         
         const messageIds = unreadMessages.map(msg => msg.id);
-        await this.vechatService.markMessagesAsRead(messageIds, {
-          id: user.userId,
-          userType: user.userType
-        });
+        await this.vechatService.markMessagesAsRead(
+          messageIds,
+          {
+            id: user.userId,
+            userType: user.userType
+          },
+          user.databaseName,
+          user.organisationId
+        );
 
         // 2. SYNC IMMÉDIAT pour TOUS les participants de la conversation
         await this.syncConversationState(data.conversationId, 'CONVERSATION_VIEWED');
@@ -411,7 +462,17 @@ export class VechatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`🔄 SYNC CONVERSATION ${conversationId} - Raison: ${reason}`);
 
     try {
-      const conversation = await this.vechatService.getConversationById(conversationId);
+      // Trouver n'importe quel utilisateur connecté pour obtenir le databaseName
+      const anyUser = Array.from(this.connectedUsers.values())[0];
+      if (!anyUser) {
+        console.error('❌ Aucun utilisateur connecté pour récupérer databaseName');
+        return;
+      }
+
+      const conversation = await this.vechatService.getConversationById(
+        conversationId,
+        anyUser.databaseName
+      );
       if (!conversation) return;
 
       // Récupérer l'état complet des deux participants

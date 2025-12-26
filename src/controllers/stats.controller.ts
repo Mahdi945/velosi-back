@@ -1,8 +1,8 @@
-import { Controller, Get } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Personnel } from '../entities/personnel.entity';
-import { Client } from '../entities/client.entity';
+import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { DatabaseConnectionService } from '../common/database-connection.service';
+import { getDatabaseName } from '../common/helpers/multi-tenant.helper';
+import { Request } from 'express';
 
 export interface UserStatsResponse {
   clients: number;
@@ -14,72 +14,79 @@ export interface UserStatsResponse {
   total_personnel: number;
 }
 
+/**
+ * ✅ MULTI-TENANT: Contrôleur des statistiques utilisateurs
+ * Utilise DatabaseConnectionService pour se connecter à la bonne base de données
+ */
 @Controller('stats')
+@UseGuards(JwtAuthGuard)
 export class StatsController {
   constructor(
-    @InjectRepository(Personnel)
-    private readonly personnelRepository: Repository<Personnel>,
-    @InjectRepository(Client)
-    private readonly clientRepository: Repository<Client>,
+    private readonly databaseConnectionService: DatabaseConnectionService,
   ) {}
 
+  /**
+   * ✅ MULTI-TENANT: Obtenir les statistiques utilisateurs
+   * Compte le personnel et les clients de l'organisation de l'utilisateur connecté
+   */
   @Get('users-count')
-  async getUsersCount(): Promise<{ success: boolean; data: UserStatsResponse; message: string }> {
+  async getUsersCount(@Req() req: Request): Promise<{ success: boolean; data: UserStatsResponse; message: string }> {
     try {
+      const databaseName = getDatabaseName(req);
+      console.log('🏢 [getUsersCount] Utilisation de la base:', databaseName);
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // Compter les clients actifs uniquement
-      const clientsCount = await this.clientRepository.count({
-        where: { statut: 'actif' }
-      });
+      const clientsResult = await connection.query(
+        `SELECT COUNT(*) as count FROM client WHERE statut = $1`,
+        ['actif']
+      );
+      const clientsCount = parseInt(clientsResult[0]?.count || '0');
 
       // Compter le personnel par rôle (seulement les actifs)
-      const chauffeurCount = await this.personnelRepository.count({
-        where: { 
-          role: 'chauffeur',
-          statut: 'actif'
-        }
-      });
+      const chauffeurResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE role = $1 AND statut = $2`,
+        ['chauffeur', 'actif']
+      );
+      const chauffeurCount = parseInt(chauffeurResult[0]?.count || '0');
 
-      const administratifCount = await this.personnelRepository.count({
-        where: { 
-          role: 'administratif',
-          statut: 'actif'
-        }
-      });
+      const administratifResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE role = $1 AND statut = $2`,
+        ['administratif', 'actif']
+      );
+      const administratifCount = parseInt(administratifResult[0]?.count || '0');
 
-      const commercialCount = await this.personnelRepository.count({
-        where: { 
-          role: 'commercial',
-          statut: 'actif'
-        }
-      });
+      const commercialResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE role = $1 AND statut = $2`,
+        ['commercial', 'actif']
+      );
+      const commercialCount = parseInt(commercialResult[0]?.count || '0');
 
-      const financiersCount = await this.personnelRepository.count({
-        where: { 
-          role: 'finance',
-          statut: 'actif'
-        }
-      });
+      const financiersResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE role = $1 AND statut = $2`,
+        ['finance', 'actif']
+      );
+      const financiersCount = parseInt(financiersResult[0]?.count || '0');
 
-      const exploiteursCount = await this.personnelRepository.count({
-        where: { 
-          role: 'exploitation',
-          statut: 'actif'
-        }
-      });
+      const exploiteursResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE role = $1 AND statut = $2`,
+        ['exploitation', 'actif']
+      );
+      const exploiteursCount = parseInt(exploiteursResult[0]?.count || '0');
 
       // Compter le total du personnel actif
-      const totalPersonnelCount = await this.personnelRepository.count({
-        where: { statut: 'actif' }
-      });
+      const totalPersonnelResult = await connection.query(
+        `SELECT COUNT(*) as count FROM personnel WHERE statut = $1`,
+        ['actif']
+      );
+      const totalPersonnelCount = parseInt(totalPersonnelResult[0]?.count || '0');
 
       // Debug: récupérer tous les rôles distincts
-      const allRoles = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .select('personnel.role', 'role')
-        .addSelect('COUNT(*)', 'count')
-        .where('personnel.statut = :statut', { statut: 'actif' })
-        .groupBy('personnel.role')
-        .getRawMany();
+      const allRoles = await connection.query(
+        `SELECT role, COUNT(*) as count FROM personnel WHERE statut = $1 GROUP BY role`,
+        ['actif']
+      );
 
       const stats: UserStatsResponse = {
         clients: clientsCount,
@@ -91,6 +98,8 @@ export class StatsController {
         total_personnel: totalPersonnelCount
       };
 
+      console.log('✅ [getUsersCount] Stats calculées:', stats);
+
       return {
         success: true,
         data: stats,
@@ -98,7 +107,7 @@ export class StatsController {
       };
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des statistiques:', error);
+      console.error('❌ [getUsersCount] Erreur lors de la récupération des statistiques:', error);
       return {
         success: false,
         data: {
@@ -115,17 +124,24 @@ export class StatsController {
     }
   }
 
+  /**
+   * ✅ MULTI-TENANT: Debug - Obtenir les rôles distincts
+   */
   @Get('debug-roles')
-  async getDebugRoles(): Promise<{ success: boolean; data: any; message: string }> {
+  async getDebugRoles(@Req() req: Request): Promise<{ success: boolean; data: any; message: string }> {
     try {
+      const databaseName = getDatabaseName(req);
+      console.log('🏢 [getDebugRoles] Utilisation de la base:', databaseName);
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // Récupérer tous les rôles distincts avec leur count
-      const rolesQuery = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .select('personnel.role', 'role')
-        .addSelect('COUNT(*)', 'count')
-        .where('personnel.statut = :statut', { statut: 'actif' })
-        .groupBy('personnel.role')
-        .getRawMany();
+      const rolesQuery = await connection.query(
+        `SELECT role, COUNT(*) as count FROM personnel WHERE statut = $1 GROUP BY role`,
+        ['actif']
+      );
+
+      console.log('✅ [getDebugRoles] Rôles trouvés:', rolesQuery);
 
       return {
         success: true,
@@ -134,7 +150,7 @@ export class StatsController {
       };
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des rôles debug:', error);
+      console.error('❌ [getDebugRoles] Erreur lors de la récupération des rôles debug:', error);
       return {
         success: false,
         data: [],
@@ -143,30 +159,36 @@ export class StatsController {
     }
   }
 
+  /**
+   * ✅ MULTI-TENANT: Obtenir les statistiques détaillées
+   */
   @Get('users-count-detailed')
-  async getUsersCountDetailed(): Promise<{ success: boolean; data: any; message: string }> {
+  async getUsersCountDetailed(@Req() req: Request): Promise<{ success: boolean; data: any; message: string }> {
     try {
+      const databaseName = getDatabaseName(req);
+      console.log('🏢 [getUsersCountDetailed] Utilisation de la base:', databaseName);
+      
+      const connection = await this.databaseConnectionService.getOrganisationConnection(databaseName);
+      
       // Récupérer tous les rôles distincts du personnel actif
-      const rolesQuery = await this.personnelRepository
-        .createQueryBuilder('personnel')
-        .select('personnel.role', 'role')
-        .addSelect('COUNT(*)', 'count')
-        .where('personnel.statut = :statut', { statut: 'actif' })
-        .groupBy('personnel.role')
-        .getRawMany();
+      const rolesQuery = await connection.query(
+        `SELECT role, COUNT(*) as count FROM personnel WHERE statut = $1 GROUP BY role`,
+        ['actif']
+      );
 
       // Compter les clients actifs
-      const clientsCount = await this.clientRepository.count({
-        where: { statut: 'actif' }
-      });
+      const clientsResult = await connection.query(
+        `SELECT COUNT(*) as count FROM client WHERE statut = $1`,
+        ['actif']
+      );
+      const clientsCount = parseInt(clientsResult[0]?.count || '0');
 
       // Compter aussi les clients par statut
-      const clientsByStatus = await this.clientRepository
-        .createQueryBuilder('client')
-        .select('client.statut', 'statut')
-        .addSelect('COUNT(*)', 'count')
-        .groupBy('client.statut')
-        .getRawMany();
+      const clientsByStatus = await connection.query(
+        `SELECT statut, COUNT(*) as count FROM client GROUP BY statut`
+      );
+
+      console.log('✅ [getUsersCountDetailed] Stats détaillées calculées');
 
       return {
         success: true,
@@ -179,7 +201,7 @@ export class StatsController {
       };
 
     } catch (error) {
-      console.error('Erreur lors de la récupération des statistiques détaillées:', error);
+      console.error('❌ [getUsersCountDetailed] Erreur lors de la récupération des statistiques détaillées:', error);
       return {
         success: false,
         data: { 
