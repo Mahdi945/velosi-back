@@ -650,9 +650,43 @@ export class EmailService {
         attachments: attachments
       };
 
-      const result = await transporter.sendMail(mailOptions);
-      this.logger.log(`✅ OTP envoyé avec succès à ${email} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
-      return true;
+      try {
+        // Tentative d'envoi avec le transporter de l'organisation
+        const result = await transporter.sendMail(mailOptions);
+        this.logger.log(`✅ OTP envoyé avec succès à ${email} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
+        return true;
+      } catch (sendError: any) {
+        // 🔄 FALLBACK: Si erreur 535 (auth failed) et transporter != global, réessayer avec global
+        const isAuthError = sendError?.responseCode === 535 || 
+                           sendError?.code === 'EAUTH' || 
+                           sendError?.message?.includes('535') ||
+                           sendError?.message?.includes('Invalid login') ||
+                           sendError?.message?.includes('authentication');
+        
+        if (isAuthError && organisationId && transporter !== this.transporter) {
+          this.logger.warn(`⚠️ Erreur d'authentification SMTP organisation (${sendError?.message})`);
+          this.logger.log(`🔄 FALLBACK: Tentative avec SMTP global (.env.production)...`);
+          
+          try {
+            // Modifier l'expéditeur pour utiliser celui du .env
+            mailOptions.from = {
+              name: this.getFromName(),
+              address: this.getFromEmail()
+            };
+            
+            const fallbackResult = await this.transporter.sendMail(mailOptions);
+            this.logger.log(`✅ OTP envoyé avec succès via SMTP global à ${email} - ID: ${fallbackResult.messageId}`);
+            this.logger.warn(`💡 Conseil: Vérifier la configuration SMTP de l'organisation "${organisation?.nom}"`);
+            return true;
+          } catch (fallbackError) {
+            this.logger.error(`❌ Échec du fallback SMTP global:`, fallbackError);
+            throw fallbackError; // Propager l'erreur du fallback
+          }
+        } else {
+          // Autre type d'erreur ou déjà sur transporter global
+          throw sendError;
+        }
+      }
     } catch (error) {
       this.logger.error(`❌ Erreur lors de l'envoi de l'OTP à ${email}:`, error);
       return false;

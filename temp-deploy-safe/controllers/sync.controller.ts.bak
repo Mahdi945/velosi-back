@@ -1,0 +1,215 @@
+import { Controller, Post, Get, Param  // Routes avec authentification pour les appels externes
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('keycloak/all')
+  @Roles('admin', 'personnel')
+  async syncAllUsers() {
+    try {
+      await this.keycloakSyncService.syncPersonnelToKeycloak();
+      await this.keycloakSyncService.syncClientsToKeycloak();
+      return {
+        success: true,
+        message: 'Synchronisation complète vers Keycloak terminée avec succès',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation complète',
+        error: error.message,
+      };
+    }
+  }'@nestjs/common';
+import { KeycloakSyncService } from '../services/keycloak-sync.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+
+@Controller('sync')
+export class SyncController {
+  constructor(private readonly keycloakSyncService: KeycloakSyncService) {}
+
+  // Route publique pour synchronisation interne (sans authentification)
+  @Post('internal/keycloak/:userType/:userId')
+  async syncSingleUserInternal(
+    @Param('userType') userType: 'personnel' | 'client',
+    @Param('userId') userId: number,
+  ) {
+    try {
+      const keycloakUserId = await this.keycloakSyncService.syncSingleUserToKeycloak(
+        userType,
+        userId,
+      );
+      return {
+        success: !!keycloakUserId,
+        keycloakUserId,
+        message: keycloakUserId
+          ? 'Utilisateur synchronisé avec succès'
+          : 'Échec de la synchronisation',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation',
+        error: error.message,
+      };
+    }
+  }
+
+  // Routes avec authentification pour les appels externes
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('keycloak/all')
+  @Roles('admin', 'personnel')
+  async syncAllUsers() {
+    try {
+      await this.keycloakSyncService.syncAllUsersToKeycloak();
+      return {
+        success: true,
+        message: 'Synchronisation complète vers Keycloak terminée avec succès',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('keycloak/personnel')
+  @Roles('admin', 'personnel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async syncPersonnel() {
+    try {
+      await this.keycloakSyncService.syncPersonnelToKeycloak();
+      return {
+        success: true,
+        message: 'Synchronisation du personnel vers Keycloak terminée avec succès',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation du personnel',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('keycloak/clients')
+  @Roles('admin', 'personnel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async syncClients() {
+    try {
+      await this.keycloakSyncService.syncClientsToKeycloak();
+      return {
+        success: true,
+        message: 'Synchronisation des clients vers Keycloak terminée avec succès',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation des clients',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('keycloak/:userType/:userId')
+  @Roles('admin', 'personnel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async syncSingleUser(
+    @Param('userType') userType: 'personnel' | 'client',
+    @Param('userId') userId: number,
+  ) {
+    try {
+      const keycloakUserId = await this.keycloakSyncService.syncSingleUserToKeycloak(
+        userType,
+        userId,
+      );
+      return {
+        success: !!keycloakUserId,
+        keycloakUserId,
+        message: keycloakUserId
+          ? 'Utilisateur synchronisé avec succès'
+          : 'Échec de la synchronisation',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur lors de la synchronisation',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Déclencher une synchronisation complète avec nettoyage des sessions
+   */
+  @Post('keycloak/full-sync')
+  @Roles('administratif', 'admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async fullKeycloakSync() {
+    try {
+      const result = await this.keycloakSyncService.fullSync();
+      return {
+        success: true,
+        message: 'Synchronisation complète réussie',
+        data: result,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur synchronisation complète',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Nettoyer toutes les sessions Keycloak
+   */
+  @Post('keycloak/clear-sessions')
+  @Roles('administratif', 'admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async clearAllSessions() {
+    try {
+      await this.keycloakSyncService.clearAllKeycloakSessions();
+      return {
+        success: true,
+        message: 'Toutes les sessions Keycloak ont été nettoyées',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur nettoyage sessions',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Obtenir les statistiques de synchronisation
+   */
+  @Get('keycloak/stats')
+  @Roles('administratif', 'admin', 'commercial', 'exploitation', 'finance')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  async getSyncStats() {
+    try {
+      const stats = await this.keycloakSyncService.getSyncStats();
+      return {
+        success: true,
+        data: stats,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Erreur récupération statistiques',
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+}
