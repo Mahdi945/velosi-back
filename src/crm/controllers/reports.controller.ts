@@ -1,7 +1,8 @@
-import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards, Req, Param } from '@nestjs/common';
 import { ReportsService } from '../services/reports.service';
 import { ReportFilterDto } from '../dto/report.dto';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { Public } from '../../auth/public.decorator';
 
 @Controller('crm/reports')
 @UseGuards(JwtAuthGuard)
@@ -165,5 +166,52 @@ export class ReportsController {
     const databaseName = req.user?.databaseName || 'postgres';
     const organisationId = req.user?.organisationId || 1;
     return this.reportsService.generateClientReports(databaseName, organisationId, filters);
+  }
+
+  /**
+   * GET /api/crm/reports/shared/:token
+   * Récupérer un rapport partagé par son token
+   * ✅ PUBLIC: Pas besoin d'authentification pour accéder au rapport
+   */
+  @Public()
+  @Get('shared/:token')
+  async getSharedReport(
+    @Req() req: any,
+    @Param('token') token: string
+  ) {
+    // Pour les rapports partagés, on utilise la base par défaut ou on extrait de l'URL
+    const databaseName = req.query?.db || 'postgres';
+    return this.reportsService.getSharedReport(databaseName, token);
+  }
+
+  /**
+   * POST /api/crm/reports/send-email
+   * Envoyer un rapport CRM par email
+   * ✅ MULTI-TENANT: Utilise databaseName et organisationId
+   */
+  @Post('send-email')
+  async sendReportByEmail(
+    @Req() req: any,
+    @Body() emailData: {
+      recipientEmail: string;
+      ccEmails?: string[];
+      subject: string;
+      message?: string;
+      filters: ReportFilterDto;
+      reportType: string;
+      format: string;
+      reportData?: any;
+    }
+  ) {
+    const databaseName = req.user?.databaseName || 'postgres';
+    const organisationId = req.user?.organisationId || 1;
+    const userId = req.user?.id || req.user?.userId;
+    
+    return this.reportsService.sendReportByEmail(
+      databaseName,
+      organisationId,
+      userId,
+      emailData
+    );
   }
 }

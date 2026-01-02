@@ -8,13 +8,14 @@ import { Quote } from '../../crm/entities/quote.entity';
 import { Activity } from '../../crm/entities/activity.entity';
 import { Personnel } from '../../entities/personnel.entity';
 import { Client } from '../../entities/client.entity';
+import { EmailService } from '../../services/email.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Lead, Opportunity, Quote, Activity, Personnel, Client]),
   ],
   controllers: [ReportsController],
-  providers: [ReportsService],
+  providers: [ReportsService, EmailService],
   exports: [ReportsService],
 })
 export class ReportModule {}

@@ -539,6 +539,99 @@ export class EmailService {
   }
 
   /**
+   * 🏢 MULTI-TENANT: Envoyer un email générique avec support multi-tenant
+   * @param organisationId - ID de l'organisation (utilise config globale si absent)
+   * @param to - Email du destinataire
+   * @param subject - Sujet de l'email
+   * @param htmlContent - Contenu HTML de l'email
+   * @param ccEmails - Emails en copie (optionnel)
+   */
+  async sendEmailMultiTenant(
+    organisationId: number,
+    to: string,
+    subject: string,
+    htmlContent: string,
+    ccEmails?: string[]
+  ): Promise<boolean> {
+    try {
+      this.logger.log(`📧 Envoi email multi-tenant à ${to} (organisationId: ${organisationId || 'Global'})`);
+      
+      // Obtenir le transporter approprié (organisation ou global)
+      const transporter = await this.getTransporterForOrganisation(organisationId);
+      
+      if (!transporter) {
+        const errorMsg = `⚠️ Impossible d'envoyer l'email à ${to}: Service email non configuré`;
+        this.logger.error(errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      // Charger l'organisation si ID fourni
+      const organisation = organisationId ? await this.getOrganisation(organisationId) : null;
+      
+      // Déterminer l'expéditeur
+      const fromName = organisation?.smtp_from_name || organisation?.nom_affichage || organisation?.nom || this.getFromName();
+      const fromEmail = organisation?.smtp_from_email || this.getFromEmail();
+      
+      this.logger.log(`📨 Expéditeur: ${fromName} <${fromEmail}>`);
+      
+      const mailOptions: any = {
+        from: {
+          name: fromName,
+          address: fromEmail
+        },
+        to,
+        subject,
+        html: htmlContent
+      };
+      
+      // Ajouter les CC si fournis
+      if (ccEmails && ccEmails.length > 0) {
+        mailOptions.cc = ccEmails.join(', ');
+        this.logger.log(`📋 CC: ${mailOptions.cc}`);
+      }
+
+      try {
+        // Tentative d'envoi avec le transporter de l'organisation
+        const result = await transporter.sendMail(mailOptions);
+        this.logger.log(`✅ Email envoyé avec succès à ${to} (Org: ${organisation?.nom || 'Global'}) - ID: ${result.messageId}`);
+        return true;
+      } catch (sendError: any) {
+        // 🔄 FALLBACK: Si erreur d'authentification et transporter != global, réessayer avec global
+        const isAuthError = sendError?.responseCode === 535 || 
+                           sendError?.code === 'EAUTH' || 
+                           sendError?.message?.includes('535') ||
+                           sendError?.message?.includes('Invalid login') ||
+                           sendError?.message?.includes('authentication');
+        
+        if (isAuthError && organisationId && transporter !== this.transporter) {
+          this.logger.warn(`⚠️ Erreur d'authentification SMTP organisation (${sendError?.message})`);
+          this.logger.log(`🔄 FALLBACK: Tentative avec SMTP global...`);
+          
+          try {
+            // Modifier l'expéditeur pour utiliser celui du .env
+            mailOptions.from = {
+              name: this.getFromName(),
+              address: this.getFromEmail()
+            };
+            
+            const fallbackResult = await this.transporter.sendMail(mailOptions);
+            this.logger.log(`✅ Email envoyé avec succès via SMTP global à ${to} - ID: ${fallbackResult.messageId}`);
+            this.logger.warn(`💡 Conseil: Vérifier la configuration SMTP de l'organisation "${organisation?.nom}"`);
+            return true;
+          } catch (fallbackError) {
+            this.logger.error(`❌ Échec du fallback SMTP global:`, fallbackError);
+            throw fallbackError;
+          }
+        } else {
+          throw sendError;
+        }
+      }
+    } catch (error) {
+      this.logger.error(`❌ Erreur lors de l'envoi de l'email multi-tenant à ${to}:`, error);
+      throw error;
+    }
+  }
+  /**
    * 🏢 MULTI-TENANT: Envoyer un code OTP par email
    * @param email - Email du destinataire
    * @param otpCode - Code OTP à 6 chiffres

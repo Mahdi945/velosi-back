@@ -1,5 +1,5 @@
 # Script de synchronisation du backend vers le VPS
-# Exclut .env et email.service.ts
+# Exclut .env uniquement
 # Synchronise package.json pour les nouvelles dépendances
 
 $VPS_HOST = "Webdesk@vps-3b4fd3be.vps.ovh.ca"
@@ -26,13 +26,6 @@ $envFile = Join-Path $TEMP_DIR ".env"
 if (Test-Path $envFile) {
     Remove-Item $envFile -Force
     Write-Host "  .env exclu" -ForegroundColor Green
-}
-
-# Supprimer email.service.ts
-$emailServicePath = Get-ChildItem -Path $TEMP_DIR -Recurse -Filter "email.service.ts" | Select-Object -First 1
-if ($emailServicePath) {
-    Remove-Item $emailServicePath.FullName -Force
-    Write-Host "  email.service.ts exclu" -ForegroundColor Green
 }
 
 Write-Host ""
@@ -68,10 +61,6 @@ echo \"Backup créé: src_backup\"
 cd ~
 tar -xzf src-sync.tar.gz -C velosi-back/src/
 echo \"Fichiers extraits\"
-if [ -f ~/velosi-back/src_backup/services/email.service.ts ]; then
-    cp ~/velosi-back/src_backup/services/email.service.ts ~/velosi-back/src/services/
-    echo \"email.service.ts restauré depuis backup\"
-fi
 if [ -f ~/velosi-back/src_backup/config/database.config.ts ]; then
     cp ~/velosi-back/src_backup/config/database.config.ts ~/velosi-back/src/config/
     echo \"database.config.ts préservé (config SSL VPS)\"
@@ -91,7 +80,6 @@ echo 'Offline25$$' | ssh $VPS_HOST $sshCommands
         Write-Host "Résumé:" -ForegroundColor Cyan
         Write-Host "  - Dossier src synchronisé" -ForegroundColor White
         Write-Host "  - .env préservé sur le VPS" -ForegroundColor White
-        Write-Host "  - email.service.ts préservé sur le VPS" -ForegroundColor White
         Write-Host "  - Backend redémarré" -ForegroundColor White
         Write-Host "  - Backup disponible: ~/velosi-back/src_backup" -ForegroundColor White
     } else {
